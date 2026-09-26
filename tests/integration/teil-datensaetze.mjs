@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { ADMIN, as, groupsOf, ocs, sql } from './lib.mjs'
+import { ADMIN, as, ocs, sql } from './lib.mjs'
 import { A, AA, AL, AU, C, L, NOAH, P, R, RUN, U1, U2, V, ISO, b64, check, expect, head, isObj, keysOf, me, sha256, ensure } from './harness.mjs'
 
 export async function datensaetze() {
@@ -118,8 +118,9 @@ export async function datensaetze() {
 			expect(`${name}: Verlauf Kunde`, await ocs(who, 'GET', `/records/customer/${C}/history`), 200)
 			expect(`${name}: GET /status`, await ocs(who, 'GET', '/status'), 200)
 			const t = await ocs(who, 'GET', '/team')
-			check(`${name}: GET /team mit members je stärkster Rolle`, t.status === 200 && t.data?.slug === 'pb'
-				&& JSON.stringify(t.data?.members) === JSON.stringify({ user: ['pbuser1', 'pbuser2'], lead: ['pblead'], subadmin: ['pbverw'], admin: ['pbadmin'] }), t.text)
+			const roles = Object.fromEntries((t.data?.members || []).map((x) => [x.uid, x.role]))
+			check(`${name}: GET /team mit members und Rolle`, t.status === 200 && t.data?.slug === 'pb'
+				&& JSON.stringify(roles) === JSON.stringify({ pbadmin: 'admin', pblead: 'lead', pbuser1: 'user', pbuser2: 'user', pbverw: 'subadmin' }), t.text)
 		}
 	}
 

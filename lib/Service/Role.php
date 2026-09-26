@@ -6,7 +6,11 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
-/** Die vier Rollen eines Teams, von schwach nach stark. */
+/**
+ * Die vier Rollen eines Teams, von schwach nach stark. Seit Fassung 2:
+ * `admin` ist, wer die Teamgruppe in Nextcloud verwaltet; `lead` und
+ * `subadmin` vergibt die App (ts_members), sonst `user`.
+ */
 final class Role {
 	public const USER = 'user';
 	public const LEAD = 'lead';
@@ -16,9 +20,15 @@ final class Role {
 	/** Alle Rollen, schwächste zuerst. */
 	public const ALL = [self::USER, self::LEAD, self::SUBADMIN, self::ADMIN];
 
+	/** Was PUT /team/members setzen kann; `admin` ist keine App-Rolle. */
+	public const APP_ROLES = [self::USER, self::LEAD, self::SUBADMIN];
+
+	/** Die Teamgruppe: die einzige Zeile in ts_role_groups, die zählt (Fassung 2). */
+	public const TEAM_GROUP = 'team';
+
 	/**
-	 * Die optionale Konten-Gruppe eines Teams. Steht als Zeile in
-	 * ts_role_groups, ist aber **keine** Rolle und nie in ALL.
+	 * Fassung 1, ungenutzt: die Konten-Gruppe. Alte Zeilen mit diesem oder
+	 * einem Rollenwert in ts_role_groups bleiben stehen und werden ignoriert.
 	 */
 	public const ACCOUNTS = 'accounts';
 

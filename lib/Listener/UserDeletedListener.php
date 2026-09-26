@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Listener;
 
 use OCA\TimeSister\Db\BackupConsentMapper;
+use OCA\TimeSister\Db\MemberMapper;
 use OCA\TimeSister\Service\RecordService;
 use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventListener;
@@ -18,6 +19,8 @@ use Psr\Log\LoggerInterface;
  * Stunden. Sie bekommen nur den Vermerk `account_deleted_at`; `data`,
  * Fassung und Revision bleiben unverändert. Die Freigabe der Sicherung
  * fällt weg; vorhandene Sicherungen bleiben bis zur Aufbewahrungsfrist.
+ * App-Rolle und Austritt fallen weg: Ein neues Konto mit derselben Kennung
+ * erbt nichts.
  *
  * @template-implements IEventListener<UserDeletedEvent>
  */
@@ -25,6 +28,7 @@ final class UserDeletedListener implements IEventListener {
 	public function __construct(
 		private RecordService $records,
 		private BackupConsentMapper $consents,
+		private MemberMapper $members,
 		private LoggerInterface $logger,
 	) {
 	}
@@ -35,6 +39,7 @@ final class UserDeletedListener implements IEventListener {
 		}
 		$uid = $event->getUser()->getUID();
 		$this->consents->deleteByUid($uid);
+		$this->members->deleteByUid($uid);
 		$n = $this->records->markAccountDeleted($uid);
 		if ($n > 0) {
 			// Ohne Kennung im Protokoll: keine Personaldaten.

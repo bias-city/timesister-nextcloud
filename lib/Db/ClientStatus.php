@@ -24,6 +24,8 @@ use OCP\DB\Types;
  * @method void setLastBackup(?string $lastBackup)
  * @method string|null getCalendarUrl()
  * @method void setCalendarUrl(?string $calendarUrl)
+ * @method int|null getCalendarShared()
+ * @method void setCalendarShared(?int $calendarShared)
  * @method int getSeenAt()
  * @method void setSeenAt(int $seenAt)
  */
@@ -34,6 +36,8 @@ final class ClientStatus extends Entity {
 	protected ?int $lastSync = null;
 	protected ?string $lastBackup = null;
 	protected ?string $calendarUrl = null;
+	/** Gemeldeter Stand der Kalenderfreigabe: 1, 0 oder null (nie gemeldet). */
+	protected ?int $calendarShared = null;
 	protected int $seenAt = 0;
 
 	public function __construct() {
@@ -43,6 +47,7 @@ final class ClientStatus extends Entity {
 		$this->addType('lastSync', Types::INTEGER);
 		$this->addType('lastBackup', Types::STRING);
 		$this->addType('calendarUrl', Types::STRING);
+		$this->addType('calendarShared', Types::SMALLINT);
 		$this->addType('seenAt', Types::INTEGER);
 	}
 }

@@ -511,3 +511,195 @@ Entscheidungen des Nutzers nach dem Datenschutzbericht:
   haben die Standardwerte.
 - `notice` `"2026-09-26.2"` wird angenommen; die Regel bleibt: 1 bis 32
   Zeichen ohne Steuerzeichen.
+
+## Teams und Rollen, Fassung 2 (26.09.2026) – ersetzt die Rollen-Gruppen
+
+Entscheidung des Nutzers: je Team nur **zwei** Gruppen, Rollen in der App,
+Freigaben setzt die App der Eigentümerin durch. `api` steigt auf **2**
+(Capabilities `timesister: { api: 2, … }`). TimeSister Next hat nur
+Testdaten; es gibt keinen Übergang von Fassung 1.
+
+**Gruppen je Team** (`groups`):
+- `team`: alle Mitglieder. Team-Admins sind Gruppenadmins dieser Gruppe
+  (Konten anlegen).
+- `zeit`: die App-Admins. Jede Person gibt ihren Zeitkalender an diese
+  Gruppe frei. Team-Admins sind auch hier Gruppenadmins.
+- Beide bestehende Nextcloud-Gruppen, verschieden, keinem anderen Team
+  zugeordnet (`409`), sonst `422`. Die Rollen-Gruppen `user`, `lead`,
+  `subadmin`, `admin` und die Konten-Gruppe `accounts` entfallen.
+
+**Mitgliedschaft und Rolle:**
+- Mitglied ist, wer in `team` oder `zeit` steht und nicht als ausgetreten
+  vermerkt ist (`left_at`). Sonst `403 no_team`; in Gruppen zweier Teams
+  `409 ambiguous_team`.
+- Rolle: `admin`, wer in `zeit` steht. Sonst die App-Rolle `subadmin` oder
+  `lead`, sonst `user`.
+- App-Rollen und Austritt speichert die App (Tabelle, additiv). In der
+  Benutzerverwaltung von Nextcloud erscheinen sie nicht.
+
+**Endpunkte:**
+- `GET /me`: wie bisher, `groups` = `{ team, zeit }`, dazu `leads`: die
+  Kennungen aller Mitglieder mit Rolle `lead` (für die Freigaben), und
+  `calendar_share` (siehe unten).
+- `GET /team`: `members: [ { uid, display_name, role, left_at } ]` (auch
+  Ausgetretene, mit Datum), `groups`, `settings`, `backup_owner`.
+- `PUT /team/members/{uid}` mit `{ "role"?: "user"|"lead"|"subadmin", "left"?: bool }`:
+  subadmin und admin; `subadmin` vergeben nur admin. Das Konto muss in
+  `team` oder `zeit` stehen (sonst `404`). `admin` ist keine App-Rolle: Das
+  ist die Mitgliedschaft in `zeit` (über Nextcloud). `left: true` vermerkt
+  den Austritt (Konto bleibt in den Gruppen, gehört aber nicht mehr zum
+  Team); `left: false` nimmt wieder auf. Antwort: der Eintrag wie in `/team`.
+- `GET /me/calendar-share` → `{ "enabled": bool }`, `PUT` mit
+  `{ "enabled": bool }`: Schalter der Person „Zeitkalender für das Team
+  freigeben“, Standard **true**, nur das eigene Konto, gespeichert auf dem
+  Server.
+- `POST /status` nimmt zusätzlich `calendar_shared` (bool, tatsächlicher
+  Stand), `GET /status` nennt es je Mitglied.
+- `POST`/`PUT /admin/teams`: `{ name, slug, groups: { team, zeit }, settings?, backup_owner? }`.
+
+**Freigaben (Aufgabe der Mac-App der Eigentümerin, bei jedem Abgleich):**
+- Ist `calendar_share` an: Freigabe an die Gruppe `zeit` und, wenn
+  `settings.leads_see_calendars`, an jede Kennung aus `leads`; jeweils mit
+  dem Recht wie bisher an Admin- bzw. Lead-Gruppe. Fehlende oder geänderte
+  App-Freigaben werden wiederhergestellt, auch wenn die Person sie in der
+  Nextcloud-Oberfläche entfernt hat. Freigaben an nicht mehr berechtigte
+  Kennungen, die die App selbst gesetzt hat, werden entfernt. Andere
+  Freigaben der Person bleiben unberührt.
+- Ist er aus: Die App entfernt ihre Freigaben und setzt keine neuen.
+
+### Nachtrag zu Fassung 2: keine Zeit-Gruppe (26.09.2026)
+
+Der Nutzer: „braucht es die zeit gruppe für die admins überhaupt?!“ – nein.
+Ersetzt die Gruppe `zeit` in allen Punkten oben:
+
+- Je Team **eine** Gruppe: `groups` = `{ team }`.
+- **Admin des Teams ist, wer in Nextcloud Gruppenadmin der Teamgruppe ist**
+  (`OCP\Group\ISubAdmin`). Das braucht es ohnehin zum Anlegen von Konten.
+  Admins ernennt der Nextcloud-Admin in der Benutzerverwaltung; die App
+  vergibt `admin` nicht.
+- Mitglied ist, wer in `team` steht oder Gruppenadmin von `team` ist, und
+  nicht ausgetreten ist.
+- `/me` nennt neben `leads` auch `admins` (Kennungen). Die Mac-App der
+  Eigentümerin gibt ihren Zeitkalender **einzeln** an jede Kennung aus
+  `admins` frei (Recht wie bisher an die Admin-Gruppe) und, wenn
+  `leads_see_calendars`, an jede aus `leads`. Das Kundenadressbuch ebenso.
+- `PUT /team/members/{uid}`: `role` nur `user`, `lead`, `subadmin`;
+  `subadmin` vergeben nur Admins.
+- `POST`/`PUT /admin/teams`: `groups: { team }`.
+
+### Nachtrag zu Fassung 2: Budgets erben die Rechte des Projekts (26.09.2026)
+
+Der Nutzer: „Budgets die ein Projekt haben erben die Rechte“. Budgets stehen
+im Projektdatensatz (`data.budgets`); die Leitung eines Projekts steht in
+`data.leads` (Personenschlüssel, über `login`/`accounts` der Person einem
+Konto zugeordnet).
+
+- **Lesen:** `data.budgets` bekommen subadmin, admin und die Leitungen
+  **dieses** Projekts. Allen anderen liefert der Server den Projektdatensatz
+  ohne das Feld `budgets` (in `/records`, `/records/{kind}/{key}` und im
+  Verlauf).
+- **Schreiben:** Eine Leitung des Projekts darf `PUT /records/project/{key}`,
+  wenn sich gegenüber der aktuellen Fassung **nur** `budgets` ändert; sonst
+  `403 forbidden` („Projektleitungen dürfen nur die Budgets ihrer Projekte
+  ändern.“). subadmin und admin wie bisher. Batch und Restore bleiben
+  subadmin/admin.
+- Ändert sich `data.leads`, entsteht ohnehin eine neue Fassung; neu
+  zugewiesene Leitungen bekommen damit beim nächsten Delta das Projekt mit
+  Budgets, entfernte ohne.
+
+### Nachtrag zu Fassung 2: Projekte nur für Leitung und Admin, sonst Buchungskatalog (26.09.2026)
+
+Der Nutzer: „wer kein PL oder Admin ist sieht keinen Projektdatensatz. nur
+seine eigenen Daten“. Verschärft den Nachtrag „Budgets erben die Rechte“:
+
+- **Voller Projektdatensatz** nur für admin, subadmin und die Leitungen
+  **dieses** Projekts.
+- **Alle anderen** (user; lead für fremde Projekte) bekommen nur den
+  **Buchungskatalog**: `data` enthält ausschliesslich `schema`, `id`,
+  `name`, `codes`, `subprojects`, `start`, `end`, `status`, `mapping`. Es
+  fehlen `description`, `cost_center`, `customer`, `quote`, `leads`,
+  `budget`, `milestones`, `budgets`. Grund: Ohne Codes, Unterprojekte und
+  Zuordnungsregeln kann die Mac-App Termine nicht verbuchen.
+- Gilt für `/records`, das Delta, `/records/project/{key}` und den Verlauf
+  (Verlauf eines Projekts: nur admin, subadmin, Leitung des Projekts).
+- Schreiben unverändert: Leitung nur `budgets` ihres Projekts; alles andere
+  subadmin/admin.
+
+### Nachtrag zu Fassung 2: Projektleitung ist Admin im Projekt (26.09.2026)
+
+Der Nutzer: „Doch dürfen sie. PL sind Admin im Projekt.“ Ersetzt die Regel
+„Leitung darf nur `budgets` ändern“:
+
+- Eine Leitung des Projekts darf `PUT /records/project/{key}` mit **allen**
+  Feldern (auch `leads`, `customer`, `codes`, `subprojects`, `budgets`,
+  `milestones`). `id` muss gleich dem Schlüssel bleiben.
+- Anlegen (`version: 0` für einen neuen Schlüssel), Löschen, Batch und
+  Restore bleiben subadmin/admin.
+- Geprüft wird gegen die Leitung der **aktuellen** Fassung auf dem Server,
+  nicht gegen die neue: Wer sich selbst aus `leads` nimmt, darf das noch
+  schreiben und sieht danach nur den Katalog.
+
+## Nachträge zu Fassung 2 aus der Umsetzung (26.09.2026)
+
+App 0.3.0. Präzisierungen; nichts oben Stehendes ändert sich.
+
+- **Mitgliedschaft:** Ausgetretene zählen für die Eindeutigkeit nicht. Wer
+  aus Team A ausgetreten ist und in der Teamgruppe von Team B steht, gehört
+  zu B; `409 ambiguous_team` nur bei zwei Teams ohne Austritt. Auch ein
+  Admin mit vermerktem Austritt bekommt `403 no_team`.
+- **Alte Zuordnungen:** Nur `team` zählt. Zeilen aus Fassung 1 (`user`,
+  `lead`, `subadmin`, `admin`, `accounts`) werden ignoriert; `PUT
+  /admin/teams/{id}` nimmt sie aus der Zuordnung, die Nextcloud-Gruppen
+  bleiben. Eine Gruppe mit alter Zuordnung zu einem anderen Team gilt als
+  vergeben (`409`).
+- **`groups`** in `POST`/`PUT /admin/teams`: genau `{ "team": "<gid>" }`.
+  Andere Schlüssel oder keine Teamgruppe → `422 invalid`. `backup_owner`
+  muss Gruppenadmin der Teamgruppe sein (`422`).
+- **`/me`:** `admins` und `leads` sind die Kennungen aller nicht
+  ausgetretenen Mitglieder mit dieser Rolle, sortiert, der Aufrufer
+  eingeschlossen.
+- **`/team`:** `members` nach Kennung; bei Ausgetretenen ist `role` die
+  Rolle, die sie hätten, `left_at` eine ISO-Zeit, sonst `null`. Wer eine
+  App-Rolle hat, aber nicht mehr in der Teamgruppe steht, fehlt; kommt das
+  Konto zurück, gilt die gespeicherte Rolle wieder.
+- **`GET /status`** nennt nur nicht Ausgetretene. `calendar_shared` ist
+  `true`, `false` oder `null` (nie gemeldet); im `POST` löscht `null` den
+  Wert, kein Wahrheitswert → `422 invalid`.
+- **`PUT /team/members/{uid}`**, Prüfung in dieser Reihenfolge:
+  - user oder lead → `403 forbidden`;
+  - weder `role` noch `left` → `400 invalid`;
+  - `role` nicht `user`, `lead` oder `subadmin` (auch `admin`), `left` kein
+    Wahrheitswert → `422 invalid`;
+  - Konto weder in der Teamgruppe noch ihr Gruppenadmin → `404 not_found`;
+  - `subadmin` vergeben und Einträge von Verwaltung und Admins ändern
+    (Rolle und Austritt) nur Admins, den eigenen Austritt vermerkt niemand
+    selbst → `403 forbidden`.
+
+  `role: "user"` löscht die App-Rolle. `left: true` auf schon Ausgetretene
+  behält das erste Datum.
+- **Admin-Seite:** `PUT /admin/teams/{id}/members/{uid}` mit demselben
+  Rumpf und denselben Prüfungen; der Nextcloud-Admin hat die Rechte eines
+  Team-Admins. Unbekanntes Team → `404`.
+- **`GET /admin/teams`:** `counts` = `{ user, lead, subadmin, admin, left }`.
+- **Konto gelöscht:** App-Rolle und Austritt fallen weg, ein neues Konto mit
+  derselben Kennung erbt nichts. `calendar_share` ist eine
+  Nextcloud-Einstellung des Kontos (`IUserConfig`, Schlüssel
+  `calendar_share`) und fällt mit ihm weg.
+- **Projekte:**
+  - Personenschlüssel für `leads`: die eigene Kennung und die Schlüssel
+    lebender Personen mit ihr in `accounts`, wie bei „eigene Person“. Jede
+    Rolle zählt, auch `user`.
+  - Katalog: die Felder der Liste, soweit vorhanden; alle anderen, auch
+    künftige, fehlen.
+  - Verlauf: Leitung nach der aktuellen Fassung, dann voll. Bei einem
+    Grabstein nur Verwaltung und Admin.
+  - Ohne Verwaltungsrolle prüft `PUT /records/project/{key}` zuerst Pfad
+    und Rumpf (`400`/`422`), dann die Leitung. Keine Leitung, Grabstein oder
+    neuer Schlüssel → `403 forbidden`, Satz: „Ein Projekt ändern nur
+    Verwaltung, Admin und seine Leitung; neue Projekte legen Verwaltung und
+    Admin an.“
+  - Die Antwort auf den `PUT` ist voll, auch wenn sich die Leitung dabei
+    herausnimmt. `409 conflict` nennt `current` voll.
+- **Gespeichert:** Tabelle `ts_members(tenant_id, uid, role, left_at,
+  updated_by, updated_at)` und Spalte `ts_client_status.calendar_shared`,
+  Migration 1004, App 0.3.0, nur hinzufügend.

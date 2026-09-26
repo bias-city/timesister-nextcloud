@@ -15,7 +15,7 @@ Nextcloud-Hauptversion bringen, ohne mehr zu ändern als nötig.
   `OCP\DB\Types`. Kein rohes SQL. Migrationen nur additiv (neue Klasse
   `lib/Migration/Version<NNNN>Date<YYYYMMDDHHMMSS>`), nie eine alte ändern.
 - Was Psalm als *deprecated* meldet, ist ein Fehler: ersetzen, nicht unterdrücken.
-- Die Schnittstelle (`docs/API.md`, Fassung 1) bleibt, wie sie ist. Muss sie
+- Die Schnittstelle (`docs/API.md`, Fassung 2) bleibt, wie sie ist. Muss sie
   sich ändern, ist das eine eigene Entscheidung, kein Update.
 - Admin-Seite: Vanilla-JS ohne `OC.*`, Token aus `document.head.dataset.requesttoken`,
   Stile nur über Nextclouds CSS-Variablen.

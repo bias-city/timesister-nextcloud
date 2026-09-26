@@ -27,14 +27,15 @@ if (!['localhost', '127.0.0.1', '::1', '[::1]'].includes(host)) {
 export const pw = (uid) => `Test-2026-${uid}!`
 export const as = (uid) => ({ user: uid, pass: pw(uid) })
 
-/** Die Teams aus docker-next/aufsetzen.sh. */
+/** Die Teams aus docker-next/aufsetzen.sh (Fassung 2: eine Teamgruppe je Team). */
 export const TEAMS = [
 	{ name: 'Planungsbüro', slug: 'pb', prefix: 'pb' },
 	{ name: 'Atelier', slug: 'at', prefix: 'at' },
 ]
-export const GROUP_SUFFIX = { user: 'mitarbeitende', lead: 'leitung', subadmin: 'verwaltung', admin: 'admin' }
-export const GROUP_LABEL = { user: 'Mitarbeitende', lead: 'Projektleitung', subadmin: 'Verwaltung', admin: 'Admin' }
-/** Konto, Anzeigename, Team, Rolle. Alle stehen auch in der Mitarbeitenden-Gruppe. */
+/**
+ * Konto, Anzeigename, Team, Rolle. Alle stehen in der Teamgruppe; admin
+ * ist Gruppenadmin der Teamgruppe, lead und subadmin sind App-Rollen.
+ */
 export const ACCOUNTS = [
 	['pbadmin', 'Petra Brunner', 'pb', 'admin'],
 	['pbverw', 'Paul Vogel', 'pb', 'subadmin'],
@@ -46,15 +47,10 @@ export const ACCOUNTS = [
 	['atuser1', 'Tim Test', 'at', 'user'],
 ]
 
-export function groupsOf(prefix) {
-	return Object.fromEntries(Object.entries(GROUP_SUFFIX).map(([role, s]) => [role, `${prefix}-${s}`]))
-}
-
-/** Die Konten-Gruppe eines Teams: alle seine Konten, keine Rolle. */
-export const accountsOf = (prefix) => `${prefix}-konten`
-export const ACCOUNTS_LABEL = 'Konten'
-/** Vier Rollen-Gruppen und die Konten-Gruppe, wie in /me, /team und /admin/teams. */
-export const teamGroupsOf = (prefix) => ({ ...groupsOf(prefix), accounts: accountsOf(prefix) })
+/** Die Teamgruppe eines Teams. */
+export const teamGroupOf = (prefix) => `${prefix}-team`
+/** `groups` wie in /me, /team und /admin/teams. */
+export const groupsOf = (prefix) => ({ team: teamGroupOf(prefix) })
 
 /**
  * Eine OCS-Anfrage. `path` beginnt mit `/ocs/…` oder ist relativ zur App-API.

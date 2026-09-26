@@ -20,6 +20,10 @@ namespace OCA\TimeSister\Service;
  * | Kalendersicherungen          | eigene           | alle   |
  * | Lebenszeichen melden         | eigenes | eigenes | eigenes |
  * | Lebenszeichen lesen, Team    | –      | –      | ja               |
+ *
+ * Projekte voll sehen nur subadmin, admin und die Leitungen dieses Projekts
+ * (`data.leads`), auch im Verlauf; alle anderen den Buchungskatalog. Siehe
+ * ProjectAccess.
  */
 final class AccessPolicy {
 	/** Arten, die jedes Teammitglied lesen darf. */
@@ -47,6 +51,15 @@ final class AccessPolicy {
 			return self::isOwnPerson($m->uid, $key, $accounts);
 		}
 		return false;
+	}
+
+	/**
+	 * Der volle Projektdatensatz und sein Verlauf.
+	 *
+	 * @param list<string> $ownKeys Personenschlüssel des Aufrufers
+	 */
+	public function canSeeFullProject(Membership $m, mixed $projectData, array $ownKeys): bool {
+		return $m->manages() || ProjectAccess::isLead($projectData, $ownKeys);
 	}
 
 	public function canWrite(Membership $m): bool {

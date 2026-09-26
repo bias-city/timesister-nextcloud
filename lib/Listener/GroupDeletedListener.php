@@ -16,10 +16,10 @@ use OCP\Group\Events\GroupDeletedEvent;
 use Psr\Log\LoggerInterface;
 
 /**
- * Gruppe gelöscht: Ist sie eine Rollen-Gruppe eines Teams, ist dessen
- * Rollenzuordnung gebrochen. Die Admin-Seite zeigt es rot, bis ein Admin eine
- * neue Gruppe zuordnet. Die Konten-Gruppe ist optional: Ihre Zuordnung fällt
- * weg, das Team bleibt ganz.
+ * Gruppe gelöscht: Ist sie die Teamgruppe eines Teams, ist dessen Zuordnung
+ * gebrochen. Die Admin-Seite zeigt es rot, bis ein Admin eine neue Gruppe
+ * zuordnet. Alte Zuordnungen aus Fassung 1 (Rollen- und Konten-Gruppen)
+ * fallen still weg.
  *
  * @template-implements IEventListener<GroupDeletedEvent>
  */
@@ -38,10 +38,8 @@ final class GroupDeletedListener implements IEventListener {
 		}
 		$ids = [];
 		foreach ($this->roleGroups->findByGid($event->getGroup()->getGID()) as $rg) {
-			if ($rg->getRole() === Role::ACCOUNTS) {
+			if ($rg->getRole() !== Role::TEAM_GROUP) {
 				$this->roleGroups->delete($rg);
-				// warning, damit es beim üblichen Log-Level sichtbar ist; das Team bleibt ganz.
-				$this->logger->warning('TimeSister: Konten-Gruppe von Team {id} gelöscht, Zuordnung entfernt (optional, Team bleibt ganz)', ['app' => 'timesister', 'id' => $rg->getTenantId()]);
 				continue;
 			}
 			$ids[] = $rg->getTenantId();
@@ -49,7 +47,7 @@ final class GroupDeletedListener implements IEventListener {
 		$ids = array_values(array_unique($ids));
 		if ($ids !== []) {
 			$this->tenants->markBroken($ids, $this->time->getTime());
-			$this->logger->warning('TimeSister: Rollen-Gruppe gelöscht, Zuordnung von {n} Team(s) gebrochen', ['app' => 'timesister', 'n' => count($ids)]);
+			$this->logger->warning('TimeSister: Teamgruppe gelöscht, Zuordnung von {n} Team(s) gebrochen', ['app' => 'timesister', 'n' => count($ids)]);
 		}
 	}
 }

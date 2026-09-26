@@ -1,9 +1,9 @@
 # TimeSister für Nextcloud
 
 Die Server-Seite der Zeiterfassung TimeSister: Stammdaten als Datensätze mit
-Version, getrennte Teams über je vier Nextcloud-Gruppen (dazu optional eine
-Konten-Gruppe, keine Rolle), Rechteprüfung auf dem Server, Verlauf,
-Kalendersicherungen und Lebenszeichen der Clients.
+Version, getrennte Teams über je eine Nextcloud-Gruppe (Admins sind deren
+Gruppenadmins, Leitung und Verwaltung führt die App), Rechteprüfung auf dem
+Server, Verlauf, Kalendersicherungen und Lebenszeichen der Clients.
 Schnittstelle: [`docs/API.md`](docs/API.md).
 
 *Server side of the TimeSister time tracker (macOS). OCS API for versioned
@@ -14,7 +14,8 @@ master data, teams and roles; no UI apart from an admin settings section.*
 | Teil | Wo |
 |---|---|
 | OCS-Controller (`/ocs/v2.php/apps/timesister/api/v1`) | `lib/Controller` |
-| Team, Rolle, Rechte, Prüfungen, Konflikte | `lib/Service` (reine Klassen ohne Nextcloud: `AccessPolicy`, `MembershipResolver`, `RecordValidator`, `VersionCheck`, `*Rules`) |
+| Team, Rolle, Rechte, Prüfungen, Konflikte | `lib/Service` (reine Klassen ohne Nextcloud: `AccessPolicy`, `MembershipResolver`, `ProjectAccess`, `RecordValidator`, `VersionCheck`, `*Rules`) |
+| App-Rollen und Austritt (Fassung 2) | `MemberService`, Tabelle `ts_members` |
 | Tabellen `ts_*`, Mapper | `lib/Db`, `lib/Migration` |
 | Admin-Seite | `lib/Settings`, `templates/admin.php`, `js/admin.js`, `css/admin.css` |
 | Übersetzungen der Admin-Seite | `l10n/de.json` (du), `l10n/de_DE.json` (Sie) |

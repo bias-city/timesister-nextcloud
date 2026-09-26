@@ -10,7 +10,7 @@ namespace OCA\TimeSister\Service;
 final class StatusRules {
 	/**
 	 * @param array<string,mixed> $in
-	 * @return array{app_version:?string,last_sync:?int,last_backup:?string,calendar_url:?string}
+	 * @return array{app_version:?string,last_sync:?int,last_backup:?string,calendar_url:?string,calendar_shared:?bool}
 	 */
 	public static function validate(array $in): array {
 		$v = $in['app_version'] ?? null;
@@ -36,6 +36,10 @@ final class StatusRules {
 				throw ApiException::invalid('„calendar_url“ muss eine http(s)-Adresse sein.');
 			}
 		}
-		return ['app_version' => $v, 'last_sync' => $sync, 'last_backup' => $backup, 'calendar_url' => $url];
+		$shared = $in['calendar_shared'] ?? null;
+		if ($shared !== null && !is_bool($shared)) {
+			throw ApiException::invalid('„calendar_shared“ muss true oder false sein.');
+		}
+		return ['app_version' => $v, 'last_sync' => $sync, 'last_backup' => $backup, 'calendar_url' => $url, 'calendar_shared' => $shared];
 	}
 }

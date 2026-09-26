@@ -52,6 +52,9 @@ final class StatusService {
 			if (array_key_exists('calendar_url', $in)) {
 				$s->setCalendarUrl($v['calendar_url']);
 			}
+			if (array_key_exists('calendar_shared', $in)) {
+				$s->setCalendarShared($v['calendar_shared'] === null ? null : (int)$v['calendar_shared']);
+			}
 			$s->setSeenAt($now);
 			try {
 				$new ? $this->status->insert($s) : $this->status->update($s);
@@ -76,6 +79,7 @@ final class StatusService {
 			$role = $roles[$uid];
 			$s = $byUid[$uid] ?? null;
 			$c = ConsentService::present($consents[$uid] ?? null);
+			$shared = $s?->getCalendarShared();
 			$out[] = [
 				'uid' => $uid,
 				'display_name' => $this->tenants->displayName($uid),
@@ -84,6 +88,7 @@ final class StatusService {
 				'last_sync' => Time::iso($s?->getLastSync()),
 				'last_backup' => $s?->getLastBackup(),
 				'calendar_url' => $s?->getCalendarUrl(),
+				'calendar_shared' => $shared === null ? null : $shared === 1,
 				'seen_at' => $s === null ? null : Time::iso($s->getSeenAt()),
 				'backup_consent' => $c['consent'],
 				'backup_consent_since' => $c['since'],

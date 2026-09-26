@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { ADMIN, as, groupsOf, ocs, sql } from './lib.mjs'
+import { ADMIN, as, ocs, sql } from './lib.mjs'
 import { A, AA, AL, AU, C, L, NOAH, P, R, RUN, U1, U2, V, ISO, b64, check, expect, head, isObj, keysOf, me, sha256, ensure } from './harness.mjs'
 import { restoreConsent } from './teil-sicherungen.mjs'
 
@@ -72,14 +72,14 @@ async function restOhneSicherungen() {
 		expect('last_sync kein ISO', await ocs(U1, 'POST', '/status', { last_sync: 'gestern' }), 422, 'invalid')
 		// Ein frisches Konto, das sicher noch nie gemeldet hat (die Umgebung teilen sich mehrere Prüfer).
 		const still = `still${RUN}`
-		await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/users', { userid: still, password: `Test-2026-${still}!`, groups: ['pb-mitarbeitende'] })
+		await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/users', { userid: still, password: `Test-2026-${still}!`, groups: ['pb-team'] })
 		const list = await ocs(V, 'GET', '/status')
 		const by = Object.fromEntries((list.data || []).map((x) => [x.uid, x]))
 		check('alle pb-Mitglieder, auch ohne Lebenszeichen', ['pbadmin', 'pblead', 'pbuser1', 'pbuser2', 'pbverw', still].every((u) => u in by) && !Object.keys(by).some((u) => u.startsWith('at')), Object.keys(by))
 		check('pbuser1 mit seinen Angaben', by.pbuser1?.app_version === '0.2.0' && by.pbuser1?.last_sync === '2026-09-26T08:15:00Z'
 			&& by.pbuser1?.last_backup === '2026-09-22' && by.pbuser1?.role === 'user' && by.pbuser1?.display_name === 'Mia Muster', by.pbuser1)
 		check('neues Konto ohne Lebenszeichen: alles null', by[still] && by[still].seen_at === null && by[still].app_version === null && by[still].calendar_url === null && by[still].role === 'user', by[still])
-		check('Rollen je stärkster Gruppe', by.pbadmin?.role === 'admin' && by.pbverw?.role === 'subadmin' && by.pblead?.role === 'lead')
+		check('Rollen aus Gruppenadmin und App-Rolle', by.pbadmin?.role === 'admin' && by.pbverw?.role === 'subadmin' && by.pblead?.role === 'lead')
 		const part = await ocs(U1, 'POST', '/status', { app_version: '0.2.1' })
 		const after = Object.fromEntries(((await ocs(V, 'GET', '/status')).data || []).map((x) => [x.uid, x]))
 		check('fehlende Felder bleiben stehen', part.status === 200 && after.pbuser1?.app_version === '0.2.1' && after.pbuser1?.last_backup === '2026-09-22', after.pbuser1)
@@ -89,19 +89,19 @@ async function restOhneSicherungen() {
 	// ---------------------------------------------------------------------------
 	head('Konto in zwei Teams, Konto gelöscht')
 	{
-		await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/users/pbuser1/groups', { groupid: 'at-mitarbeitende' })
+		await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/users/pbuser1/groups', { groupid: 'at-team' })
 		try {
 			expect('pbuser1 zusätzlich in at: /me', await ocs(U1, 'GET', '/me'), 409, 'ambiguous_team')
 			expect('… und /records', await ocs(U1, 'GET', '/records'), 409, 'ambiguous_team')
 			expect('… und /backups', await ocs(U1, 'GET', '/backups'), 409, 'ambiguous_team')
 		} finally {
-			await ocs(ADMIN, 'DELETE', '/ocs/v2.php/cloud/users/pbuser1/groups', { groupid: 'at-mitarbeitende' }, { form: true })
+			await ocs(ADMIN, 'DELETE', '/ocs/v2.php/cloud/users/pbuser1/groups', { groupid: 'at-team' }, { form: true })
 		}
 		const back = await ocs(U1, 'GET', '/me')
 		check('aufgeräumt: pbuser1 wieder nur in pb', back.status === 200 && back.data?.team?.slug === 'pb', back.text)
 
 		const tmp = `weg${RUN}`
-		await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/users', { userid: tmp, password: `Test-2026-${tmp}!`, groups: ['pb-mitarbeitende'] })
+		await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/users', { userid: tmp, password: `Test-2026-${tmp}!`, groups: ['pb-team'] })
 		const pr = await ocs(A, 'PUT', `/records/person/${tmp}`, { version: 0, data: { login: tmp, first_name: 'Weg' } })
 		const del = await ocs(ADMIN, 'DELETE', `/ocs/v2.php/cloud/users/${tmp}`)
 		check('Konto gelöscht', pr.status === 200 && del.status === 200, `${pr.status} ${del.status}`)

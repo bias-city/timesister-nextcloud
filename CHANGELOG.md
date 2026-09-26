@@ -1,5 +1,29 @@
 # Änderungen
 
+## 0.3.0 – unveröffentlicht
+
+Schnittstelle Fassung 2 (`api: 2`), ohne Übergang von Fassung 1:
+
+- Je Team **eine** Teamgruppe (`groups: { team }`). Admin des Teams ist,
+  wer in Nextcloud Gruppenadmin der Teamgruppe ist (`ISubAdmin`); `lead` und
+  `subadmin` und der Austritt stehen in der App (Tabelle `ts_members`).
+  Rollen-, Konten- und Zeit-Gruppen entfallen; alte Zeilen in
+  `ts_role_groups` bleiben stehen und werden ignoriert.
+- `/me` mit `admins`, `leads` und `calendar_share`; `/team` mit
+  `members: [{ uid, display_name, role, left_at }]`, auch Ausgetretene.
+- `PUT /team/members/{uid}` (Verwaltung und Admin; `subadmin` vergeben nur
+  Admins), dazu `PUT /admin/teams/{id}/members/{uid}` für die Admin-Seite.
+- `GET`/`PUT /me/calendar-share` (Standard an), `calendar_shared` in
+  `POST`/`GET /status`.
+- Projekte voll nur für Verwaltung, Admin und die Leitungen des Projekts,
+  sonst der Buchungskatalog; die Leitung ändert ihr Projekt ganz, legt aber
+  keine neuen an. Verlauf eines Projekts auch für seine Leitung.
+- Admin-Seite: ein Gruppenfeld, Admins als Liste mit Hinweis, Mitglieder
+  mit Rolle und Austritt (setzbar in „Team bearbeiten“), im Zustand die
+  Konten ohne freigegebenen Zeitkalender.
+- Migration `Version1004…`, nur hinzufügend (`ts_members`,
+  `ts_client_status.calendar_shared`).
+
 ## 0.2.2 – unveröffentlicht
 
 - Schnittstelle Fassung 1.2: Team-Einstellungen `settings`

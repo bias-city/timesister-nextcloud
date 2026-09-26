@@ -51,15 +51,46 @@ final class RecordService {
 		];
 	}
 
+	/**
+	 * Wie present(); ein Projekt voll nur für Verwaltung, Admin und seine
+	 * Leitungen, sonst nur der Buchungskatalog.
+	 *
+	 * @param list<string> $ownKeys Personenschlüssel des Aufrufers
+	 * @return array<string,mixed>
+	 */
+	private function presentFor(Membership $m, Record $r, array $ownKeys): array {
+		$out = $this->present($r);
+		$data = $out['data'];
+		if ($r->getKind() === 'project' && $data instanceof \stdClass && !$this->policy->canSeeFullProject($m, $data, $ownKeys)) {
+			$out['data'] = ProjectAccess::catalog($data);
+		}
+		return $out;
+	}
+
+	/**
+	 * Die Personenschlüssel des Aufrufers wie bei „eigene Person“: die
+	 * Kennung selbst und jede Person mit ihr in `accounts`.
+	 *
+	 * @return list<string>
+	 */
+	public function ownKeys(Membership $m): array {
+		$keys = [$m->uid];
+		foreach ($this->records->findPersonsOf($m->uid, $m->tenantId, true) as $r) {
+			$keys[] = $r->getRkey();
+		}
+		return array_values(array_unique($keys));
+	}
+
 	/** @return array{revision:int,records:list<array<string,mixed>>} */
 	public function list(Membership $m, int $since): array {
 		// Erst die Revision, dann die Datensätze bis zu ihr: Was danach
 		// geschrieben wird, kommt mit dem nächsten Delta.
 		$rev = $this->tenants->revision($m->tenantId);
+		$own = $this->ownKeys($m);
 		$out = [];
 		foreach ($this->records->findChanged($m->tenantId, $since, $rev) as $r) {
 			if ($this->policy->canRead($m, $r->getKind(), $r->getRkey(), $r->accountList())) {
-				$out[] = $this->present($r);
+				$out[] = $this->presentFor($m, $r, $own);
 			}
 		}
 		return ['revision' => $rev, 'records' => $out];
@@ -75,7 +106,7 @@ final class RecordService {
 		if ($r === null || $r->isTombstone()) {
 			throw ApiException::notFound('Diesen Datensatz gibt es nicht.');
 		}
-		return $this->present($r);
+		return $this->presentFor($m, $r, $this->ownKeys($m));
 	}
 
 	/** Schlüssel des eigenen Personendatensatzes, sonst null. */
@@ -91,17 +122,36 @@ final class RecordService {
 
 	/** @return array<string,mixed> der neue Datensatz */
 	public function put(Membership $m, string $kind, string $key, \stdClass $body): array {
-		$this->policy->requireWrite($m);
+		if ($kind !== 'project') {
+			$this->policy->requireWrite($m);
+		}
 		RecordValidator::checkAddress($kind, $key);
 		$version = RecordValidator::checkVersion($body->version ?? null);
 		if (!property_exists($body, 'data')) {
 			throw ApiException::invalid('„data“ fehlt.');
+		}
+		if (!$this->policy->canWrite($m)) {
+			$this->requireProjectLead($m, $key);
 		}
 		$v = RecordValidator::validate($kind, $key, $body->data);
 		return $this->write($m, [[
 			'kind' => $kind, 'key' => $key, 'version' => $version,
 			'json' => $v['json'], 'accounts' => $v['accounts'],
 		]], false)['records'][0];
+	}
+
+	/**
+	 * Die Leitung der aktuellen Fassung darf ihr Projekt ganz ändern, auch
+	 * sich selbst aus `leads` nehmen. Neue Projekte (auch auf einem
+	 * Grabstein) legen nur Verwaltung und Admin an. Sonst 403.
+	 */
+	private function requireProjectLead(Membership $m, string $key): void {
+		$cur = $this->records->findOne($m->tenantId, 'project', $key);
+		$raw = $cur?->getData();
+		$old = ($cur === null || $cur->isTombstone() || $raw === null) ? null : Json::decode($raw);
+		if (!ProjectAccess::isLead($old, $this->ownKeys($m))) {
+			throw ApiException::forbidden(ProjectAccess::FORBIDDEN);
+		}
 	}
 
 	/** @return array<string,mixed> der Grabstein */
@@ -167,7 +217,11 @@ final class RecordService {
 	public function history(Membership $m, string $kind, string $key): array {
 		RecordValidator::checkAddress($kind, $key);
 		$r = $this->records->findOne($m->tenantId, $kind, $key);
-		if (!$this->policy->canReadHistory($m, $kind, $key, $r?->accountList() ?? [])) {
+		// Projekt: auch seine Leitungen (nach der aktuellen Fassung).
+		$raw = $r?->getData();
+		$lead = $kind === 'project' && $r !== null && !$r->isTombstone() && $raw !== null
+			&& $this->policy->canSeeFullProject($m, Json::decode($raw), $this->ownKeys($m));
+		if (!$lead && !$this->policy->canReadHistory($m, $kind, $key, $r?->accountList() ?? [])) {
 			throw ApiException::forbidden('Den Verlauf dieses Datensatzes darf dieses Konto nicht lesen.');
 		}
 		if ($r === null) {

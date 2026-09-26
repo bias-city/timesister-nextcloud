@@ -6,30 +6,35 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
+use OCA\TimeSister\Db\MemberMapper;
 use OCA\TimeSister\Db\RoleGroupMapper;
 use OCA\TimeSister\Db\Tenant;
 use OCA\TimeSister\Db\TenantMapper;
+use OCP\Group\ISubAdmin;
+use OCP\IGroup;
 use OCP\IGroupManager;
 use OCP\IUser;
 use OCP\IUserManager;
 use OCP\IUserSession;
 
 /**
- * Mitgliedschaft → Team und Rolle. Das Team ergibt sich immer aus den
- * Gruppen des Aufrufers, nie aus der Anfrage.
+ * Mitgliedschaft → Team und Rolle (Fassung 2). Das Team ergibt sich immer
+ * aus der Teamgruppe des Aufrufers, nie aus der Anfrage.
  */
 final class TenantService {
 	/** @var list<array{tenant_id:int,role:string,gid:string}>|null */
 	private ?array $roleRows = null;
-	/** @var array<int,array<string,string>> Team → uid → Rolle */
+	/** @var array<int,array<string,array{role:string,left_at:?int}>> Team → uid → Eintrag */
 	private array $members = [];
 
 	public function __construct(
 		private IUserSession $userSession,
 		private IGroupManager $groupManager,
+		private ISubAdmin $subAdmin,
 		private IUserManager $userManager,
 		private TenantMapper $tenants,
 		private RoleGroupMapper $roleGroups,
+		private MemberMapper $memberMapper,
 	) {
 	}
 
@@ -43,7 +48,13 @@ final class TenantService {
 	}
 
 	public function membershipOf(IUser $user): Membership {
-		$r = MembershipResolver::resolve($this->groupManager->getUserGroupIds($user), $this->roleRows());
+		$managed = array_map(static fn (IGroup $g) => $g->getGID(), $this->subAdmin->getSubAdminsGroups($user));
+		$r = MembershipResolver::resolve(
+			$this->groupManager->getUserGroupIds($user),
+			array_values($managed),
+			$this->roleRows(),
+			$this->memberMapper->entriesByUid($user->getUID()),
+		);
 		if ($this->tenants->find($r['tenant_id']) === null) {
 			throw ApiException::noTeam();
 		}
@@ -55,7 +66,7 @@ final class TenantService {
 		return $this->roleRows ??= $this->roleGroups->allRows();
 	}
 
-	/** Nach Änderungen an den Teams. */
+	/** Nach Änderungen an Teams oder Rollen. */
 	public function reset(): void {
 		$this->roleRows = null;
 		$this->members = [];
@@ -69,75 +80,56 @@ final class TenantService {
 		return $t;
 	}
 
-	/** @return array<string,string> Rolle oder `accounts` → Gruppe */
-	private function rowsOf(int $tenantId): array {
-		$gid = [];
-		foreach ($this->roleRows() as $rg) {
-			if ($rg['tenant_id'] === $tenantId) {
-				$gid[$rg['role']] = $rg['gid'];
-			}
-		}
-		return $gid;
+	/** Die Teamgruppe oder null. Alte Zeilen aus Fassung 1 zählen nicht. */
+	public function teamGroupOf(int $tenantId): ?string {
+		return MembershipResolver::teamGroups($this->roleRows())[$tenantId] ?? null;
 	}
 
-	/**
-	 * Nur die vier Rollen-Gruppen, ohne Konten-Gruppe.
-	 *
-	 * @return array{user:?string,lead:?string,subadmin:?string,admin:?string}
-	 */
-	public function roleGroupsOf(int $tenantId): array {
-		$gid = $this->rowsOf($tenantId);
-		return [
-			'user' => $gid['user'] ?? null,
-			'lead' => $gid['lead'] ?? null,
-			'subadmin' => $gid['subadmin'] ?? null,
-			'admin' => $gid['admin'] ?? null,
-		];
-	}
-
-	/** Die Konten-Gruppe des Teams oder null. Keine Rolle. */
-	public function accountsGroupOf(int $tenantId): ?string {
-		return $this->rowsOf($tenantId)[Role::ACCOUNTS] ?? null;
-	}
-
-	/**
-	 * Für /me, /team und /admin/teams: die vier Rollen-Gruppen, dazu
-	 * `accounts` nur, wenn gesetzt.
-	 *
-	 * @return array<string,?string>
-	 */
+	/** @return array{team:?string} für /me, /team und /admin/teams */
 	public function groupsOf(int $tenantId): array {
-		$groups = $this->roleGroupsOf($tenantId);
-		$accounts = $this->accountsGroupOf($tenantId);
-		if ($accounts !== null) {
-			$groups[Role::ACCOUNTS] = $accounts;
-		}
-		return $groups;
+		return [Role::TEAM_GROUP => $this->teamGroupOf($tenantId)];
 	}
 
-	/** @return array<string,string> uid → stärkste Rolle im Team */
+	/**
+	 * Alle Mitglieder, auch Ausgetretene: Konten der Teamgruppe und ihre
+	 * Gruppenadmins, mit Rolle und `left_at`.
+	 *
+	 * @return array<string,array{role:string,left_at:?int}>
+	 */
+	public function members(int $tenantId): array {
+		return $this->members[$tenantId] ??= $this->loadMembers($tenantId);
+	}
+
+	/** @return array<string,array{role:string,left_at:?int}> */
+	private function loadMembers(int $tenantId): array {
+		$gid = $this->teamGroupOf($tenantId);
+		$group = $gid === null ? null : $this->groupManager->get($gid);
+		if ($group === null) {
+			return [];
+		}
+		$uids = static fn (array $users): array => array_values(array_map(static fn (IUser $u) => $u->getUID(), $users));
+		return MembershipResolver::members(
+			$uids($group->getUsers()),
+			$uids($this->subAdmin->getGroupsSubAdmins($group)),
+			$this->memberMapper->entriesByTenant($tenantId),
+		);
+	}
+
+	/** @return array<string,string> uid → Rolle, ohne Ausgetretene */
 	public function memberRoles(int $tenantId): array {
-		return $this->members[$tenantId] ??= $this->loadMemberRoles($tenantId);
+		return MembershipResolver::activeRoles($this->members($tenantId));
 	}
 
-	/** @return array<string,string> */
-	private function loadMemberRoles(int $tenantId): array {
-		$byRole = [];
-		foreach ($this->roleGroupsOf($tenantId) as $role => $gid) {
-			$group = $gid === null ? null : $this->groupManager->get($gid);
-			$byRole[$role] = $group === null
-				? []
-				: array_map(static fn (IUser $u) => $u->getUID(), array_values($group->getUsers()));
-		}
-		return MembershipResolver::strongestRoles($byRole);
+	/** @return list<string> Kennungen mit dieser Rolle, ohne Ausgetretene, sortiert */
+	public function withRole(int $tenantId, string $role): array {
+		$uids = array_map('strval', array_keys(array_filter($this->memberRoles($tenantId), static fn (string $r) => $r === $role)));
+		sort($uids, SORT_STRING);
+		return $uids;
 	}
 
 	/** @return list<string> Konten mit Rolle admin, nach Kennung */
 	public function adminsOf(int $tenantId): array {
-		$roles = array_filter($this->memberRoles($tenantId), static fn (string $r) => $r === Role::ADMIN);
-		$admins = array_map('strval', array_keys($roles));
-		sort($admins, SORT_STRING);
-		return $admins;
+		return $this->withRole($tenantId, Role::ADMIN);
 	}
 
 	/** Das Sicherungs-Konto: die Wahl, solange sie admin ist, sonst der erste admin. */
@@ -149,7 +141,33 @@ final class TenantService {
 		return $this->userManager->getDisplayName($uid) ?? $uid;
 	}
 
-	/** @return array{id:int,name:string,slug:string,groups:array<string,?string>,backup_owner:?string,settings:array{leads_see_calendars:bool,backup_required:bool}} */
+	/**
+	 * Ein Mitglied wie in GET /team.
+	 *
+	 * @param array{role:string,left_at:?int} $m
+	 * @return array{uid:string,display_name:string,role:string,left_at:?string}
+	 */
+	public function presentMember(string $uid, array $m): array {
+		return [
+			'uid' => $uid,
+			'display_name' => $this->displayName($uid),
+			'role' => $m['role'],
+			'left_at' => Time::iso($m['left_at']),
+		];
+	}
+
+	/** @return list<array{uid:string,display_name:string,role:string,left_at:?string}> alle Mitglieder, auch Ausgetretene */
+	public function presentMembers(int $tenantId): array {
+		$members = $this->members($tenantId);
+		$out = [];
+		// Rein numerische Kennungen kommen als int-Schlüssel.
+		foreach (array_map('strval', array_keys($members)) as $uid) {
+			$out[] = $this->presentMember($uid, $members[$uid]);
+		}
+		return $out;
+	}
+
+	/** @return array{id:int,name:string,slug:string,groups:array{team:?string},backup_owner:?string,settings:array{leads_see_calendars:bool,backup_required:bool}} */
 	public function presentTeam(Tenant $t): array {
 		return [
 			'id' => $t->getId(),

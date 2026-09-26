@@ -48,6 +48,12 @@
 }
 #timesister-admin ul.ts-list { margin: 0; padding: 0; list-style: none; }
 #timesister-admin ul.ts-list li { padding: 1px 0; }
+/* Mitglieder: Ausgetretene bleiben sichtbar, blass und durchgestrichen. */
+#timesister-admin ul.ts-members { margin-top: 6px; }
+#timesister-admin .ts-left > :first-child { text-decoration: line-through; color: var(--color-text-maxcontrast); }
+#timesister-admin .ts-form h4 { margin: 16px 0 4px; font-weight: bold; }
+#timesister-admin #ts-members { overflow-x: auto; }
+#timesister-admin #ts-members select { margin: 0; }
 
 @media (max-width: 640px) {
 	#timesister-admin .ts-grid { grid-template-columns: 1fr; }

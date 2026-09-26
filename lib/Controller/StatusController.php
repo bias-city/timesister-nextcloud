@@ -16,7 +16,7 @@ use OCP\IRequest;
 
 /** Lebenszeichen: melden jedes Mitglied für sich, lesen Verwaltung und Admin. */
 final class StatusController extends BaseController {
-	private const FIELDS = ['app_version', 'last_sync', 'last_backup', 'calendar_url'];
+	private const FIELDS = ['app_version', 'last_sync', 'last_backup', 'calendar_url', 'calendar_shared'];
 
 	public function __construct(
 		IRequest $request,

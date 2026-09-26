@@ -11,8 +11,11 @@ final class TeamRules {
 	public const SLUG_PATTERN = '/^[a-z0-9-]{2,32}$/';
 
 	/**
+	 * Fassung 2: `groups` = `{ team }`, eine bestehende Nextcloud-Gruppe.
+	 * Andere Schlüssel (Rollen- oder Konten-Gruppen aus Fassung 1) → 422.
+	 *
 	 * @param array<string,mixed> $in
-	 * @return array{name:string,slug:string,groups:array{user:string,lead:string,subadmin:string,admin:string},accounts:?string}
+	 * @return array{name:string,slug:string,groups:array{team:string}}
 	 */
 	public static function validate(array $in): array {
 		$name = $in['name'] ?? null;
@@ -25,40 +28,18 @@ final class TeamRules {
 		}
 		$groups = $in['groups'] ?? null;
 		if (!is_array($groups)) {
-			throw ApiException::invalid('Die vier Rollen-Gruppen fehlen.');
+			throw ApiException::invalid('Die Teamgruppe fehlt.');
 		}
-		$out = [];
-		foreach (Role::ALL as $role) {
-			$gid = $groups[$role] ?? null;
-			if (!is_string($gid) || $gid === '' || strlen($gid) > 64) {
-				throw ApiException::invalid("Die Gruppe für die Rolle „{$role}“ fehlt.");
+		foreach (array_keys($groups) as $key) {
+			if ($key !== Role::TEAM_GROUP) {
+				throw ApiException::invalid("Unbekannte Gruppe „{$key}“: Ein Team hat nur die Teamgruppe „team“.");
 			}
-			$out[$role] = $gid;
 		}
-		if (count(array_unique($out)) !== 4) {
-			throw ApiException::invalid('Jede Rolle braucht eine eigene Gruppe.');
+		$gid = $groups[Role::TEAM_GROUP] ?? null;
+		if (!is_string($gid) || $gid === '' || strlen($gid) > 64) {
+			throw ApiException::invalid('Die Teamgruppe fehlt.');
 		}
-		/** @var array{user:string,lead:string,subadmin:string,admin:string} $out */
-		return ['name' => $name, 'slug' => $slug, 'groups' => $out, 'accounts' => self::accounts($groups['accounts'] ?? null, $out)];
-	}
-
-	/**
-	 * Die optionale Konten-Gruppe: fehlt, null oder leer heisst keine. Sie
-	 * darf keine der vier Rollen-Gruppen desselben Teams sein.
-	 *
-	 * @param array<string,string> $roleGroups
-	 */
-	public static function accounts(mixed $gid, array $roleGroups): ?string {
-		if ($gid === null || $gid === '') {
-			return null;
-		}
-		if (!is_string($gid) || strlen($gid) > 64) {
-			throw ApiException::invalid('Die Konten-Gruppe ist ungültig.');
-		}
-		if (in_array($gid, $roleGroups, true)) {
-			throw ApiException::invalid('Die Konten-Gruppe darf keine Rollen-Gruppe des Teams sein.');
-		}
-		return $gid;
+		return ['name' => $name, 'slug' => $slug, 'groups' => [Role::TEAM_GROUP => $gid]];
 	}
 
 	/**

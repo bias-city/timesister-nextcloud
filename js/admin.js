@@ -8,9 +8,9 @@
 (function () {
 	'use strict'
 
+	// Fassung 2: eine Teamgruppe; admin ist, wer sie in Nextcloud verwaltet.
 	const ROLES = ['user', 'lead', 'subadmin', 'admin']
-	// Die optionale Konten-Gruppe: alle Konten des Teams, keine Rolle.
-	const ACCOUNTS = 'accounts'
+	const APP_ROLES = ['user', 'lead', 'subadmin']
 
 	/** Ohne OC-Globals: das Token steht im Kopf der Seite. */
 	function requestToken() {
@@ -144,6 +144,11 @@
 		return a && a.display_name && a.display_name !== uid ? a.display_name + ' (' + uid + ')' : uid
 	}
 
+	/** Anzeigename (Kennung) eines Mitglieds. */
+	function memberLabel(m) {
+		return m.display_name && m.display_name !== m.uid ? m.display_name + ' (' + m.uid + ')' : m.uid
+	}
+
 	function formatDay(day) {
 		const d = new Date(day + 'T12:00:00Z')
 		if (!day || isNaN(d)) {
@@ -166,15 +171,19 @@
 		const rows = teams.map((t) => {
 			const st = stateOf(t.id)
 			const broken = st && st.broken
-			const roles = h('div', { class: 'ts-roles' }, ROLES.map((role) => [
-				h('span', { text: tr('role_' + role) }),
-				h('span', { class: (st && st.missing_roles && st.missing_roles.includes(role)) ? 'ts-bad' : '', text: t.groups[role] ? groupLabel(t.groups[role]) : '–' }),
-				h('span', { class: 'ts-count', text: String(t.counts ? t.counts[role] : 0) }),
-			]), t.groups[ACCOUNTS] ? [
-				h('span', { class: 'ts-muted', text: tr('accounts_group') }),
-				h('span', { text: groupLabel(t.groups[ACCOUNTS]) }),
-				h('span', { class: 'ts-count', text: String(t.counts && t.counts[ACCOUNTS] !== undefined ? t.counts[ACCOUNTS] : 0) }),
-			] : null)
+			const c = t.counts || {}
+			const group = h('div', { class: 'ts-roles' },
+				h('span', { text: tr('team_group') }),
+				h('span', { class: (st && st.missing_groups && st.missing_groups.includes('team')) ? 'ts-bad' : '', text: t.groups.team ? groupLabel(t.groups.team) : '–' }),
+				h('span', { class: 'ts-count', text: String(ROLES.reduce((n, r) => n + (c[r] || 0), 0)) }))
+			const adminList = (st && st.admins) || []
+			const admins = h('div', { class: 'ts-owner' },
+				h('span', { class: 'ts-muted', text: tr('admins') + ': ' }),
+				adminList.length ? h('span', { text: adminList.map((a) => adminLabel(st, a.uid)).join(', ') }) : h('span', { class: 'ts-bad', text: tr('no_admin') }))
+			// Alle Mitglieder mit Rolle; Ausgetretene bleiben sichtbar, markiert.
+			const members = h('ul', { class: 'ts-list ts-members' }, ((st && st.members) || []).map((m) => h('li', { class: m.left_at ? 'ts-left' : '' },
+				h('span', { text: memberLabel(m) + ' ' }),
+				h('span', { class: 'ts-muted', text: tr('role_' + m.role) + (m.left_at ? ' · ' + tr('left_on', { date: formatDay(m.left_at.slice(0, 10)) }) : '') }))))
 			const owner = h('div', { class: 'ts-owner' },
 				h('span', { class: 'ts-muted', text: tr('backups_stored_with') + ' ' }),
 				t.backup_owner ? h('span', { text: adminLabel(st, t.backup_owner) }) : h('span', { class: 'ts-bad', text: tr('owner_none') }))
@@ -187,7 +196,7 @@
 					h('div', { class: 'ts-slug', text: t.slug }),
 					broken ? h('div', { class: 'ts-bad', text: tr('broken') }) : null,
 				),
-				h('td', {}, roles, owner, settings),
+				h('td', {}, group, admins, members, owner, settings),
 				h('td', { class: 'ts-right' },
 					h('button', { type: 'button', class: 'button', onclick: () => openForm(t) }, tr('edit')),
 					' ',
@@ -202,7 +211,7 @@
 			)
 		})
 		box.append(h('table', {},
-			h('thead', {}, h('tr', {}, h('th', { text: tr('team') }), h('th', { text: tr('roles_col') }), h('th', {}))),
+			h('thead', {}, h('tr', {}, h('th', { text: tr('team') }), h('th', { text: tr('group_col') }), h('th', {}))),
 			h('tbody', {}, rows),
 		))
 	}
@@ -218,8 +227,9 @@
 		const rows = teams.map((t) => {
 			const st = stateOf(t.id)
 			if (!st) {
-				return h('tr', {}, h('td', { text: t.name }), h('td', { class: 'ts-muted', colspan: 5, text: tr('new_after_reload') }))
+				return h('tr', {}, h('td', { text: t.name }), h('td', { class: 'ts-muted', colspan: 6, text: tr('new_after_reload') }))
 			}
+			const calendars = h('span', { class: st.calendar_not_shared > 0 ? 'ts-bad' : '', text: tr('not_shared', { n: st.calendar_not_shared || 0 }) })
 			const backups = h('ul', { class: 'ts-list' },
 				h('li', { text: tr('consent_count', { n: st.backup_consent, total: st.member_count }) }),
 				h('li', { class: st.without_backup_week > 0 ? 'ts-bad' : '', text: tr('without_week', { n: st.without_backup_week }) }),
@@ -233,6 +243,7 @@
 				h('td', { class: 'ts-num', text: String(st.records) }),
 				h('td', { text: formatTime(st.last_modified) }),
 				h('td', { class: 'ts-num', text: String(st.revision) }),
+				h('td', {}, calendars),
 				h('td', {}, backups),
 				h('td', {}, silent),
 			)
@@ -243,6 +254,7 @@
 				h('th', { text: tr('records') }),
 				h('th', { text: tr('last_change') }),
 				h('th', { text: tr('revision') }),
+				h('th', { text: tr('calendars_col') }),
 				h('th', { text: tr('backups_col') }),
 				h('th', { text: tr('silent') }),
 			)),
@@ -251,10 +263,10 @@
 	}
 
 	function fillSelects(current) {
-		for (const role of [...ROLES, ACCOUNTS]) {
-			const sel = $('ts-g-' + role)
+		for (const key of ['team']) {
+			const sel = $('ts-g-' + key)
 			sel.textContent = ''
-			sel.append(h('option', { value: '', text: role === ACCOUNTS ? tr('no_group') : tr('choose_group') }))
+			sel.append(h('option', { value: '', text: tr('choose_group') }))
 			for (const g of overview.groups) {
 				const taken = g.team !== null && g.team !== undefined && g.team !== (editing || -1)
 				sel.append(h('option', {
@@ -263,7 +275,7 @@
 					disabled: taken,
 				}))
 			}
-			sel.value = (current && current.groups && current.groups[role]) || ''
+			sel.value = (current && current.groups && current.groups[key]) || ''
 		}
 	}
 
@@ -281,6 +293,61 @@
 		sel.disabled = !st
 	}
 
+	/** Admins (nur lesen: sie kommen aus Nextclouds Benutzerverwaltung). */
+	function fillAdmins(team) {
+		const st = team ? stateOf(team.id) : null
+		const list = (st && st.admins) || []
+		const box = $('ts-admins')
+		box.textContent = ''
+		box.append(list.length
+			? h('ul', { class: 'ts-list' }, list.map((a) => h('li', { text: adminLabel(st, a.uid) })))
+			: h('span', { class: 'ts-muted', text: tr('no_admin') }))
+	}
+
+	/** Mitglieder mit App-Rolle und Austritt; ändern erst beim Sichern. */
+	function fillMembers(team) {
+		const box = $('ts-members')
+		box.textContent = ''
+		const st = team ? stateOf(team.id) : null
+		if (!st) {
+			box.append(h('p', { class: 'ts-muted', text: tr('members_after_save') }))
+			return
+		}
+		if (!st.members || st.members.length === 0) {
+			box.append(h('p', { class: 'ts-muted', text: tr('no_members') }))
+			return
+		}
+		const rows = st.members.map((m) => {
+			const name = memberLabel(m)
+			const role = m.role === 'admin'
+				? h('span', { text: tr('role_admin') })
+				: h('select', { 'data-uid': m.uid, 'data-was': m.role, 'aria-label': tr('role_of', { name }) },
+					APP_ROLES.map((r) => h('option', { value: r, text: tr('role_' + r), selected: r === m.role })))
+			const left = h('input', { type: 'checkbox', 'data-uid': m.uid, 'data-was': m.left_at ? '1' : '0', checked: Boolean(m.left_at), 'aria-label': tr('left_of', { name }) })
+			return h('tr', { class: m.left_at ? 'ts-left' : '' }, h('td', { text: name }), h('td', {}, role), h('td', {}, left))
+		})
+		box.append(h('table', {},
+			h('thead', {}, h('tr', {}, h('th', { text: tr('member') }), h('th', { text: tr('role') }), h('th', { text: tr('left') }))),
+			h('tbody', {}, rows)))
+	}
+
+	/** Geänderte Mitglieder: uid → { role?, left? }. */
+	function memberChanges() {
+		const out = new Map()
+		const put = (uid, key, value) => out.set(uid, Object.assign(out.get(uid) || {}, { [key]: value }))
+		for (const sel of $('ts-members').querySelectorAll('select[data-uid]')) {
+			if (sel.value !== sel.dataset.was) {
+				put(sel.dataset.uid, 'role', sel.value)
+			}
+		}
+		for (const box of $('ts-members').querySelectorAll('input[type=checkbox][data-uid]')) {
+			if (box.checked !== (box.dataset.was === '1')) {
+				put(box.dataset.uid, 'left', box.checked)
+			}
+		}
+		return out
+	}
+
 	function openForm(team) {
 		editing = team ? team.id : null
 		$('ts-form-title').textContent = team ? tr('edit_team') : tr('new_team')
@@ -288,6 +355,8 @@
 		$('ts-slug').value = team ? team.slug : ''
 		$('ts-error').textContent = ''
 		fillSelects(team)
+		fillAdmins(team)
+		fillMembers(team)
 		fillOwner(team)
 		// Neues Team: die Standardwerte des Vertrags (Leitung sieht alles, keine Anordnung).
 		const s = (team && team.settings) || {}
@@ -307,8 +376,7 @@
 		const body = {
 			name: $('ts-name').value.trim(),
 			slug: $('ts-slug').value.trim(),
-			// accounts leer: das Team hat keine Konten-Gruppe (beim Ändern: entfernen).
-			groups: Object.fromEntries([...ROLES, ACCOUNTS].map((role) => [role, $('ts-g-' + role).value])),
+			groups: { team: $('ts-g-team').value },
 		}
 		body.settings = {
 			leads_see_calendars: $('ts-leads-see').checked,
@@ -324,7 +392,16 @@
 			if (editing === null) {
 				await api('POST', '/admin/teams', body)
 			} else {
+				const changes = memberChanges()
 				await api('PUT', '/admin/teams/' + editing, body)
+				// Rollen und Austritte über denselben Dienst wie PUT /team/members.
+				for (const [uid, change] of changes) {
+					try {
+						await api('PUT', '/admin/teams/' + editing + '/members/' + encodeURIComponent(uid), change)
+					} catch (e) {
+						throw new Error(tr('member_failed', { name: uid, message: e.message }))
+					}
+				}
 			}
 			// Zustand und Gruppenbelegung kommen frisch vom Server.
 			window.location.reload()

@@ -7,6 +7,8 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Controller;
 
 use OCA\TimeSister\Service\ApiException;
+use OCA\TimeSister\Service\MemberService;
+use OCA\TimeSister\Service\Role;
 use OCA\TimeSister\Service\TeamAdminService;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
@@ -27,6 +29,7 @@ final class AdminTeamController extends BaseController {
 		IRequest $request,
 		TenantService $tenants,
 		private TeamAdminService $admin,
+		private MemberService $members,
 		private IGroupManager $groupManager,
 		private IUserSession $userSession,
 	) {
@@ -73,11 +76,29 @@ final class AdminTeamController extends BaseController {
 		});
 	}
 
-	private function requireAdmin(): void {
+	/**
+	 * PUT /admin/teams/{id}/members/{uid} – Rolle und Austritt von der
+	 * Admin-Seite; derselbe Dienst wie PUT /team/members, mit den Rechten
+	 * eines Team-Admins.
+	 */
+	#[ApiRoute(verb: 'PUT', url: '/api/v1/admin/teams/{id}/members/{uid}', requirements: ['id' => '\d+'])]
+	#[UserRateLimit(limit: 300, period: 60)]
+	public function updateMember(int $id, string $uid): DataResponse {
+		return $this->run(function () use ($id, $uid) {
+			$actor = $this->requireAdmin();
+			$this->admin->find($id);
+			$in = array_intersect_key($this->request->getParams(), array_flip(['role', 'left']));
+			return $this->members->update($id, $actor, Role::ADMIN, $uid, $in);
+		});
+	}
+
+	/** @return string die Kennung des Nextcloud-Admins */
+	private function requireAdmin(): string {
 		$user = $this->userSession->getUser();
 		if ($user === null || !$this->groupManager->isAdmin($user->getUID())) {
 			throw ApiException::forbidden('Teams verwalten nur Nextcloud-Admins.');
 		}
+		return $user->getUID();
 	}
 
 	/** @return array<string,mixed> */

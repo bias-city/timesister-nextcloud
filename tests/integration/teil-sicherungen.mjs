@@ -162,7 +162,7 @@ async function testkonto() {
 	const cal = `zeit-${uid}`
 	const probe = `tsprobe-${RUN}`
 	const adminDir = `TimeSister-Sicherungen/${uid} (${uid})`
-	await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/users', { userid: uid, password: who.pass, groups: ['pb-mitarbeitende'] })
+	await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/users', { userid: uid, password: who.pass, groups: ['pb-team'] })
 	try {
 		const mk = await dav(who, 'MKCALENDAR', `calendars/${uid}/${cal}/`)
 		const ev = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//TimeSister//Probe//DE\r\nBEGIN:VEVENT\r\nUID:${probe}\r\nDTSTAMP:20260926T080000Z\r\nDTSTART:20260926T080000Z\r\nDTEND:20260926T090000Z\r\nSUMMARY:Probe\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`
@@ -247,13 +247,13 @@ async function testteam() {
 		check('/team nennt dieselben settings', JSON.stringify(team?.settings) === JSON.stringify(me?.settings), team?.settings)
 	}
 	head('Sicherungs-Konto und Team-Einstellungen (eigenes Testteam)')
-	const g = { user: `bo-${RUN}-u`, lead: `bo-${RUN}-l`, subadmin: `bo-${RUN}-s`, admin: `bo-${RUN}-a` }
+	const g = { team: `bo-${RUN}-t` }
 	const [first, second] = [`a${RUN}`, `z${RUN}`]
-	for (const gid of Object.values(g)) {
-		await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/groups', { groupid: gid })
-	}
+	await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/groups', { groupid: g.team })
+	// Admin des Teams: Gruppenadmin der Teamgruppe.
 	for (const uid of [first, second]) {
-		await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/users', { userid: uid, password: `Test-2026-${uid}!`, groups: [g.admin] })
+		await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/users', { userid: uid, password: `Test-2026-${uid}!`, groups: [g.team] })
+		await ocs(ADMIN, 'POST', `/ocs/v2.php/cloud/users/${uid}/subadmins`, { groupid: g.team })
 	}
 	let id
 	try {

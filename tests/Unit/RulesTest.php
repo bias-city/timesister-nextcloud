@@ -71,7 +71,11 @@ class RulesTest extends TestCase {
 		]);
 		$this->assertSame(gmmktime(8, 15, 0, 9, 26, 2026), $v['last_sync']);
 		$this->assertSame('0.2.0', $v['app_version']);
-		$this->assertSame(['app_version' => null, 'last_sync' => null, 'last_backup' => null, 'calendar_url' => null], StatusRules::validate([]));
+		$this->assertSame(['app_version' => null, 'last_sync' => null, 'last_backup' => null, 'calendar_url' => null, 'calendar_shared' => null], StatusRules::validate([]));
+		$this->assertTrue(StatusRules::validate(['calendar_shared' => true])['calendar_shared']);
+		$this->assertFalse(StatusRules::validate(['calendar_shared' => false])['calendar_shared']);
+		$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['calendar_shared' => 1])));
+		$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['calendar_shared' => 'true'])));
 		$this->assertSame(gmmktime(6, 15, 0, 9, 26, 2026), StatusRules::validate(['last_sync' => '2026-09-26T08:15:00+02:00'])['last_sync']);
 		$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['calendar_url' => 'javascript:alert(1)'])));
 		$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['calendar_url' => 'file:///etc/passwd'])));
@@ -83,35 +87,25 @@ class RulesTest extends TestCase {
 	}
 
 	public function testTeam(): void {
-		$ok = ['name' => ' Planungsbüro ', 'slug' => 'pb', 'groups' => ['user' => 'a', 'lead' => 'b', 'subadmin' => 'c', 'admin' => 'd']];
+		$ok = ['name' => ' Planungsbüro ', 'slug' => 'pb', 'groups' => ['team' => 'pb-team']];
 		$v = TeamRules::validate($ok);
 		$this->assertSame('Planungsbüro', $v['name']);
-		$this->assertSame(['user' => 'a', 'lead' => 'b', 'subadmin' => 'c', 'admin' => 'd'], $v['groups']);
+		$this->assertSame(['team' => 'pb-team'], $v['groups']);
 		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate(['slug' => 'Pb'] + $ok)));
 		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate(['slug' => 'p'] + $ok)));
 		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate(['slug' => str_repeat('a', 33)] + $ok)));
 		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate(['name' => '  '] + $ok)));
-		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate(['groups' => ['user' => 'a', 'lead' => 'b', 'subadmin' => 'c']] + $ok)));
-		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate(['groups' => ['user' => 'a', 'lead' => 'a', 'subadmin' => 'c', 'admin' => 'd']] + $ok)));
 	}
 
-	public function testTeamAccountsGroup(): void {
-		$four = ['user' => 'a', 'lead' => 'b', 'subadmin' => 'c', 'admin' => 'd'];
-		$with = fn (mixed $acc): array => ['name' => 'T', 'slug' => 'tt', 'groups' => $four + ['accounts' => $acc]];
-		// Fehlt, null oder leer: keine Konten-Gruppe; die vier Rollen bleiben unter groups.
-		$this->assertNull(TeamRules::validate(['name' => 'T', 'slug' => 'tt', 'groups' => $four])['accounts']);
-		$this->assertNull(TeamRules::validate($with(null))['accounts']);
-		$this->assertNull(TeamRules::validate($with(''))['accounts']);
-		$v = TeamRules::validate($with('e'));
-		$this->assertSame('e', $v['accounts']);
-		$this->assertSame($four, $v['groups']);
-		// Keine der vier Rollen-Gruppen desselben Teams.
-		foreach ($four as $gid) {
-			$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate($with($gid))));
+	/** Fassung 2: nur `team`; Rollen-, Konten- und Zeit-Gruppen gibt es nicht mehr. */
+	public function testTeamGroupOnly(): void {
+		$with = fn (mixed $groups): array => ['name' => 'T', 'slug' => 'tt', 'groups' => $groups];
+		foreach ([[], ['team' => ''], ['team' => 7], ['team' => str_repeat('g', 65)], 'pb-team', null] as $bad) {
+			$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate($with($bad))), json_encode($bad));
 		}
-		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate($with(7))));
-		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate($with(['e']))));
-		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate($with(str_repeat('e', 65)))));
+		foreach (['user', 'lead', 'subadmin', 'admin', 'accounts', 'zeit'] as $old) {
+			$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate($with(['team' => 'pb-team', $old => 'x']))), $old);
+		}
 	}
 
 	public function testTeamSettings(): void {
