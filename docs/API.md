@@ -37,8 +37,20 @@ Fehlt der Eintrag, ist die App nicht installiert oder ausgeschaltet.
 - Ein **Team** hat `id`, `name`, `slug` und genau vier Rollen-Gruppen:
   `user`, `lead`, `subadmin`, `admin`, je eine bestehende Nextcloud-Gruppe.
   Eine Gruppe gehört zu höchstens einem Team.
+- Dazu optional eine **Konten-Gruppe** `accounts`, ebenfalls eine bestehende
+  Nextcloud-Gruppe. Alle Konten des Teams stehen darin; sie ist **keine**
+  Rolle. Die Team-Admins verwalten sie als Gruppenadmins mit. So bleibt jedes
+  Konto in einer ihrer Gruppen, und sie können jede Rollen-Gruppe entziehen
+  (Nextcloud-Regel OCS 105, siehe Nachträge). Sie darf keinem anderen Team
+  gehören, weder als Rolle noch als Konten-Gruppe (`409 conflict`), und keine
+  der vier Rollen-Gruppen desselben Teams sein (`422 invalid`).
 - Ein Konto gehört zu dem Team, in dessen Rollen-Gruppen es steht. Steht es in
   Gruppen von zwei Teams: `409 ambiguous_team`. In keiner: `403 no_team`.
+  Die Konten-Gruppe zählt dafür nie: Wer nur in ihr steht, bekommt
+  `403 no_team`; wer in der Konten-Gruppe von Team A und in einer Rollen-Gruppe
+  von Team B steht, gehört zu B.
+- `groups` in `/me`, `/team` und `/admin/teams` nennt `accounts` nur, wenn
+  das Team eine Konten-Gruppe hat; sonst fehlt das Feld.
 - Die Rolle ist die stärkste Rolle aus diesen Gruppen:
   `admin` > `subadmin` > `lead` > `user`.
 - Nextclouds Admin ist **nicht** automatisch Rolle in einem Team.
@@ -98,11 +110,13 @@ Nicht Lesbares erscheint in Listen nicht; direkter Zugriff gibt `403 forbidden`.
   "team": { "id": 1, "name": "Planungsbüro", "slug": "pb" },
   "role": "lead",
   "groups": { "user": "pb-mitarbeitende", "lead": "pb-leitung",
-              "subadmin": "pb-verwaltung", "admin": "pb-admin" },
+              "subadmin": "pb-verwaltung", "admin": "pb-admin",
+              "accounts": "pb-konten" },
   "person_key": "alice", "revision": 118, "server_time": "2026-09-26T08:15:00Z" }
 ```
 
 `person_key` ist `null`, wenn es keinen eigenen Personendatensatz gibt.
+`groups.accounts` fehlt, wenn das Team keine Konten-Gruppe hat.
 
 ### `GET /records?since=<revision>`
 
@@ -211,11 +225,13 @@ Alle Mitglieder des Teams, auch ohne Lebenszeichen:
 
 ```json
 { "id": 1, "name": "Planungsbüro", "slug": "pb",
-  "groups": { "user": "…", "lead": "…", "subadmin": "…", "admin": "…" },
+  "groups": { "user": "…", "lead": "…", "subadmin": "…", "admin": "…", "accounts": "…" },
   "members": { "user": ["carol"], "lead": ["alice"], "subadmin": [], "admin": ["pbadmin"] } }
 ```
 
-`members` nennt jedes Konto nur unter seiner stärksten Rolle.
+`members` nennt jedes Konto nur unter seiner stärksten Rolle. Konten, die nur
+in der Konten-Gruppe stehen, sind keine Mitglieder und fehlen hier.
+`groups.accounts` wie bei `/me`.
 
 ## Verwaltung der Teams (nur Nextcloud-Admins)
 
@@ -223,9 +239,9 @@ Für die Admin-Seite und die Einrichtungsskripte, unter demselben Basis-Pfad:
 
 | Methode | Pfad | Rumpf |
 |---|---|---|
-| GET | `/admin/teams` | – → Liste wie `GET /team`, ohne `members`, mit `counts` je Rolle |
-| POST | `/admin/teams` | `{ "name", "slug", "groups": { "user", "lead", "subadmin", "admin" } }` |
-| PUT | `/admin/teams/{id}` | wie POST |
+| GET | `/admin/teams` | – → Liste wie `GET /team`, ohne `members`, mit `counts` je Rolle, dazu `counts.accounts` (Mitglieder der Konten-Gruppe), wenn gesetzt |
+| POST | `/admin/teams` | `{ "name", "slug", "groups": { "user", "lead", "subadmin", "admin", "accounts"? } }` |
+| PUT | `/admin/teams/{id}` | wie POST; fehlt `accounts` oder ist es leer, entfällt die Konten-Gruppe |
 | DELETE | `/admin/teams/{id}` | nur ohne Datensätze, sonst `409` |
 
 Die Gruppen müssen existieren (`422 invalid`) und dürfen keinem anderen Team
@@ -271,7 +287,9 @@ Präzisierungen, die die App so umsetzt. Nichts oben Stehendes ändert sich.
   Liste (mit `counts`), `DELETE` mit `{ "id", "deleted": true }`. Löschen nur
   ohne Datensätze (auch Grabsteine) **und ohne Sicherungen**, sonst `409`.
   Jede Rolle braucht eine eigene Gruppe (`422`). Eine gelöschte Rollen-Gruppe
-  markiert das Team als „Zuordnung gebrochen“ (Admin-Seite, rot).
+  markiert das Team als „Zuordnung gebrochen“ (Admin-Seite, rot). Eine
+  gelöschte Konten-Gruppe verliert nur ihre Zuordnung; das Team gilt **nicht**
+  als gebrochen, Nextclouds Log vermerkt es.
 - **Drosselung:** Schreibende Endpunkte höchstens 300 Aufrufe je Minute und
   Konto, `POST /backups` 60; darüber antwortet Nextcloud mit `429`.
 
@@ -279,7 +297,10 @@ Präzisierungen, die die App so umsetzt. Nichts oben Stehendes ändert sich.
   hat als `data` `{"entries": [{"from", "weekly_hours", "note"}]}`,
   `setting/settings` hat `{"vacation_code": …}`.
 - **Gruppenadmins:** Team-Admins und Verwaltung brauchen in Nextcloud
-  Gruppenadmin-Rechte auf die vier Gruppen ihres Teams. Rollen, Konten und
-  Austritte laufen über Nextclouds Provisioning-API. Nextcloud lässt
-  Gruppenadmins niemanden aus der letzten Gruppe nehmen, die sie verwalten
-  (OCS 105); das kann nur ein Nextcloud-Admin.
+  Gruppenadmin-Rechte auf die vier Gruppen ihres Teams und auf die
+  Konten-Gruppe. Rollen, Konten und Austritte laufen über Nextclouds
+  Provisioning-API. Nextcloud lässt Gruppenadmins niemanden aus der letzten
+  Gruppe nehmen, die sie verwalten (OCS 105). Mit der Konten-Gruppe bleibt das
+  Konto in einer verwalteten Gruppe: Alle vier Rollen-Gruppen lassen sich
+  entziehen, danach gibt `/me` für das Konto `403 no_team`. Ohne
+  Konten-Gruppe kann die letzte Rolle nur ein Nextcloud-Admin entziehen.

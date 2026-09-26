@@ -80,6 +80,42 @@ class MembershipResolverTest extends TestCase {
 		MembershipResolver::resolve(['x'], $rows);
 	}
 
+	/** Beide Teams mit Konten-Gruppe, wie im Seed. */
+	private const WITH_ACCOUNTS = [
+		...self::ROWS,
+		['tenant_id' => 1, 'role' => Role::ACCOUNTS, 'gid' => 'pb-konten'],
+		['tenant_id' => 2, 'role' => Role::ACCOUNTS, 'gid' => 'at-konten'],
+	];
+
+	public function testAccountsGroupIsNoRole(): void {
+		$this->assertFalse(Role::isValid(Role::ACCOUNTS));
+		$this->assertNotContains(Role::ACCOUNTS, Role::ALL);
+	}
+
+	public function testOnlyInAccountsGroupIsNoTeam(): void {
+		try {
+			MembershipResolver::resolve(['pb-konten'], self::WITH_ACCOUNTS);
+			$this->fail('no_team erwartet');
+		} catch (ApiException $e) {
+			$this->assertSame('no_team', $e->getErrorCode());
+		}
+	}
+
+	public function testAccountsGroupDoesNotChangeRole(): void {
+		$this->assertSame(['tenant_id' => 1, 'role' => 'user'], MembershipResolver::resolve(['pb-konten', 'pb-mitarbeitende'], self::WITH_ACCOUNTS));
+		$this->assertSame(['tenant_id' => 1, 'role' => 'admin'], MembershipResolver::resolve(['pb-admin', 'pb-konten'], self::WITH_ACCOUNTS));
+	}
+
+	public function testAccountsGroupOfOtherTeamIsNotAmbiguous(): void {
+		// Konten-Gruppe von pb, Rollen-Gruppe von at: gehört zu at.
+		$this->assertSame(['tenant_id' => 2, 'role' => 'lead'], MembershipResolver::resolve(['pb-konten', 'at-leitung'], self::WITH_ACCOUNTS));
+	}
+
+	public function testStrongestRolesIgnoresAccounts(): void {
+		$roles = MembershipResolver::strongestRoles(['user' => ['carol'], Role::ACCOUNTS => ['carol', 'nur-konto']]);
+		$this->assertSame(['carol' => 'user'], $roles);
+	}
+
 	public function testStrongestRolesListsEachAccountOnce(): void {
 		$roles = MembershipResolver::strongestRoles([
 			'user' => ['carol', 'alice', 'bob', 'dora'],

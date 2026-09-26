@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Legt die Testumgebung an: zwei Teams mit je vier Rollen-Gruppen und die
-// Konten aus lib.mjs. Nur über Nextclouds Provisioning-API und die
-// Admin-Endpunkte der App – kein occ, kein SQL. Idempotent.
+// Legt die Testumgebung an: zwei Teams mit je vier Rollen-Gruppen, einer
+// Konten-Gruppe (alle Konten des Teams, keine Rolle) und die Konten aus
+// lib.mjs. Nur über Nextclouds Provisioning-API und die Admin-Endpunkte der
+// App – kein occ, kein SQL. Idempotent; nimmt nie jemanden aus einer Gruppe.
 //
 //   NC_URL=http://localhost:8081 node tests/integration/seed.mjs
-import { ACCOUNTS, ADMIN, GROUP_LABEL, TEAMS, groupsOf, ocs, pw } from './lib.mjs'
+import { ACCOUNTS, ACCOUNTS_LABEL, ADMIN, GROUP_LABEL, TEAMS, accountsOf, groupsOf, ocs, pw, teamGroupsOf } from './lib.mjs'
 
 const log = (ok, msg) => console.log(`    ${ok ? '\x1b[32mok\x1b[0m' : '\x1b[33m--\x1b[0m'}  ${msg}`)
 
@@ -43,7 +44,7 @@ async function ensureUser(uid, name, groups) {
 }
 
 async function ensureTeam(team) {
-	const body = { name: team.name, slug: team.slug, groups: groupsOf(team.prefix) }
+	const body = { name: team.name, slug: team.slug, groups: teamGroupsOf(team.prefix) }
 	const list = await ocs(ADMIN, 'GET', '/admin/teams')
 	if (list.status !== 200) {
 		throw new Error(`GET /admin/teams: HTTP ${list.status} – ist die App aktiv?`)
@@ -63,11 +64,12 @@ for (const team of TEAMS) {
 	for (const [role, gid] of Object.entries(groupsOf(team.prefix))) {
 		await ensureGroup(gid, `${team.name} – ${GROUP_LABEL[role]}`)
 	}
+	await ensureGroup(accountsOf(team.prefix), `${team.name} – ${ACCOUNTS_LABEL}`)
 }
 console.log('\x1b[1;34m==>\x1b[0m Konten')
 for (const [uid, name, slug, role] of ACCOUNTS) {
 	const g = groupsOf(slug)
-	await ensureUser(uid, name, role === 'user' ? [g.user] : [g.user, g[role]])
+	await ensureUser(uid, name, role === 'user' ? [g.user, accountsOf(slug)] : [g.user, g[role], accountsOf(slug)])
 }
 console.log('\x1b[1;34m==>\x1b[0m Teams über die Admin-Endpunkte')
 for (const team of TEAMS) {

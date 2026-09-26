@@ -9,6 +9,7 @@ namespace OCA\TimeSister\Service;
 /**
  * Bestimmt Team und Rolle aus den Gruppen eines Kontos. Rein.
  *
+ * - Nur die vier Rollen-Gruppen zählen, die Konten-Gruppe nie.
  * - keine Rollen-Gruppe eines Teams: `no_team`
  * - Rollen-Gruppen zweier Teams: `ambiguous_team`
  * - sonst die stärkste Rolle aus den Gruppen dieses Teams
@@ -16,7 +17,7 @@ namespace OCA\TimeSister\Service;
 final class MembershipResolver {
 	/**
 	 * @param list<string> $userGroupIds Gruppen des Kontos
-	 * @param list<array{tenant_id:int,role:string,gid:string}> $roleGroups alle Rollen-Gruppen aller Teams
+	 * @param list<array{tenant_id:int,role:string,gid:string}> $roleGroups alle Zeilen aus ts_role_groups, auch Konten-Gruppen
 	 * @return array{tenant_id:int,role:string}
 	 * @throws ApiException
 	 */
@@ -24,6 +25,7 @@ final class MembershipResolver {
 		$mine = array_flip($userGroupIds);
 		$found = [];
 		foreach ($roleGroups as $rg) {
+			// Role::isValid schliesst die Konten-Gruppe (Role::ACCOUNTS) aus.
 			if (!isset($mine[$rg['gid']]) || !Role::isValid($rg['role'])) {
 				continue;
 			}

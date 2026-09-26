@@ -1,0 +1,143 @@
+# Nach Nextclouds Vorlage appstore-build-publish (github.com/nextcloud/.github, workflow-templates).
+# Bei einem veröffentlichten GitHub-Release: Paket ohne .nextcloudignore bauen,
+# mit dem App-Zertifikat signieren, ans Release hängen und in den App Store laden.
+# Aus, solange eines der Secrets APP_PRIVATE_KEY, APP_PUBLIC_CRT, APPSTORE_TOKEN fehlt.
+# Kein Composer, kein npm: Die App hat keine Laufzeit-Abhängigkeiten und keinen Build.
+# SPDX-FileCopyrightText: 2021-2024 Nextcloud GmbH and Nextcloud contributors
+# SPDX-License-Identifier: MIT
+
+name: Build and publish app release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appstore-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    if: github.repository == 'bias-city/timesister-nextcloud'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      enabled: ${{ steps.k.outputs.enabled }}
+    steps:
+      - id: k
+        env:
+          KEY: ${{ secrets.APP_PRIVATE_KEY }}
+          CRT: ${{ secrets.APP_PUBLIC_CRT }}
+          TOKEN: ${{ secrets.APPSTORE_TOKEN }}
+        run: |
+          if [ -n "$KEY" ] && [ -n "$CRT" ] && [ -n "$TOKEN" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else echo "enabled=false" >> "$GITHUB_OUTPUT"; echo "::notice::App Store ist aus: Secrets APP_PRIVATE_KEY, APP_PUBLIC_CRT und APPSTORE_TOKEN fehlen (UPDATE.md)."; fi
+
+  build_and_publish:
+    needs: gate
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      APP_NAME: timesister
+
+    steps:
+      - name: Check actor permission
+        uses: skjnldsv/check-actor-permission@69e92a3c4711150929bca9fcf34448c5bf5526e7 # v3.0
+        with:
+          require: write
+
+      - name: Set app version
+        run: echo "APP_VERSION=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: ${{ env.APP_NAME }}
+
+      - name: Validate app version against tag
+        run: |
+          VERSION=$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' "$APP_NAME/appinfo/info.xml")
+          NC_MIN=$(sed -n 's:.*<nextcloud min-version="\([0-9]*\)".*:\1:p' "$APP_NAME/appinfo/info.xml")
+          [ "$APP_VERSION" = "v$VERSION" ] || { echo "::error::Tag $APP_VERSION passt nicht zu info.xml ($VERSION)."; exit 1; }
+          echo "NC_MIN=$NC_MIN" >> "$GITHUB_ENV"
+
+      - name: Get php version
+        id: php-versions
+        uses: nextcloud-libraries/nextcloud-version-matrix@cd0211ffcef1065e2020cd579e4843b8746e7a58 # v1.3.3
+        with:
+          filename: ${{ env.APP_NAME }}/appinfo/info.xml
+
+      - name: Set up php ${{ steps.php-versions.outputs.php-min }}
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: ${{ steps.php-versions.outputs.php-min }}
+          coverage: none
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package ${{ env.APP_NAME }} ${{ env.APP_VERSION }}
+        # .nextcloudignore wie bei rsync: führender / = Wurzel der App.
+        run: |
+          mkdir -p "build/artifacts/$APP_NAME"
+          rsync -a --exclude-from="$APP_NAME/.nextcloudignore" "$APP_NAME/" "build/artifacts/$APP_NAME/"
+          find "build/artifacts/$APP_NAME" -type f | sort
+
+      - name: Check server download link for ${{ env.NC_MIN }}
+        run: |
+          DOWNLOAD_URL=$(curl -s "https://updates.nextcloud.com/updater_server/latest?channel=beta&version=$NC_MIN" | jq -r '.downloads.zip[0]')
+          echo "DOWNLOAD_URL=$DOWNLOAD_URL" >> "$GITHUB_ENV"
+
+      - name: Download server ${{ env.NC_MIN }}
+        continue-on-error: true
+        id: server-download
+        if: ${{ env.DOWNLOAD_URL != 'null' }}
+        run: |
+          wget --quiet "$DOWNLOAD_URL" -O nextcloud.zip
+          unzip -q nextcloud.zip
+
+      - name: Checkout server master fallback
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ steps.server-download.outcome != 'success' }}
+        with:
+          persist-credentials: false
+          submodules: true
+          repository: nextcloud/server
+          path: nextcloud
+
+      - name: Sign app
+        env:
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+          APP_PUBLIC_CRT: ${{ secrets.APP_PUBLIC_CRT }}
+        run: |
+          KEY="$RUNNER_TEMP/$APP_NAME.key"
+          CRT="$RUNNER_TEMP/$APP_NAME.crt"
+          printf '%s\n' "$APP_PRIVATE_KEY" > "$KEY"
+          printf '%s\n' "$APP_PUBLIC_CRT" > "$CRT"
+          php nextcloud/occ integrity:sign-app --privateKey="$KEY" --certificate="$CRT" --path="$PWD/build/artifacts/$APP_NAME"
+          rm -f "$KEY"
+          tar -C build/artifacts -czf "build/artifacts/$APP_NAME.tar.gz" "$APP_NAME"
+
+      - name: Attach tarball to github release
+        uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
+        id: attach_to_release
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: build/artifacts/${{ env.APP_NAME }}.tar.gz
+          asset_name: ${{ env.APP_NAME }}-${{ env.APP_VERSION }}.tar.gz
+          tag: ${{ github.ref }}
+          overwrite: true
+
+      - name: Upload app to Nextcloud appstore
+        uses: nextcloud-libraries/nextcloud-appstore-push-action@a011fe619bcf6e77ddebc96f9908e1af4071b9c1 # v1.0.3
+        with:
+          app_name: ${{ env.APP_NAME }}
+          appstore_token: ${{ secrets.APPSTORE_TOKEN }}
+          download_url: ${{ steps.attach_to_release.outputs.browser_download_url }}
+          app_private_key: ${{ secrets.APP_PRIVATE_KEY }}

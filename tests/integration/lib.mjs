@@ -48,6 +48,12 @@ export function groupsOf(prefix) {
 	return Object.fromEntries(Object.entries(GROUP_SUFFIX).map(([role, s]) => [role, `${prefix}-${s}`]))
 }
 
+/** Die Konten-Gruppe eines Teams: alle seine Konten, keine Rolle. */
+export const accountsOf = (prefix) => `${prefix}-konten`
+export const ACCOUNTS_LABEL = 'Konten'
+/** Vier Rollen-Gruppen und die Konten-Gruppe, wie in /me, /team und /admin/teams. */
+export const teamGroupsOf = (prefix) => ({ ...groupsOf(prefix), accounts: accountsOf(prefix) })
+
 /**
  * Eine OCS-Anfrage. `path` beginnt mit `/ocs/…` oder ist relativ zur App-API.
  * @returns {Promise<{status:number, data:any, meta:any, text:string}>}

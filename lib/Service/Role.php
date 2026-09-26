@@ -16,6 +16,12 @@ final class Role {
 	/** Alle Rollen, schwächste zuerst. */
 	public const ALL = [self::USER, self::LEAD, self::SUBADMIN, self::ADMIN];
 
+	/**
+	 * Die optionale Konten-Gruppe eines Teams. Steht als Zeile in
+	 * ts_role_groups, ist aber **keine** Rolle und nie in ALL.
+	 */
+	public const ACCOUNTS = 'accounts';
+
 	public static function isValid(string $role): bool {
 		return in_array($role, self::ALL, true);
 	}

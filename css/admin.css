@@ -33,6 +33,7 @@
 #timesister-admin .ts-grid { display: grid; grid-template-columns: max-content minmax(200px, 360px); gap: 8px 16px; align-items: center; }
 #timesister-admin .ts-grid input,
 #timesister-admin .ts-grid select { width: 100%; margin: 0; }
+#timesister-admin .ts-grid .ts-hint { grid-column: 2; margin: -4px 0 0; }
 #timesister-admin .ts-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 
 #timesister-admin button.ts-icon {
@@ -45,4 +46,5 @@
 
 @media (max-width: 640px) {
 	#timesister-admin .ts-grid { grid-template-columns: 1fr; }
+	#timesister-admin .ts-grid .ts-hint { grid-column: 1; }
 }

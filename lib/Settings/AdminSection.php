@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Settings;
 
 use OCA\TimeSister\AppInfo\Application;
+use OCP\IL10N;
 use OCP\IURLGenerator;
 use OCP\Settings\IIconSection;
 
@@ -14,6 +15,7 @@ use OCP\Settings\IIconSection;
 final class AdminSection implements IIconSection {
 	public function __construct(
 		private IURLGenerator $url,
+		private IL10N $l,
 	) {
 	}
 
@@ -22,7 +24,7 @@ final class AdminSection implements IIconSection {
 	}
 
 	public function getName(): string {
-		return 'TimeSister';
+		return $this->l->t('TimeSister');
 	}
 
 	public function getPriority(): int {

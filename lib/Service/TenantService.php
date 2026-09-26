@@ -66,14 +66,24 @@ final class TenantService {
 		return $t;
 	}
 
-	/** @return array{user:?string,lead:?string,subadmin:?string,admin:?string} */
-	public function groupsOf(int $tenantId): array {
+	/** @return array<string,string> Rolle oder `accounts` → Gruppe */
+	private function rowsOf(int $tenantId): array {
 		$gid = [];
 		foreach ($this->roleRows() as $rg) {
 			if ($rg['tenant_id'] === $tenantId) {
 				$gid[$rg['role']] = $rg['gid'];
 			}
 		}
+		return $gid;
+	}
+
+	/**
+	 * Nur die vier Rollen-Gruppen, ohne Konten-Gruppe.
+	 *
+	 * @return array{user:?string,lead:?string,subadmin:?string,admin:?string}
+	 */
+	public function roleGroupsOf(int $tenantId): array {
+		$gid = $this->rowsOf($tenantId);
 		return [
 			'user' => $gid['user'] ?? null,
 			'lead' => $gid['lead'] ?? null,
@@ -82,10 +92,30 @@ final class TenantService {
 		];
 	}
 
+	/** Die Konten-Gruppe des Teams oder null. Keine Rolle. */
+	public function accountsGroupOf(int $tenantId): ?string {
+		return $this->rowsOf($tenantId)[Role::ACCOUNTS] ?? null;
+	}
+
+	/**
+	 * Für /me, /team und /admin/teams: die vier Rollen-Gruppen, dazu
+	 * `accounts` nur, wenn gesetzt.
+	 *
+	 * @return array<string,?string>
+	 */
+	public function groupsOf(int $tenantId): array {
+		$groups = $this->roleGroupsOf($tenantId);
+		$accounts = $this->accountsGroupOf($tenantId);
+		if ($accounts !== null) {
+			$groups[Role::ACCOUNTS] = $accounts;
+		}
+		return $groups;
+	}
+
 	/** @return array<string,string> uid → stärkste Rolle im Team */
 	public function memberRoles(int $tenantId): array {
 		$byRole = [];
-		foreach ($this->groupsOf($tenantId) as $role => $gid) {
+		foreach ($this->roleGroupsOf($tenantId) as $role => $gid) {
 			$group = $gid === null ? null : $this->groupManager->get($gid);
 			$byRole[$role] = $group === null
 				? []

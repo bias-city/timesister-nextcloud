@@ -48,6 +48,12 @@ final class TeamAdminService {
 		foreach ($this->tenantService->memberRoles($t->getId()) as $role) {
 			$counts[$role]++;
 		}
+		// Konten-Gruppe: alle ihre Mitglieder, nur wenn gesetzt.
+		$accounts = $this->tenantService->accountsGroupOf($t->getId());
+		if ($accounts !== null) {
+			$group = $this->groupManager->get($accounts);
+			$counts[Role::ACCOUNTS] = $group === null ? 0 : count($group->getUsers());
+		}
 		$team['counts'] = $counts;
 		return $team;
 	}
@@ -58,7 +64,7 @@ final class TeamAdminService {
 	 */
 	public function create(array $in): array {
 		$v = TeamRules::validate($in);
-		$this->checkGroups($v['groups'], null);
+		$this->checkGroups(self::allGids($v['groups'], $v['accounts']), null);
 		if ($this->tenants->findBySlug($v['slug']) !== null) {
 			throw ApiException::conflict('Diesen Kurznamen hat schon ein anderes Team.');
 		}
@@ -70,7 +76,7 @@ final class TeamAdminService {
 			$t->setRevision(0);
 			$t->setCreatedAt($this->time->getTime());
 			$t = $this->tenants->insert($t);
-			$this->insertGroups($t->getId(), $v['groups']);
+			$this->insertGroups($t->getId(), self::allGids($v['groups'], $v['accounts']));
 			$this->db->commit();
 		} catch (\Throwable $e) {
 			$this->db->rollBack();
@@ -87,7 +93,7 @@ final class TeamAdminService {
 	public function update(int $id, array $in): array {
 		$t = $this->tenants->find($id) ?? throw ApiException::notFound('Dieses Team gibt es nicht.');
 		$v = TeamRules::validate($in);
-		$this->checkGroups($v['groups'], $id);
+		$this->checkGroups(self::allGids($v['groups'], $v['accounts']), $id);
 		$other = $this->tenants->findBySlug($v['slug']);
 		if ($other !== null && $other->getId() !== $id) {
 			throw ApiException::conflict('Diesen Kurznamen hat schon ein anderes Team.');
@@ -99,8 +105,9 @@ final class TeamAdminService {
 			// Alle vier Gruppen gibt es (geprüft): die Zuordnung ist wieder ganz.
 			$t->setBrokenAt(null);
 			$this->tenants->update($t);
+			// Ohne accounts im Rumpf fällt die Konten-Gruppe hier weg.
 			$this->roleGroups->deleteByTenant($id);
-			$this->insertGroups($id, $v['groups']);
+			$this->insertGroups($id, self::allGids($v['groups'], $v['accounts']));
 			$this->db->commit();
 		} catch (\Throwable $e) {
 			$this->db->rollBack();
@@ -154,7 +161,7 @@ final class TeamAdminService {
 				}
 			}
 			$missing = [];
-			foreach ($this->tenantService->groupsOf($t->getId()) as $role => $gid) {
+			foreach ($this->tenantService->roleGroupsOf($t->getId()) as $role => $gid) {
 				if ($gid === null || !$this->groupManager->groupExists($gid)) {
 					$missing[] = $role;
 				}
@@ -188,7 +195,25 @@ final class TeamAdminService {
 		return $out;
 	}
 
-	/** @param array<string,string> $groups */
+	/**
+	 * Rollen-Gruppen und, falls gesetzt, die Konten-Gruppe als eine Zuordnung.
+	 *
+	 * @param array<string,string> $groups
+	 * @return array<string,string>
+	 */
+	private static function allGids(array $groups, ?string $accounts): array {
+		if ($accounts !== null) {
+			$groups[Role::ACCOUNTS] = $accounts;
+		}
+		return $groups;
+	}
+
+	/**
+	 * Jede Gruppe muss es geben (422) und darf keinem anderen Team gehören,
+	 * weder als Rolle noch als Konten-Gruppe (409).
+	 *
+	 * @param array<string,string> $groups
+	 */
 	private function checkGroups(array $groups, ?int $ownId): void {
 		foreach ($groups as $gid) {
 			if (!$this->groupManager->groupExists($gid)) {

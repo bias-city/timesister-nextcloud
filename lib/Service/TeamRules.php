@@ -12,7 +12,7 @@ final class TeamRules {
 
 	/**
 	 * @param array<string,mixed> $in
-	 * @return array{name:string,slug:string,groups:array{user:string,lead:string,subadmin:string,admin:string}}
+	 * @return array{name:string,slug:string,groups:array{user:string,lead:string,subadmin:string,admin:string},accounts:?string}
 	 */
 	public static function validate(array $in): array {
 		$name = $in['name'] ?? null;
@@ -39,6 +39,25 @@ final class TeamRules {
 			throw ApiException::invalid('Jede Rolle braucht eine eigene Gruppe.');
 		}
 		/** @var array{user:string,lead:string,subadmin:string,admin:string} $out */
-		return ['name' => $name, 'slug' => $slug, 'groups' => $out];
+		return ['name' => $name, 'slug' => $slug, 'groups' => $out, 'accounts' => self::accounts($groups['accounts'] ?? null, $out)];
+	}
+
+	/**
+	 * Die optionale Konten-Gruppe: fehlt, null oder leer heisst keine. Sie
+	 * darf keine der vier Rollen-Gruppen desselben Teams sein.
+	 *
+	 * @param array<string,string> $roleGroups
+	 */
+	public static function accounts(mixed $gid, array $roleGroups): ?string {
+		if ($gid === null || $gid === '') {
+			return null;
+		}
+		if (!is_string($gid) || strlen($gid) > 64) {
+			throw ApiException::invalid('Die Konten-Gruppe ist ungültig.');
+		}
+		if (in_array($gid, $roleGroups, true)) {
+			throw ApiException::invalid('Die Konten-Gruppe darf keine Rollen-Gruppe des Teams sein.');
+		}
+		return $gid;
 	}
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { ADMIN, as, groupsOf, ocs, sql } from './lib.mjs'
+import { ADMIN, as, groupsOf, ocs, sql, teamGroupsOf } from './lib.mjs'
 import { A, AA, AL, AU, C, L, NOAH, P, R, RUN, U1, U2, V, ISO, b64, check, expect, head, isObj, keysOf, me, sha256, ensure } from './harness.mjs'
 
 export async function teams() {
@@ -23,7 +23,7 @@ export async function teams() {
 			const d = r.data || {}
 			check(`${uid}: Team ${slug}, Rolle ${role}`,
 				r.status === 200 && d.uid === uid && d.team?.slug === slug && d.role === role && d.api === 1
-				&& JSON.stringify(d.groups) === JSON.stringify(groupsOf(slug)) && ISO.test(d.server_time)
+				&& JSON.stringify(d.groups) === JSON.stringify(teamGroupsOf(slug)) && ISO.test(d.server_time)
 				&& Number.isInteger(d.revision) && typeof d.display_name === 'string', r.text)
 		}
 		expect('Nextcloud-Admin ohne Teamgruppe', await ocs(ADMIN, 'GET', '/me'), 403, 'no_team')
@@ -37,9 +37,10 @@ export async function teams() {
 		const pb = r.data?.find?.((t) => t.slug === 'pb')
 		const at = r.data?.find?.((t) => t.slug === 'at')
 		check('GET /admin/teams: zwei Teams', r.status === 200 && pb && at, r.text)
-		check('Zählung je Rolle, jedes Konto nur unter seiner stärksten Rolle',
-			JSON.stringify(pb?.counts) === JSON.stringify({ user: 2, lead: 1, subadmin: 1, admin: 1 })
-			&& JSON.stringify(at?.counts) === JSON.stringify({ user: 1, lead: 1, subadmin: 0, admin: 1 }), { pb: pb?.counts, at: at?.counts })
+		check('Zählung je Rolle, jedes Konto nur unter seiner stärksten Rolle, dazu die Konten-Gruppe',
+			JSON.stringify(pb?.counts) === JSON.stringify({ user: 2, lead: 1, subadmin: 1, admin: 1, accounts: 5 })
+			&& JSON.stringify(at?.counts) === JSON.stringify({ user: 1, lead: 1, subadmin: 0, admin: 1, accounts: 3 }), { pb: pb?.counts, at: at?.counts })
+		check('groups.accounts in der Liste', pb?.groups?.accounts === 'pb-konten' && at?.groups?.accounts === 'at-konten', { pb: pb?.groups, at: at?.groups })
 		check('Liste ohne members', pb && !('members' in pb))
 		expect('GET /admin/teams als pbadmin', await ocs(A, 'GET', '/admin/teams'), 403)
 		expect('POST /admin/teams als pbadmin', await ocs(A, 'POST', '/admin/teams', { name: 'X', slug: 'xx', groups: groupsOf('pb') }), 403)

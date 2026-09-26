@@ -11,9 +11,11 @@
 import { datensaetze } from './teil-datensaetze.mjs'
 import { rest } from './teil-rest.mjs'
 import { teams } from './teil-teams.mjs'
+import { konten } from './teil-konten.mjs'
 import { summary } from './harness.mjs'
 
 await teams()
+await konten()
 await datensaetze()
 await rest()
 process.exit(summary())

@@ -3,16 +3,14 @@
  * TimeSister – Admin-Seite. Vanilla-JavaScript, ohne Build.
  * Teams kommen über die Admin-Endpunkte (OCS, requesttoken), der Zustand
  * als Initial-State. Kein innerHTML mit Daten: alles über textContent.
+ * Texte übersetzt der Server (Initial-State „l10n“), ohne OC.L10N.
  */
 (function () {
 	'use strict'
 
-	const ROLES = [
-		['user', 'Mitarbeitende'],
-		['lead', 'Projektleitung'],
-		['subadmin', 'Verwaltung'],
-		['admin', 'Admin'],
-	]
+	const ROLES = ['user', 'lead', 'subadmin', 'admin']
+	// Die optionale Konten-Gruppe: alle Konten des Teams, keine Rolle.
+	const ACCOUNTS = 'accounts'
 
 	/** Ohne OC-Globals: das Token steht im Kopf der Seite. */
 	function requestToken() {
@@ -32,6 +30,14 @@
 		} catch (e) {
 			return null
 		}
+	}
+
+	const TEXTS = loadState('l10n') || {}
+
+	/** Übersetzter Text zum Schlüssel; {name} wird durch vars.name ersetzt. */
+	function tr(key, vars) {
+		const text = typeof TEXTS[key] === 'string' ? TEXTS[key] : key
+		return text.replace(/\{(\w+)\}/g, (m, k) => (vars && k in vars ? String(vars[k]) : m))
 	}
 
 	async function api(method, path, body) {
@@ -54,7 +60,7 @@
 		}
 		const data = json && json.ocs ? json.ocs.data : null
 		if (!res.ok) {
-			const msg = (data && data.message) || (json && json.ocs && json.ocs.meta && json.ocs.meta.message) || ('Fehler ' + res.status)
+			const msg = (data && data.message) || (json && json.ocs && json.ocs.meta && json.ocs.meta.message) || tr('error_status', { status: res.status })
 			throw new Error(msg)
 		}
 		return data
@@ -106,7 +112,15 @@
 			return '–'
 		}
 		const d = new Date(iso)
-		return isNaN(d) ? iso : d.toLocaleString('de-CH', { dateStyle: 'medium', timeStyle: 'short' })
+		if (isNaN(d)) {
+			return iso
+		}
+		const opts = { dateStyle: 'medium', timeStyle: 'short' }
+		try {
+			return d.toLocaleString(overview.locale || undefined, opts)
+		} catch (e) {
+			return d.toLocaleString(undefined, opts)
+		}
 	}
 
 	const overview = loadState('overview') || { state: [], groups: [], silent_days: 14, api: 1, version: '', api_base: '/ocs/v2.php/apps/timesister/api/v1' }
@@ -128,39 +142,43 @@
 		const box = $('ts-teams')
 		box.textContent = ''
 		if (teams.length === 0) {
-			box.append(h('p', { class: 'ts-muted', text: 'Noch kein Team. Legen Sie eines an und ordnen Sie ihm vier Gruppen zu.' }))
+			box.append(h('p', { class: 'ts-muted', text: tr('no_team') }))
 			return
 		}
 		const rows = teams.map((t) => {
 			const st = stateOf(t.id)
 			const broken = st && st.broken
-			const roles = h('div', { class: 'ts-roles' }, ROLES.map(([role, label]) => [
-				h('span', { text: label }),
+			const roles = h('div', { class: 'ts-roles' }, ROLES.map((role) => [
+				h('span', { text: tr('role_' + role) }),
 				h('span', { class: (st && st.missing_roles && st.missing_roles.includes(role)) ? 'ts-bad' : '', text: t.groups[role] ? groupLabel(t.groups[role]) : '–' }),
 				h('span', { class: 'ts-count', text: String(t.counts ? t.counts[role] : 0) }),
-			]))
+			]), t.groups[ACCOUNTS] ? [
+				h('span', { class: 'ts-muted', text: tr('accounts_group') }),
+				h('span', { text: groupLabel(t.groups[ACCOUNTS]) }),
+				h('span', { class: 'ts-count', text: String(t.counts && t.counts[ACCOUNTS] !== undefined ? t.counts[ACCOUNTS] : 0) }),
+			] : null)
 			return h('tr', { 'data-team': t.slug },
 				h('td', {},
 					h('div', { text: t.name }),
 					h('div', { class: 'ts-slug', text: t.slug }),
-					broken ? h('div', { class: 'ts-bad', text: 'Zuordnung gebrochen' }) : null,
+					broken ? h('div', { class: 'ts-bad', text: tr('broken') }) : null,
 				),
 				h('td', {}, roles),
 				h('td', { class: 'ts-right' },
-					h('button', { type: 'button', class: 'button', onclick: () => openForm(t) }, 'Bearbeiten'),
+					h('button', { type: 'button', class: 'button', onclick: () => openForm(t) }, tr('edit')),
 					' ',
 					h('button', {
 						type: 'button',
 						class: 'button ts-icon',
-						title: 'Team löschen',
-						'aria-label': 'Team ' + t.name + ' löschen',
+						title: tr('delete_team'),
+						'aria-label': tr('delete_team_named', { name: t.name }),
 						onclick: () => removeTeam(t),
 					}, trashIcon()),
 				),
 			)
 		})
 		box.append(h('table', {},
-			h('thead', {}, h('tr', {}, h('th', { text: 'Team' }), h('th', { text: 'Rollen, Gruppe und Mitglieder' }), h('th', {}))),
+			h('thead', {}, h('tr', {}, h('th', { text: tr('team') }), h('th', { text: tr('roles_col') }), h('th', {}))),
 			h('tbody', {}, rows),
 		))
 	}
@@ -168,23 +186,22 @@
 	function renderState() {
 		const box = $('ts-state')
 		box.textContent = ''
-		box.append(h('p', {}, 'Schnittstelle: Fassung ', h('strong', { text: String(overview.api) }),
-			' · App ', h('strong', { text: overview.version || '–' })))
+		box.append(h('p', {}, tr('api_version') + ' ', h('strong', { text: String(overview.api) }),
+			' · ' + tr('app') + ' ', h('strong', { text: overview.version || '–' })))
 		if (teams.length === 0) {
 			return
 		}
-		const days = overview.silent_days || 14
 		const rows = teams.map((t) => {
 			const st = stateOf(t.id)
 			if (!st) {
-				return h('tr', {}, h('td', { text: t.name }), h('td', { class: 'ts-muted', colspan: 4, text: 'Neu – Zustand nach dem Neuladen.' }))
+				return h('tr', {}, h('td', { text: t.name }), h('td', { class: 'ts-muted', colspan: 4, text: tr('new_after_reload') }))
 			}
 			const silent = st.silent.length === 0
-				? h('span', { class: 'ts-ok', text: 'alle gemeldet' })
+				? h('span', { class: 'ts-ok', text: tr('all_reported') })
 				: h('ul', { class: 'ts-list' }, st.silent.map((p) => h('li', {},
-					p.display_name + ' ', h('span', { class: 'ts-muted', text: p.seen_at ? '(zuletzt ' + formatTime(p.seen_at) + ')' : '(noch nie)' }))))
+					p.display_name + ' ', h('span', { class: 'ts-muted', text: p.seen_at ? tr('last_seen', { time: formatTime(p.seen_at) }) : tr('never') }))))
 			return h('tr', {},
-				h('td', {}, h('div', { text: t.name }), st.broken ? h('div', { class: 'ts-bad', text: 'Zuordnung gebrochen' }) : null),
+				h('td', {}, h('div', { text: t.name }), st.broken ? h('div', { class: 'ts-bad', text: tr('broken') }) : null),
 				h('td', { class: 'ts-num', text: String(st.records) }),
 				h('td', { text: formatTime(st.last_modified) }),
 				h('td', { class: 'ts-num', text: String(st.revision) }),
@@ -193,26 +210,26 @@
 		})
 		box.append(h('table', {},
 			h('thead', {}, h('tr', {},
-				h('th', { text: 'Team' }),
-				h('th', { text: 'Datensätze' }),
-				h('th', { text: 'Letzte Änderung' }),
-				h('th', { text: 'Revision' }),
-				h('th', { text: 'Ohne Lebenszeichen seit ' + days + ' Tagen' }),
+				h('th', { text: tr('team') }),
+				h('th', { text: tr('records') }),
+				h('th', { text: tr('last_change') }),
+				h('th', { text: tr('revision') }),
+				h('th', { text: tr('silent') }),
 			)),
 			h('tbody', {}, rows),
 		))
 	}
 
 	function fillSelects(current) {
-		for (const [role] of ROLES) {
+		for (const role of [...ROLES, ACCOUNTS]) {
 			const sel = $('ts-g-' + role)
 			sel.textContent = ''
-			sel.append(h('option', { value: '', text: '– Gruppe wählen –' }))
+			sel.append(h('option', { value: '', text: role === ACCOUNTS ? tr('no_group') : tr('choose_group') }))
 			for (const g of overview.groups) {
 				const taken = g.team !== null && g.team !== undefined && g.team !== (editing || -1)
 				sel.append(h('option', {
 					value: g.id,
-					text: (g.name && g.name !== g.id ? g.name + ' (' + g.id + ')' : g.id) + (taken ? ' – anderes Team' : ''),
+					text: (g.name && g.name !== g.id ? g.name + ' (' + g.id + ')' : g.id) + (taken ? ' ' + tr('other_team') : ''),
 					disabled: taken,
 				}))
 			}
@@ -222,7 +239,7 @@
 
 	function openForm(team) {
 		editing = team ? team.id : null
-		$('ts-form-title').textContent = team ? 'Team bearbeiten' : 'Neues Team'
+		$('ts-form-title').textContent = team ? tr('edit_team') : tr('new_team')
 		$('ts-name').value = team ? team.name : ''
 		$('ts-slug').value = team ? team.slug : ''
 		$('ts-error').textContent = ''
@@ -241,7 +258,8 @@
 		const body = {
 			name: $('ts-name').value.trim(),
 			slug: $('ts-slug').value.trim(),
-			groups: Object.fromEntries(ROLES.map(([role]) => [role, $('ts-g-' + role).value])),
+			// accounts leer: das Team hat keine Konten-Gruppe (beim Ändern: entfernen).
+			groups: Object.fromEntries([...ROLES, ACCOUNTS].map((role) => [role, $('ts-g-' + role).value])),
 		}
 		$('ts-save').disabled = true
 		$('ts-error').textContent = ''
@@ -261,7 +279,7 @@
 	}
 
 	async function removeTeam(t) {
-		if (!window.confirm('Team „' + t.name + '“ löschen? Das geht nur, solange es keine Datensätze und Sicherungen hat. Die Gruppen und Konten bleiben.')) {
+		if (!window.confirm(tr('confirm_delete', { name: t.name }))) {
 			return
 		}
 		try {
@@ -277,7 +295,7 @@
 			teams = await api('GET', '/admin/teams')
 		} catch (e) {
 			$('ts-teams').textContent = ''
-			$('ts-teams').append(h('p', { class: 'ts-bad', text: 'Teams lassen sich nicht laden: ' + e.message }))
+			$('ts-teams').append(h('p', { class: 'ts-bad', text: tr('load_failed', { message: e.message }) }))
 			return
 		}
 		renderTeams()

@@ -95,6 +95,25 @@ class RulesTest extends TestCase {
 		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate(['groups' => ['user' => 'a', 'lead' => 'a', 'subadmin' => 'c', 'admin' => 'd']] + $ok)));
 	}
 
+	public function testTeamAccountsGroup(): void {
+		$four = ['user' => 'a', 'lead' => 'b', 'subadmin' => 'c', 'admin' => 'd'];
+		$with = fn (mixed $acc): array => ['name' => 'T', 'slug' => 'tt', 'groups' => $four + ['accounts' => $acc]];
+		// Fehlt, null oder leer: keine Konten-Gruppe; die vier Rollen bleiben unter groups.
+		$this->assertNull(TeamRules::validate(['name' => 'T', 'slug' => 'tt', 'groups' => $four])['accounts']);
+		$this->assertNull(TeamRules::validate($with(null))['accounts']);
+		$this->assertNull(TeamRules::validate($with(''))['accounts']);
+		$v = TeamRules::validate($with('e'));
+		$this->assertSame('e', $v['accounts']);
+		$this->assertSame($four, $v['groups']);
+		// Keine der vier Rollen-Gruppen desselben Teams.
+		foreach ($four as $gid) {
+			$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate($with($gid))));
+		}
+		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate($with(7))));
+		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate($with(['e']))));
+		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate($with(str_repeat('e', 65)))));
+	}
+
 	public function testTime(): void {
 		$this->assertSame('2026-09-26T08:15:00Z', Time::iso(gmmktime(8, 15, 0, 9, 26, 2026)));
 		$this->assertNull(Time::iso(null));

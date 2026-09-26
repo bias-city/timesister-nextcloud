@@ -33,7 +33,7 @@ Nextcloud-Hauptversion bringen, ohne mehr zu ändern als nötig.
 - [ ] **Fassung:** `<version>` in `appinfo/info.xml` heben (Patch für reine Anpassung), `CHANGELOG.md` ergänzen.
 - [ ] **Pull-Request** mit Verweis auf das Issue; CI grün (Lint, Psalm, PHPUnit min/max).
 - [ ] **Tag** `nc-app-v<version>` nach dem Merge.
-- [ ] **Signatur und App Store:** Archiv bauen, mit dem App-Zertifikat signieren, hochladen.
+- [ ] **App Store:** GitHub-Release mit Tag `v<version>` im Repo der App; bauen, signieren und hochladen macht `appstore-build-publish.yml`.
 <!-- /checkliste -->
 
 ## Einzelheiten
@@ -64,9 +64,13 @@ Composer: `composer` im PATH oder `COMPOSER_BIN="php /pfad/composer.phar"`.
 
 ### Signatur und App Store
 
-1. Archiv ohne die Dateien aus `.nextcloudignore`:
-   `tar --exclude-from=.nextcloudignore -czf timesister.tar.gz ../timesister`
-2. Signatur: `openssl dgst -sha512 -sign ~/.nextcloud/certificates/timesister.key timesister.tar.gz | openssl base64`
+Macht `.github/workflows/appstore-build-publish.yml` bei jedem veröffentlichten
+Release (einmal vorher: [Erste Veröffentlichung](#erste-veröffentlichung-im-app-store)).
+Von Hand, falls der Workflow ausfällt:
+
+1. Paket ohne die Dateien aus `.nextcloudignore`:
+   `rsync -a --exclude-from=.nextcloudignore ./ ../build/timesister/ && tar -C ../build -czf ../build/timesister.tar.gz timesister`
+2. Signatur des Archivs: `openssl dgst -sha512 -sign <schlüssel> ../build/timesister.tar.gz | openssl base64`
 3. Upload im App Store (apps.nextcloud.com) mit Link zum Release-Archiv und Signatur.
 
 ### CI und Frühwarnung
@@ -76,5 +80,37 @@ Composer: `composer` im PATH oder `COMPOSER_BIN="php /pfad/composer.phar"`.
   (Nextcloud-Checkout mit SQLite).
 - Wöchentlich (`fruehwarnung.yml`): neueste Veröffentlichung und master;
   Fehler → Issue `nc-update`, bei einer neuen Hauptversion ruft sie Claude.
+- Bei einem veröffentlichten Release (`appstore-build-publish.yml`): Paket,
+  Signatur, App Store; aus, solange die drei Secrets fehlen.
 - Claude (`claude.yml`) läuft nur, wenn das Secret `ANTHROPIC_API_KEY` gesetzt
   ist und die Claude-GitHub-App installiert ist.
+
+## Erste Veröffentlichung im App Store
+
+Einmalig; danach genügt für jede Fassung ein Release. Der private Schlüssel
+liegt beim Maintainer und kommt in kein Repo, nur als Secret zu GitHub.
+
+1. **Zertifikat holen**, sobald der Pull-Request
+   [nextcloud/app-certificate-requests#1270](https://github.com/nextcloud/app-certificate-requests/pull/1270)
+   gemergt ist: die Datei `timesister/timesister.crt` im Repo
+   `nextcloud/app-certificate-requests`. Passt es zum Schlüssel, geben
+   `openssl x509 -in timesister.crt -noout -pubkey` und
+   `openssl pkey -in <schlüssel> -pubout` dasselbe aus.
+2. **App registrieren** auf [apps.nextcloud.com](https://apps.nextcloud.com)
+   (angemeldet: „Register app“): das Zertifikat einfügen, dazu die Signatur
+   der App-ID:
+   `echo -n "timesister" | openssl dgst -sha512 -sign <schlüssel> | openssl base64`
+3. **Secrets** im Repo `bias-city/timesister-nextcloud` setzen
+   (Settings → Secrets and variables → Actions):
+   - `APP_PRIVATE_KEY` – der private Schlüssel (ganze PEM-Datei)
+   - `APP_PUBLIC_CRT` – der Inhalt von `timesister.crt`
+   - `APPSTORE_TOKEN` – das API-Token des Kontos auf apps.nextcloud.com
+
+   Solange eines fehlt, bleibt der Workflow aus und meldet das als Hinweis.
+4. **Fassung heben:** `<version>` in `appinfo/info.xml` und einen Eintrag in
+   `CHANGELOG.md`; auf `main` bringen. Das Bild für den Store
+   (`img/screenshot-admin.png`) muss dort liegen, `info.xml` verlinkt es.
+5. **Release** auf GitHub mit Tag `v<version>` veröffentlichen, z. B.
+   `gh release create v0.1.0 --title 0.1.0 --notes "…"`. Der Workflow
+   prüft Tag gegen `info.xml`, baut, signiert, hängt
+   `timesister-v<version>.tar.gz` ans Release und lädt es in den Store.
