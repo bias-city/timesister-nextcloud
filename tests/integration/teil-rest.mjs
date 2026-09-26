@@ -1,11 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { ADMIN, as, groupsOf, ocs, sql } from './lib.mjs'
 import { A, AA, AL, AU, C, L, NOAH, P, R, RUN, U1, U2, V, ISO, b64, check, expect, head, isObj, keysOf, me, sha256, ensure } from './harness.mjs'
+import { restoreConsent } from './teil-sicherungen.mjs'
 
 export async function rest() {
+	await kalendersicherungen()
+	await restOhneSicherungen()
+}
+
+/** POST/GET /backups (Fassung 1), eigener Teil: läuft auch allein. */
+export async function kalendersicherungen() {
 	let backupId
 	head('Kalendersicherungen')
-	{
+	// Seit Fassung 1.1 nur mit Freigabe; danach wieder wie vorher.
+	const prior = (await ocs(U1, 'GET', '/backups/consent')).data
+	await ocs(U1, 'PUT', '/backups/consent', { consent: true, notice: '2026-09-26.2' })
+	try {
 		const ics1 = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//TimeSister//Test ${RUN}//DE\r\nEND:VCALENDAR\r\n`
 		const ics2 = ics1.replace('Test', 'Zweite')
 		const up = await ocs(U1, 'POST', '/backups', { taken_on: '2099-12-31', ics_base64: b64(ics1) })
@@ -13,6 +23,8 @@ export async function rest() {
 		backupId = up.data?.id
 		check('Antwort mit id, uid, taken_on, size, sha256', Number.isInteger(backupId) && up.data?.uid === 'pbuser1' && up.data?.taken_on === '2099-12-31'
 			&& up.data?.size === Buffer.byteLength(ics1) && up.data?.sha256 === sha256(ics1), up.text)
+		check('hochgeladen: source client, sichtbare Kopie beim Sicherungs-Konto', up.data?.source === 'client'
+			&& up.data?.file_path === 'TimeSister-Sicherungen/Mia Muster (pbuser1)/2099-12-31.ics', up.text)
 		const up2 = await ocs(U1, 'POST', '/backups', { taken_on: '2099-12-31', ics_base64: b64(ics2) })
 		check('zweite am selben Tag ersetzt die erste (gleiche id, neuer Hash)', up2.status === 200 && up2.data?.id === backupId && up2.data?.sha256 === sha256(ics2), up2.text)
 		expect('ältere Sicherung', await ocs(U1, 'POST', '/backups', { taken_on: '2099-12-30', ics_base64: b64(ics1) }), 200)
@@ -41,7 +53,12 @@ export async function rest() {
 		const al = await ocs(AA, 'GET', '/backups?uid=pbuser1')
 		check('at-Admin: Liste für pb-Konto leer', al.status === 200 && Array.isArray(al.data) && al.data.length === 0, al.text)
 		expect('unbekannte Sicherung', await ocs(A, 'GET', '/backups/999999999'), 404, 'not_found')
+	} finally {
+		await restoreConsent(U1, prior)
 	}
+}
+
+async function restOhneSicherungen() {
 
 	// ---------------------------------------------------------------------------
 	head('Lebenszeichen')

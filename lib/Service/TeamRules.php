@@ -60,4 +60,56 @@ final class TeamRules {
 		}
 		return $gid;
 	}
+
+	/**
+	 * Das Sicherungs-Konto aus dem Rumpf: fehlt der Schlüssel, bleibt die
+	 * Wahl ([false, null]); null oder leer heisst automatisch ([true, null]).
+	 *
+	 * @param array<string,mixed> $in
+	 * @return array{0:bool,1:?string}
+	 */
+	public static function backupOwner(array $in): array {
+		if (!array_key_exists('backup_owner', $in)) {
+			return [false, null];
+		}
+		$uid = $in['backup_owner'];
+		if ($uid === null || $uid === '') {
+			return [true, null];
+		}
+		if (!is_string($uid) || strlen($uid) > 64) {
+			throw ApiException::invalid('Das Sicherungs-Konto ist ungültig.');
+		}
+		return [true, $uid];
+	}
+
+	/** Team-Einstellungen (Fassung 1.2) mit ihren Standardwerten. */
+	public const SETTINGS = ['leads_see_calendars' => true, 'backup_required' => false];
+
+	/**
+	 * Team-Einstellungen aus dem Rumpf. Fehlt `settings` oder ein Schlüssel,
+	 * bleibt der Wert. Unbekannte Schlüssel oder kein Wahrheitswert: 422.
+	 *
+	 * @param array<string,mixed> $in
+	 * @return array<string,bool>
+	 */
+	public static function settings(array $in): array {
+		$s = $in['settings'] ?? null;
+		if ($s === null) {
+			return [];
+		}
+		if (!is_array($s)) {
+			throw ApiException::invalid('„settings“ muss ein Objekt sein.');
+		}
+		$out = [];
+		foreach ($s as $key => $value) {
+			if (!is_string($key) || !array_key_exists($key, self::SETTINGS)) {
+				throw ApiException::invalid("Unbekannte Team-Einstellung „{$key}“.");
+			}
+			if (!is_bool($value)) {
+				throw ApiException::invalid("„{$key}“ muss true oder false sein.");
+			}
+			$out[$key] = $value;
+		}
+		return $out;
+	}
 }

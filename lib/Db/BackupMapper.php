@@ -52,12 +52,48 @@ final class BackupMapper extends QBMapper {
 		return $this->findEntities($qb);
 	}
 
-	/** @return list<Backup> über alle Teams, für die Aufbewahrung */
-	public function findBefore(string $day): array {
+	/** Die zuletzt geschriebene Sicherung eines Kontos (geschützte Ablage). */
+	public function latestFor(int $tenantId, string $uid): ?Backup {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
-			->where($qb->expr()->lt('taken_on', $qb->createNamedParameter($day)));
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('uid', $qb->createNamedParameter($uid)))
+			->orderBy('created_at', 'DESC')->addOrderBy('id', 'DESC')
+			->setMaxResults(1);
+		try {
+			return $this->findEntity($qb);
+		} catch (DoesNotExistException) {
+			return null;
+		}
+	}
+
+	/** @return list<Backup> alle eines Teams, für das Ausdünnen */
+	public function listByTenant(int $tenantId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')->from($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)));
 		return $this->findEntities($qb);
+	}
+
+	/**
+	 * Letzter Tag einer Server-Sicherung je Konto des Teams.
+	 *
+	 * @return array<string,string> uid → YYYY-MM-DD
+	 */
+	public function lastServerDays(int $tenantId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('uid')->selectAlias($qb->func()->max('taken_on'), 'last_day')
+			->from($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('source', $qb->createNamedParameter('server')))
+			->groupBy('uid');
+		$res = $qb->executeQuery();
+		$out = [];
+		while (($row = $res->fetch()) !== false) {
+			$out[(string)$row['uid']] = (string)$row['last_day'];
+		}
+		$res->closeCursor();
+		return $out;
 	}
 
 	public function countByTenant(int $tenantId): int {

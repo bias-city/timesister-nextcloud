@@ -8,6 +8,9 @@
 #timesister-admin .ts-muted { color: var(--color-text-maxcontrast); }
 
 #timesister-admin table { width: 100%; border-collapse: collapse; }
+/* Breite Tabellen scrollen waagrecht, statt über den Rand zu laufen. */
+#timesister-admin #ts-teams,
+#timesister-admin #ts-state { overflow-x: auto; }
 #timesister-admin th,
 #timesister-admin td {
 	text-align: left; vertical-align: top;
@@ -19,6 +22,7 @@
 #timesister-admin .ts-roles { display: grid; grid-template-columns: max-content 1fr max-content; gap: 2px 12px; }
 #timesister-admin .ts-roles .ts-count { text-align: right; color: var(--color-text-maxcontrast); font-variant-numeric: tabular-nums; }
 #timesister-admin .ts-slug { font-family: monospace; color: var(--color-text-maxcontrast); }
+#timesister-admin .ts-owner { margin-top: 6px; }
 
 #timesister-admin .ts-bad { color: var(--color-error-text, var(--color-error)); font-weight: bold; }
 #timesister-admin .ts-ok { color: var(--color-success-text, var(--color-success)); }
@@ -34,6 +38,7 @@
 #timesister-admin .ts-grid input,
 #timesister-admin .ts-grid select { width: 100%; margin: 0; }
 #timesister-admin .ts-grid .ts-hint { grid-column: 2; margin: -4px 0 0; }
+#timesister-admin .ts-grid input[type=checkbox] { width: auto; justify-self: start; }
 #timesister-admin .ts-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 
 #timesister-admin button.ts-icon {

@@ -8,6 +8,8 @@ namespace OCA\TimeSister\Controller;
 
 use OCA\TimeSister\Service\ApiException;
 use OCA\TimeSister\Service\BackupService;
+use OCA\TimeSister\Service\ConsentService;
+use OCA\TimeSister\Service\OwnCopyService;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
@@ -15,12 +17,17 @@ use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\IRequest;
 
-/** Kalendersicherungen: eigene für alle, fremde nur für Verwaltung und Admin. */
+/**
+ * Kalendersicherungen: eigene für alle, fremde nur für Verwaltung und Admin.
+ * Gesichert wird nur mit Freigabe der Person.
+ */
 final class BackupController extends BaseController {
 	public function __construct(
 		IRequest $request,
 		TenantService $tenants,
 		private BackupService $backups,
+		private ConsentService $consent,
+		private OwnCopyService $ownCopy,
 	) {
 		parent::__construct($request, $tenants);
 	}
@@ -59,5 +66,53 @@ final class BackupController extends BaseController {
 	#[NoAdminRequired]
 	public function show(int $id): DataResponse {
 		return $this->run(fn () => $this->backups->get($this->tenants->current(), $id));
+	}
+
+	/** POST /backups/now – sofort auf dem Server sichern. */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/backups/now')]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 20, period: 60)]
+	public function now(): DataResponse {
+		return $this->run(function () {
+			return $this->backups->now($this->tenants->current(), $this->request->getParam('uid'));
+		});
+	}
+
+	/** GET /backups/consent – die eigene Freigabe. */
+	#[ApiRoute(verb: 'GET', url: '/api/v1/backups/consent')]
+	#[NoAdminRequired]
+	public function consent(): DataResponse {
+		return $this->run(fn () => $this->consent->get($this->tenants->current()));
+	}
+
+	/** PUT /backups/consent – die eigene Freigabe setzen oder zurückziehen. */
+	#[ApiRoute(verb: 'PUT', url: '/api/v1/backups/consent')]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 300, period: 60)]
+	public function setConsent(): DataResponse {
+		return $this->run(function () {
+			$m = $this->tenants->current();
+			$in = array_intersect_key($this->request->getParams(), array_flip(['consent', 'notice', 'uid']));
+			return $this->consent->set($m, $in);
+		});
+	}
+
+	/** GET /backups/own-copy – Kopie im eigenen Ordner, eigenes Konto. */
+	#[ApiRoute(verb: 'GET', url: '/api/v1/backups/own-copy')]
+	#[NoAdminRequired]
+	public function ownCopy(): DataResponse {
+		return $this->run(fn () => $this->ownCopy->get($this->tenants->current()->uid));
+	}
+
+	/** PUT /backups/own-copy – ein- oder ausschalten, eigenes Konto. */
+	#[ApiRoute(verb: 'PUT', url: '/api/v1/backups/own-copy')]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 300, period: 60)]
+	public function setOwnCopy(): DataResponse {
+		return $this->run(function () {
+			$m = $this->tenants->current();
+			$in = array_intersect_key($this->request->getParams(), array_flip(['enabled', 'uid']));
+			return $this->ownCopy->set($m->uid, $in);
+		});
 	}
 }

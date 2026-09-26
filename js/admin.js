@@ -138,6 +138,24 @@
 		return (overview.state || []).find((s) => s.id === id) || null
 	}
 
+	/** Anzeigename (Kennung) eines Admins aus dem Zustand, sonst die Kennung. */
+	function adminLabel(st, uid) {
+		const a = st && st.admins ? st.admins.find((x) => x.uid === uid) : null
+		return a && a.display_name && a.display_name !== uid ? a.display_name + ' (' + uid + ')' : uid
+	}
+
+	function formatDay(day) {
+		const d = new Date(day + 'T12:00:00Z')
+		if (!day || isNaN(d)) {
+			return day || '–'
+		}
+		try {
+			return d.toLocaleDateString(overview.locale || undefined, { dateStyle: 'medium' })
+		} catch (e) {
+			return d.toLocaleDateString(undefined, { dateStyle: 'medium' })
+		}
+	}
+
 	function renderTeams() {
 		const box = $('ts-teams')
 		box.textContent = ''
@@ -157,13 +175,19 @@
 				h('span', { text: groupLabel(t.groups[ACCOUNTS]) }),
 				h('span', { class: 'ts-count', text: String(t.counts && t.counts[ACCOUNTS] !== undefined ? t.counts[ACCOUNTS] : 0) }),
 			] : null)
+			const owner = h('div', { class: 'ts-owner' },
+				h('span', { class: 'ts-muted', text: tr('backups_stored_with') + ' ' }),
+				t.backup_owner ? h('span', { text: adminLabel(st, t.backup_owner) }) : h('span', { class: 'ts-bad', text: tr('owner_none') }))
+			const s = t.settings || {}
+			const settings = [['leads_see', s.leads_see_calendars], ['backup_required', s.backup_required]].map(([key, on]) =>
+				h('div', {}, h('span', { class: 'ts-muted', text: tr(key) + ': ' }), h('span', { text: on ? tr('yes') : tr('no') })))
 			return h('tr', { 'data-team': t.slug },
 				h('td', {},
 					h('div', { text: t.name }),
 					h('div', { class: 'ts-slug', text: t.slug }),
 					broken ? h('div', { class: 'ts-bad', text: tr('broken') }) : null,
 				),
-				h('td', {}, roles),
+				h('td', {}, roles, owner, settings),
 				h('td', { class: 'ts-right' },
 					h('button', { type: 'button', class: 'button', onclick: () => openForm(t) }, tr('edit')),
 					' ',
@@ -194,8 +218,12 @@
 		const rows = teams.map((t) => {
 			const st = stateOf(t.id)
 			if (!st) {
-				return h('tr', {}, h('td', { text: t.name }), h('td', { class: 'ts-muted', colspan: 4, text: tr('new_after_reload') }))
+				return h('tr', {}, h('td', { text: t.name }), h('td', { class: 'ts-muted', colspan: 5, text: tr('new_after_reload') }))
 			}
+			const backups = h('ul', { class: 'ts-list' },
+				h('li', { text: tr('consent_count', { n: st.backup_consent, total: st.member_count }) }),
+				h('li', { class: st.without_backup_week > 0 ? 'ts-bad' : '', text: tr('without_week', { n: st.without_backup_week }) }),
+				h('li', { class: 'ts-muted', text: st.last_server_backup ? tr('last_server', { date: formatDay(st.last_server_backup) }) : tr('no_server_backup') }))
 			const silent = st.silent.length === 0
 				? h('span', { class: 'ts-ok', text: tr('all_reported') })
 				: h('ul', { class: 'ts-list' }, st.silent.map((p) => h('li', {},
@@ -205,6 +233,7 @@
 				h('td', { class: 'ts-num', text: String(st.records) }),
 				h('td', { text: formatTime(st.last_modified) }),
 				h('td', { class: 'ts-num', text: String(st.revision) }),
+				h('td', {}, backups),
 				h('td', {}, silent),
 			)
 		})
@@ -214,6 +243,7 @@
 				h('th', { text: tr('records') }),
 				h('th', { text: tr('last_change') }),
 				h('th', { text: tr('revision') }),
+				h('th', { text: tr('backups_col') }),
 				h('th', { text: tr('silent') }),
 			)),
 			h('tbody', {}, rows),
@@ -237,6 +267,20 @@
 		}
 	}
 
+	/** Sicherungs-Konto: automatisch oder einer der Admins des Teams (nur beim Bearbeiten). */
+	function fillOwner(team) {
+		const sel = $('ts-backup-owner')
+		const st = team ? stateOf(team.id) : null
+		sel.textContent = ''
+		sel.append(h('option', { value: '', text: tr('owner_auto') }))
+		for (const a of (st && st.admins) || []) {
+			sel.append(h('option', { value: a.uid, text: adminLabel(st, a.uid) }))
+		}
+		const choice = st ? st.backup_owner_choice : null
+		sel.value = choice && [...sel.options].some((o) => o.value === choice) ? choice : ''
+		sel.disabled = !st
+	}
+
 	function openForm(team) {
 		editing = team ? team.id : null
 		$('ts-form-title').textContent = team ? tr('edit_team') : tr('new_team')
@@ -244,6 +288,11 @@
 		$('ts-slug').value = team ? team.slug : ''
 		$('ts-error').textContent = ''
 		fillSelects(team)
+		fillOwner(team)
+		// Neues Team: die Standardwerte des Vertrags (Leitung sieht alles, keine Anordnung).
+		const s = (team && team.settings) || {}
+		$('ts-leads-see').checked = s.leads_see_calendars !== false
+		$('ts-backup-required').checked = s.backup_required === true
 		$('ts-form').hidden = false
 		$('ts-name').focus()
 	}
@@ -260,6 +309,14 @@
 			slug: $('ts-slug').value.trim(),
 			// accounts leer: das Team hat keine Konten-Gruppe (beim Ändern: entfernen).
 			groups: Object.fromEntries([...ROLES, ACCOUNTS].map((role) => [role, $('ts-g-' + role).value])),
+		}
+		body.settings = {
+			leads_see_calendars: $('ts-leads-see').checked,
+			backup_required: $('ts-backup-required').checked,
+		}
+		// Leer heisst automatisch; bei einem neuen Team gibt es noch keine Wahl.
+		if (editing !== null) {
+			body.backup_owner = $('ts-backup-owner').value || null
 		}
 		$('ts-save').disabled = true
 		$('ts-error').textContent = ''

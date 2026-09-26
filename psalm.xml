@@ -56,7 +56,17 @@
 			<errorLevel type="suppress">
 				<referencedClass name="Doctrine\DBAL\Schema\Table" />
 				<referencedClass name="Doctrine\DBAL\Schema\Schema" />
+				<!-- ICalendarExport::export() liefert laut OCP Sabre-VCalendar;
+				     Sabre liegt nicht in nextcloud/ocp. Genutzt wird nur serialize(). -->
+				<referencedClass name="Sabre\VObject\Component\VCalendar" />
 			</errorLevel>
 		</UndefinedDocblockClass>
+		<!-- IRootFolder erbt OC\Hooks\Emitter, das nextcloud/ocp nicht mitliefert.
+		     Die App ruft davon nichts auf. Nur die Datei, die IRootFolder nutzt. -->
+		<MissingDependency>
+			<errorLevel type="suppress">
+				<file name="lib/Service/VisibleCopy.php" />
+			</errorLevel>
+		</MissingDependency>
 	</issueHandlers>
 </psalm>

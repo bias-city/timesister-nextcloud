@@ -87,6 +87,18 @@ final class AdminSettings implements ISettings {
 			'edit_team' => $l->t('Edit team'),
 			'confirm_delete' => $l->t('Delete team “{name}”? This only works as long as it has no records and backups. The groups and accounts remain.'),
 			'load_failed' => $l->t('Teams cannot be loaded: {message}'),
+			'backups_stored_with' => $l->t('Backups stored with'),
+			'owner_auto' => $l->t('Automatic: first admin'),
+			'owner_none' => $l->t('No admin in the team'),
+			'backups_col' => $l->t('Server backups'),
+			'consent_count' => $l->t('Consent: {n} of {total}'),
+			'without_week' => $l->t('Without backup this week: {n}'),
+			'last_server' => $l->t('Last: {date}'),
+			'no_server_backup' => $l->t('No server backup yet'),
+			'leads_see' => $l->t('Leads see all time calendars'),
+			'backup_required' => $l->t('Backup required'),
+			'yes' => $l->t('Yes'),
+			'no' => $l->t('No'),
 		];
 	}
 

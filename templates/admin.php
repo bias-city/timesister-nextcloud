@@ -34,6 +34,15 @@
 			<label for="ts-g-accounts"><?php p($l->t('Accounts group (optional)')); ?></label>
 			<select id="ts-g-accounts" name="accounts" aria-describedby="ts-g-accounts-hint"></select>
 			<p id="ts-g-accounts-hint" class="ts-hint ts-muted"><?php p($l->t('All accounts of the team, not a role. Lets team admins remove every role.')); ?></p>
+			<label for="ts-backup-owner"><?php p($l->t('Backups stored with')); ?></label>
+			<select id="ts-backup-owner" name="backup_owner" aria-describedby="ts-backup-owner-hint"></select>
+			<p id="ts-backup-owner-hint" class="ts-hint ts-muted"><?php p($l->t('Server backups of people who agreed are stored as files in this account’s folder “TimeSister-Sicherungen”.')); ?></p>
+			<label for="ts-leads-see"><?php p($l->t('Leads see all time calendars')); ?></label>
+			<input id="ts-leads-see" name="leads_see_calendars" type="checkbox" aria-describedby="ts-leads-see-hint">
+			<p id="ts-leads-see-hint" class="ts-hint ts-muted"><?php p($l->t('Off: leads no longer receive the members’ time calendars; the apps withdraw the share at their next sync.')); ?></p>
+			<label for="ts-backup-required"><?php p($l->t('Backup required')); ?></label>
+			<input id="ts-backup-required" name="backup_required" type="checkbox" aria-describedby="ts-backup-required-hint">
+			<p id="ts-backup-required-hint" class="ts-hint ts-muted"><?php p($l->t('The administration requires members to enable the backup.')); ?></p>
 		</div>
 		<p id="ts-error" class="ts-error" role="alert"></p>
 		<div class="ts-actions">

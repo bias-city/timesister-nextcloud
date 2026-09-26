@@ -40,6 +40,7 @@ final class MeController extends BaseController {
 				'team' => ['id' => $t->getId(), 'name' => $t->getName(), 'slug' => $t->getSlug()],
 				'role' => $m->role,
 				'groups' => $this->tenants->groupsOf($m->tenantId),
+				'settings' => TenantService::settingsOf($t),
 				'person_key' => $this->records->personKey($m),
 				'revision' => $t->getRevision(),
 				'server_time' => Time::iso($this->time->getTime()),

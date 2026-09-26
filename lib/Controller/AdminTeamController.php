@@ -21,7 +21,7 @@ use OCP\IUserSession;
  * lässt nur Admins herein. Die eigene Prüfung hier ist die zweite Tür.
  */
 final class AdminTeamController extends BaseController {
-	private const FIELDS = ['name', 'slug', 'groups'];
+	private const FIELDS = ['name', 'slug', 'groups', 'backup_owner', 'settings'];
 
 	public function __construct(
 		IRequest $request,

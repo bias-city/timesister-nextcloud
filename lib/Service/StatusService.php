@@ -15,6 +15,7 @@ use OCP\DB\Exception as DbException;
 final class StatusService {
 	public function __construct(
 		private ClientStatusMapper $status,
+		private ConsentService $consent,
 		private TenantService $tenants,
 		private AccessPolicy $policy,
 		private ITimeFactory $time,
@@ -68,9 +69,13 @@ final class StatusService {
 	public function list(Membership $m): array {
 		$this->policy->requireTeamRead($m);
 		$byUid = $this->status->findByTenant($m->tenantId);
+		$consents = $this->consent->byTenant($m->tenantId);
 		$out = [];
-		foreach ($this->tenants->memberRoles($m->tenantId) as $uid => $role) {
+		$roles = $this->tenants->memberRoles($m->tenantId);
+		foreach (array_map('strval', array_keys($roles)) as $uid) {
+			$role = $roles[$uid];
 			$s = $byUid[$uid] ?? null;
+			$c = ConsentService::present($consents[$uid] ?? null);
 			$out[] = [
 				'uid' => $uid,
 				'display_name' => $this->tenants->displayName($uid),
@@ -80,6 +85,9 @@ final class StatusService {
 				'last_backup' => $s?->getLastBackup(),
 				'calendar_url' => $s?->getCalendarUrl(),
 				'seen_at' => $s === null ? null : Time::iso($s->getSeenAt()),
+				'backup_consent' => $c['consent'],
+				'backup_consent_since' => $c['since'],
+				'backup_consent_notice' => $c['notice'],
 			];
 		}
 		return $out;

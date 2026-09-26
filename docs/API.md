@@ -304,3 +304,210 @@ Präzisierungen, die die App so umsetzt. Nichts oben Stehendes ändert sich.
   Konto in einer verwalteten Gruppe: Alle vier Rollen-Gruppen lassen sich
   entziehen, danach gibt `/me` für das Konto `403 no_team`. Ohne
   Konten-Gruppe kann die letzte Rolle nur ein Nextcloud-Admin entziehen.
+
+## Sicherungen, Fassung 1.1 (26.09.2026)
+
+Vorgabe des Nutzers: Die Sicherungen entstehen auf dem Server, liegen als
+Dateien je Person in einem Ordner beim Admin und lassen sich zurückspielen.
+
+- **Der Server sichert selbst.** Ein Hintergrundjob exportiert einmal je
+  Kalenderwoche den Zeitkalender jedes Teammitglieds mit Nextclouds
+  öffentlicher Schnittstelle `OCP\Calendar\ICalendarExport` (seit Nextcloud
+  32). Welcher Kalender: `calendar_url` aus dem letzten Lebenszeichen, sonst
+  der Kalender mit der URI `zeit-<uid>` im Heim des Kontos. `source` einer
+  solchen Sicherung ist `"server"`, hochgeladene haben `"client"`.
+  `POST /backups` bleibt für Clients bestehen, der Mac-Fork nutzt es nicht mehr.
+- **Zwei Ablagen.** Geschützt wie bisher in `IAppData` (daraus liest die
+  Schnittstelle), dazu **sichtbar** als Datei im Ordner des
+  Sicherungs-Kontos des Teams: `TimeSister-Sicherungen/<Anzeigename> (<uid>)/<YYYY-MM-DD>.ics`.
+  Das Sicherungs-Konto (`backup_owner`) wählt der Nextcloud-Admin auf der
+  Admin-Seite unter den Konten mit Rolle `admin`; ohne Wahl der erste
+  `admin` des Teams nach Kennung. Die sichtbare Kopie darf dort gelöscht
+  werden; die geschützte bleibt.
+- `GET /backups` und `GET /backups/{id}` nennen zusätzlich `source` und
+  `file_path` (Pfad im Ordner des Sicherungs-Kontos, oder `null`).
+  `GET /team` nennt `backup_owner`.
+- `POST /backups/now` mit `{ "uid"? }`: sofort sichern. Ohne `uid` das
+  eigene Konto; fremde nur subadmin und admin. Antwort wie ein Eintrag aus
+  `GET /backups`.
+- **Kein Zurückspielen auf dem Server** (Entscheidung des Nutzers,
+  26.09.2026: „der Weg über alte Termine reicht vollkommen“). Die Person
+  spielt eine Sicherung in ihrer Mac-App über „Alte Termine“ zurück, das
+  den Zeitkalender mit eigenen Rechten ersetzt; die Mac-App holt die Datei
+  dafür mit `GET /backups/{id}`. Admins finden die Dateien im Ordner des
+  Sicherungs-Kontos.
+- **Freigabe durch die Person** (Vorgabe des Nutzers, 26.09.2026: „der NC user
+  muss generell einen Button haben, der das Backup beim Admin freigibt. das
+  kann er zurückziehen, bis dahin gespeicherte termine bleiben aber im
+  backup“). Standard ist **keine** Freigabe.
+  - `GET /backups/consent` → `{ "consent": bool, "since": "…"|null, "revoked_at": "…"|null }`
+    für das eigene Konto.
+  - `PUT /backups/consent` mit `{ "consent": true|false }`, nur für das
+    eigene Konto. Antwort wie `GET`.
+  - Ohne Freigabe sichert der Hintergrundjob das Konto nicht, und
+    `POST /backups/now` sowie `POST /backups` antworten `403 forbidden` mit
+    dem Satz „Die Person hat die Sicherung beim Admin nicht freigegeben.“
+  - Zurückziehen hält nur künftige Sicherungen an. Vorhandene bleiben in
+    beiden Ablagen und unterliegen der normalen Aufbewahrung.
+  - `GET /status` nennt je Mitglied `backup_consent` (bool) und
+    `backup_consent_since`.
+- **Bestätigte Aufklärung** (Vorgabe des Nutzers, 26.09.2026: Einschalten nur
+  über einen ausdrücklichen Dialog, in dem die Person „Freigabe“ eintippt und
+  über ihre Personendaten aufgeklärt wird). `PUT /backups/consent` mit
+  `consent: true` verlangt zusätzlich `notice` (Kennung der Fassung des
+  Aufklärungstexts, z. B. `"2026-09-26"`, höchstens 32 Zeichen, sonst
+  `422 invalid`). Der Server speichert sie mit Zeitpunkt; `GET /backups/consent`
+  und `GET /status` nennen sie als `notice` bzw. `backup_consent_notice`.
+  Zurückziehen braucht keine `notice`.
+- **Kopie im eigenen Ordner** (Vorschlag des Nutzers, 26.09.2026: „wahlweise
+  zusätzliche ics beim User als Kopie in einen Folder“). Unabhängig von der
+  Freigabe beim Admin, ohne Dialog, Standard aus.
+  - `GET /backups/own-copy` → `{ "enabled": bool }`, `PUT /backups/own-copy`
+    mit `{ "enabled": bool }`, nur für das eigene Konto.
+  - Ist sie an, legt der Wochenjob die Sicherung zusätzlich als
+    `TimeSister-Sicherungen/<YYYY-MM-DD>.ics` in den eigenen Dateien der Person
+    ab. Ohne Freigabe beim Admin entsteht **nur** diese Kopie, nichts in
+    `IAppData` oder beim Admin.
+  - `POST /backups/now` ohne `uid` sichert auch dann, wenn nur die eigene
+    Kopie an ist, und legt dann nur sie an; die Antwort nennt dann
+    `{ "own_copy": "<Pfad>" }` statt eines Listeneintrags.
+  - Dateien im eigenen Ordner löscht der Server nie; die Person verwaltet sie.
+  - `GET /status` nennt `own_copy` (bool) je Mitglied nicht - das geht die
+    Verwaltung nichts an.
+- **Nur bei Änderungen, dann ausdünnen** (Vorgabe des Nutzers, 26.09.2026:
+  „es sollen auch inkrementelle Backups sein … sie müssen bereinigt werden“).
+  Gilt für alle drei Ablagen (geschützt, beim Admin, eigener Ordner) und
+  ersetzt „Dateien im eigenen Ordner löscht der Server nie“.
+  - Eine neue Sicherung entsteht nur, wenn sich der Kalender seit der
+    letzten dieser Ablage geändert hat (Vergleich der Prüfsumme). Sonst
+    bleibt es bei der vorhandenen.
+  - Ausdünnen: alle der letzten 8 Wochen; danach die jüngste je
+    Kalendermonat bis 12 Monate; danach die jüngste je Kalenderjahr.
+  - Frist für die geschützte Kopie und die beim Admin: Team-Einstellung
+    `backup_retention_years` (1 bis 10, Standard 1), auf der Admin-Seite;
+    `GET /team` nennt sie. Ältere werden gelöscht. Im eigenen Ordner bleiben
+    die Jahressicherungen ohne Frist.
+  - Gelöscht werden **nur** Dateien, die die App selbst angelegt hat und
+    deren Datei-ID sie sich gemerkt hat. Verschobene oder umbenannte Dateien
+    und alles andere bleiben unberührt; Ordner werden nie gelöscht. Löschen
+    in Dateien von Personen geht über Nextclouds Papierkorb.
+- **Staffel, endgültig** (Nutzer, 26.09.2026: „inkrementell meine ich die
+  vollständigen ics kalender als datei. 4 Wochen, 12 Monate, 5 Jahre“).
+  Ersetzt die Zahlen und `backup_retention_years` aus dem vorigen Punkt; die
+  Team-Einstellung entfällt. Jede Sicherung ist eine **vollständige**
+  `.ics`-Datei. Für alle drei Ablagen gleich:
+  - alle Sicherungen der letzten **4 Wochen**;
+  - danach die jüngste je Kalendermonat bis **12 Monate** zurück;
+  - danach die jüngste je Kalenderjahr bis **5 Jahre** zurück;
+  - älter als 5 Jahre: löschen.
+  Weiterhin: neue Sicherung nur bei Änderung; gelöscht wird nur, was die
+  App selbst angelegt und sich gemerkt hat.
+- **Jahresstufe 10 Jahre** (Nutzer, 26.09.2026: „mache 10 Jahre draus aber min
+  was das gesetz sagt“). Ersetzt „bis 5 Jahre“: die jüngste je Kalenderjahr bis
+  **10 Jahre** zurück, älter löschen. Die Grenze ist eine Konstante
+  (`JAHRE = 10`); verlangt ein anwendbares Gesetz mehr, wird sie angehoben,
+  nie unter die gesetzliche Mindestfrist.
+
+## Nachträge zu 1.1 aus der Umsetzung (26.09.2026)
+
+Präzisierungen, die die App (0.2.1) so umsetzt. Nichts oben Stehendes ändert sich.
+
+- **Tage und Wochen** in UTC; die ISO-Woche geht von Montag bis Sonntag.
+- **Welcher Kalender:** `calendar_url` zählt nur, wenn sie im Heim des Kontos
+  selbst liegt (`…/remote.php/dav/calendars/<uid>/<uri>/`); sonst gilt
+  `zeit-<uid>`. So sichert der Server nie einen Kalender, den das Konto
+  nicht sieht.
+- **Export:** `ICalendarExport` liefert je Termin ein eigenes VCALENDAR; der
+  Server setzt daraus eine vollständige `.ics` zusammen (eigener Kopf,
+  `PRODID:-//B/IAS//TimeSister Server-Sicherung//DE`, jede VTIMEZONE einmal,
+  dann alle Termine). Er läuft ohne Benutzerkontext (Wochenjob) und im
+  Anfragekontext jedes berechtigten Kontos. Ein leerer Kalender ergibt eine
+  gültige leere Sicherung. Kein Zeitkalender → `404 not_found`
+  („Für dieses Konto gibt es keinen Zeitkalender.“), über 20 MB → `413 too_large`.
+- **Nur bei Änderung:** Verglichen wird die Prüfsumme der ganzen `.ics` mit
+  der zuletzt geschriebenen Sicherung derselben Ablage. Die Kopie beim Admin
+  entsteht immer zusammen mit der geschützten. Die eigene Kopie gilt nur als
+  vorhanden, solange die gemerkte Datei noch an ihrem Pfad liegt; hat die
+  Person sie gelöscht oder verschoben, entsteht eine neue.
+- **`POST /backups/now`:** Rumpf darf fehlen. Fremdes Konto: user und lead
+  `403`, nicht im Team `404`, ohne Freigabe `403` mit dem Satz oben. Ist der
+  Kalender unverändert, antwortet es mit dem vorhandenen letzten Eintrag
+  (`taken_on` kann älter sein). Eigenes Konto mit Freigabe **und** eigener
+  Kopie: der Eintrag und dazu `own_copy`. Für ein fremdes Konto schreibt der
+  Endpunkt nie in dessen eigenen Ordner; das tut nur der Wochenjob. Drosselung
+  20 Aufrufe je Minute.
+- **`POST /backups`** (Client) bleibt Fassung 1: immer gespeichert, eine je
+  Tag, ohne Vergleich der Prüfsumme; `source: "client"`. Auch dafür entsteht
+  die Kopie beim Sicherungs-Konto.
+- **`file_path`** ist relativ zum Heim des Sicherungs-Kontos. `null`, wenn das
+  Team kein Konto mit Rolle `admin` hat oder die Kopie nicht geschrieben
+  werden konnte (etwa Speicherplatz); die geschützte Sicherung entsteht
+  trotzdem. Ein Wechsel des Sicherungs-Kontos verschiebt keine vorhandenen
+  Dateien.
+- **Wochenjob:** stündlich; je Konto und Ablage höchstens eine Prüfung je
+  ISO-Woche (vermerkt als Nextcloud-Einstellung des Kontos), höchstens 100
+  Konten je Lauf. Wer mitten in der Woche freigibt oder die eigene Kopie
+  einschaltet, wird beim nächsten stündlichen Lauf gesichert.
+- **`backup_owner`** in `GET /team` und `GET /admin/teams` ist das wirksame
+  Konto: die Wahl, solange sie `admin` ist, sonst der erste `admin` nach
+  Kennung, ohne `admin` `null`. `POST`/`PUT /admin/teams` nehmen
+  `backup_owner`: fehlt es, bleibt die Wahl; `null` oder leer heisst
+  automatisch; sonst muss das Konto in der `admin`-Gruppe des Teams stehen
+  (`422 invalid`).
+- **`PUT /backups/consent`:** `consent` kein Wahrheitswert → `400 invalid`;
+  `uid` im Rumpf → `400 invalid`; `notice` fehlt, leer, länger als 32 Zeichen
+  oder mit Steuerzeichen → `422 invalid`. Erneutes Freigeben ersetzt `notice`
+  und behält `since`. Zurückziehen setzt `since` auf `null` und `revoked_at`;
+  `notice` bleibt. Die Freigabe gilt je Team; wird das Konto gelöscht, fällt
+  sie weg (ein neues Konto mit derselben Kennung muss neu freigeben).
+- **`PUT /backups/own-copy`:** `enabled` kein Wahrheitswert oder `uid` im
+  Rumpf → `400 invalid`. Gespeichert als Nextcloud-Einstellung des Kontos;
+  sie fällt mit dem Konto weg. Die Admin-Seite zeigt sie nicht.
+- **Ausdünnen:** täglich im Aufbewahrungsjob, Grenzen einschliesslich:
+  heute − 28 Tage, heute − 12 Monate, heute − 10 Jahre (`Thinning::JAHRE`).
+  Die jüngste je Monat bzw. Jahr zählt innerhalb ihrer Stufe. Tage in der
+  Zukunft bleiben. Die geschützte Ablage wird je Team und Konto ausgedünnt
+  (Zeile, Datei in `IAppData` und ihre Kopien beim Admin), die eigenen Kopien
+  je Konto. Ersetzt die bisherige Frist von einem Jahr.
+- **Merkliste:** Tabelle `ts_backup_files` mit Konto, Ablage (`admin`/`own`),
+  Besitzer der Datei, Datei-ID, Pfad, Tag und Prüfsumme. Eine Datei wird nur
+  gelöscht, wenn ihre Datei-ID noch auf genau diesen Pfad zeigt, über die
+  Node-API (Papierkorb). Ordner nie.
+- **Admin-Seite:** je Team „Sicherungen ablegen bei“ (automatisch oder ein
+  Admin des Teams) und im Zustand: Zahl mit Freigabe, davon ohne Sicherung in
+  dieser Woche (geprüft und unverändert zählt als gesichert), letzte
+  Server-Sicherung.
+- **`POST /backups/{id}/restore`** gibt es nicht (Zurückspielen macht die
+  Mac-App). Befund aus einem Versuch vor dieser Entscheidung:
+  `ICreateFromString::createFromString` schreibt über
+  `getCalendarsForPrincipal('principals/users/<uid>')` ohne Benutzerkontext in
+  den eigenen Kalender des Kontos.
+
+## Team-Einstellungen, Fassung 1.2 (26.09.2026)
+
+Entscheidungen des Nutzers nach dem Datenschutzbericht:
+
+- `settings` eines Teams, in `GET /me`, `GET /team` und `GET /admin/teams`,
+  setzbar über `POST`/`PUT /admin/teams` (fehlend = unverändert):
+  - `leads_see_calendars` (bool, Standard **true**): Die Leitung bekommt die
+    Zeitkalender aller Teammitglieder freigegeben. Aus: Die Clients nehmen
+    die Freigabe an die Lead-Gruppe beim nächsten Abgleich zurück (die an die
+    Admin-Gruppe bleibt).
+  - `backup_required` (bool, Standard **false**): Die Verwaltung hat die
+    Sicherung beim Admin angeordnet. Die Mac-App zeigt das im
+    Freigabe-Dialog und beim Ausschalten.
+- Neue Fassung der Aufklärung: `notice` `"2026-09-26.2"` (Wortlaut aus
+  `BERICHT-DATENSCHUTZ-2026-09-26.md`, 3.1, mit der Staffel bis 10 Jahre).
+
+## Nachträge zu 1.2 aus der Umsetzung (26.09.2026)
+
+- `settings` = `{ "leads_see_calendars": bool, "backup_required": bool }`,
+  immer mit beiden Schlüsseln. In `GET /me` steht es auf oberster Ebene (wie
+  `groups`), in `GET /team` und `GET /admin/teams` im Team-Objekt.
+- `POST`/`PUT /admin/teams`: fehlt `settings` oder ist es `null`, bleibt es
+  (beim Anlegen: Standardwerte); fehlt ein Schlüssel, bleibt dieser.
+  Unbekannter Schlüssel, kein Wahrheitswert oder kein Objekt → `422 invalid`.
+- Gespeichert in `ts_tenants` (Migration 1003, App 0.2.2); bestehende Teams
+  haben die Standardwerte.
+- `notice` `"2026-09-26.2"` wird angenommen; die Regel bleibt: 1 bis 32
+  Zeichen ohne Steuerzeichen.

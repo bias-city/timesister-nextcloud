@@ -18,7 +18,7 @@ It requires the TimeSister Mac app, where master data, roles and backups are man
 Teams bauen auf bestehenden Nextcloud-Gruppen auf: Jedes Team ordnet vier Gruppen den Rollen Mitarbeitende, Projektleitung, Verwaltung und Admin zu. Die App legt keine eigenen Konten und keine eigenen Kalender an; die Buchungen bleiben in den CalDAV-Kalendern der Konten.
 
 Sie setzt die Mac-App TimeSister voraus, in der Stammdaten, Rollen und Sicherungen gepflegt werden. Für sich allein bringt die App nur einen Admin-Abschnitt für Teams und Zustand mit.]]></description>
-	<version>0.1.0</version>
+	<version>0.2.2</version>
 	<licence>AGPL-3.0-or-later</licence>
 	<author homepage="https://bias.city">B/IAS – Basel Institut für angewandte Stadtforschung</author>
 	<namespace>TimeSister</namespace>
@@ -37,6 +37,7 @@ Sie setzt die Mac-App TimeSister voraus, in der Stammdaten, Rollen und Sicherung
 	</dependencies>
 	<background-jobs>
 		<job>OCA\TimeSister\BackgroundJob\Retention</job>
+		<job>OCA\TimeSister\BackgroundJob\WeeklyBackup</job>
 	</background-jobs>
 	<settings>
 		<admin>OCA\TimeSister\Settings\AdminSettings</admin>

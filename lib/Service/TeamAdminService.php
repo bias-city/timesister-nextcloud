@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
+use OCA\TimeSister\Db\BackupConsentMapper;
 use OCA\TimeSister\Db\BackupMapper;
 use OCA\TimeSister\Db\ClientStatusMapper;
 use OCA\TimeSister\Db\RecordMapper;
@@ -31,7 +32,9 @@ final class TeamAdminService {
 		private RecordMapper $records,
 		private BackupMapper $backups,
 		private ClientStatusMapper $status,
+		private BackupConsentMapper $consents,
 		private TenantService $tenantService,
+		private WeekMarks $marks,
 		private ITimeFactory $time,
 	) {
 	}
@@ -65,6 +68,9 @@ final class TeamAdminService {
 	public function create(array $in): array {
 		$v = TeamRules::validate($in);
 		$this->checkGroups(self::allGids($v['groups'], $v['accounts']), null);
+		[, $owner] = TeamRules::backupOwner($in);
+		$this->checkOwner($owner, $v['groups']['admin']);
+		$settings = TeamRules::settings($in) + TeamRules::SETTINGS;
 		if ($this->tenants->findBySlug($v['slug']) !== null) {
 			throw ApiException::conflict('Diesen Kurznamen hat schon ein anderes Team.');
 		}
@@ -75,6 +81,8 @@ final class TeamAdminService {
 			$t->setSlug($v['slug']);
 			$t->setRevision(0);
 			$t->setCreatedAt($this->time->getTime());
+			$t->setBackupOwner($owner);
+			self::applySettings($t, $settings);
 			$t = $this->tenants->insert($t);
 			$this->insertGroups($t->getId(), self::allGids($v['groups'], $v['accounts']));
 			$this->db->commit();
@@ -94,6 +102,11 @@ final class TeamAdminService {
 		$t = $this->tenants->find($id) ?? throw ApiException::notFound('Dieses Team gibt es nicht.');
 		$v = TeamRules::validate($in);
 		$this->checkGroups(self::allGids($v['groups'], $v['accounts']), $id);
+		[$ownerGiven, $owner] = TeamRules::backupOwner($in);
+		if ($ownerGiven) {
+			$this->checkOwner($owner, $v['groups']['admin']);
+		}
+		$settings = TeamRules::settings($in);
 		$other = $this->tenants->findBySlug($v['slug']);
 		if ($other !== null && $other->getId() !== $id) {
 			throw ApiException::conflict('Diesen Kurznamen hat schon ein anderes Team.');
@@ -104,6 +117,12 @@ final class TeamAdminService {
 			$t->setSlug($v['slug']);
 			// Alle vier Gruppen gibt es (geprüft): die Zuordnung ist wieder ganz.
 			$t->setBrokenAt(null);
+			// Ohne backup_owner im Rumpf bleibt die Wahl.
+			if ($ownerGiven) {
+				$t->setBackupOwner($owner);
+			}
+			// Nur die geschickten Einstellungen ändern sich.
+			self::applySettings($t, $settings);
 			$this->tenants->update($t);
 			// Ohne accounts im Rumpf fällt die Konten-Gruppe hier weg.
 			$this->roleGroups->deleteByTenant($id);
@@ -127,6 +146,7 @@ final class TeamAdminService {
 		try {
 			$this->roleGroups->deleteByTenant($id);
 			$this->status->deleteByTenant($id);
+			$this->consents->deleteByTenant($id);
 			$this->tenants->delete($t);
 			$this->db->commit();
 		} catch (\Throwable $e) {
@@ -145,11 +165,26 @@ final class TeamAdminService {
 		$now = $this->time->getTime();
 		$limit = $now - self::SILENT_DAYS * 86400;
 		$out = [];
+		$today = gmdate('Y-m-d', $now);
 		foreach ($this->tenants->findAll() as $t) {
 			$stats = $this->records->stats($t->getId());
 			$seen = $this->status->findByTenant($t->getId());
+			$consents = $this->consents->findByTenant($t->getId());
+			$lastDays = $this->backups->lastServerDays($t->getId());
 			$silent = [];
-			foreach ($this->tenantService->memberRoles($t->getId()) as $uid => $role) {
+			$consenting = 0;
+			$withoutWeek = 0;
+			$members = $this->tenantService->memberRoles($t->getId());
+			foreach (array_map('strval', array_keys($members)) as $uid) {
+				$role = $members[$uid];
+				// Ohne Sicherung diese Woche zählt nur, wer freigegeben hat. Geprüft
+				// und unverändert gilt als gesichert (es bleibt bei der vorhandenen).
+				if (ConsentService::granted($consents[$uid] ?? null)) {
+					$consenting++;
+					if (!$this->marks->checked($uid, WeekMarks::ADMIN, $today)) {
+						$withoutWeek++;
+					}
+				}
 				$s = $seen[$uid] ?? null;
 				if ($s === null || $s->getSeenAt() < $limit) {
 					$silent[] = [
@@ -175,9 +210,34 @@ final class TeamAdminService {
 				'persons_account_deleted' => $stats['persons_account_deleted'],
 				'last_modified' => Time::iso($stats['last']),
 				'silent' => $silent,
+				'member_count' => count($members),
+				'backup_consent' => $consenting,
+				'without_backup_week' => $withoutWeek,
+				'last_server_backup' => $lastDays === [] ? null : max($lastDays),
+				'backup_owner_choice' => $t->getBackupOwner(),
+				'admins' => array_map(fn (string $uid) => [
+					'uid' => $uid, 'display_name' => $this->tenantService->displayName($uid),
+				], $this->tenantService->adminsOf($t->getId())),
 			];
 		}
 		return $out;
+	}
+
+	/** @param array<string,bool> $settings */
+	private static function applySettings(Tenant $t, array $settings): void {
+		if (array_key_exists('leads_see_calendars', $settings)) {
+			$t->setLeadsSeeCalendars($settings['leads_see_calendars'] ? 1 : 0);
+		}
+		if (array_key_exists('backup_required', $settings)) {
+			$t->setBackupRequired($settings['backup_required'] ? 1 : 0);
+		}
+	}
+
+	/** Das Sicherungs-Konto muss in der admin-Gruppe des Teams stehen (422). */
+	private function checkOwner(?string $uid, string $adminGid): void {
+		if ($uid !== null && !$this->groupManager->isInGroup($uid, $adminGid)) {
+			throw ApiException::invalid('Das Sicherungs-Konto muss Admin des Teams sein.');
+		}
 	}
 
 	/** @return list<array{id:string,name:string,team:?int}> alle Gruppen */

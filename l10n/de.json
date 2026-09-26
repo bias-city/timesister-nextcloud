@@ -43,7 +43,22 @@
 		"– used by another team": "– anderes Team",
 		"Edit team": "Team bearbeiten",
 		"Delete team “{name}”? This only works as long as it has no records and backups. The groups and accounts remain.": "Team „{name}“ löschen? Das geht nur, solange es keine Datensätze und Sicherungen hat. Die Gruppen und Konten bleiben.",
-		"Teams cannot be loaded: {message}": "Teams lassen sich nicht laden: {message}"
+		"Teams cannot be loaded: {message}": "Teams lassen sich nicht laden: {message}",
+		"Backups stored with": "Sicherungen ablegen bei",
+		"Server backups of people who agreed are stored as files in this account’s folder “TimeSister-Sicherungen”.": "Die Server-Sicherungen der Personen, die zugestimmt haben, liegen als Dateien im Ordner „TimeSister-Sicherungen“ dieses Kontos.",
+		"Automatic: first admin": "Automatisch: erster Admin",
+		"No admin in the team": "Kein Admin im Team",
+		"Server backups": "Server-Sicherungen",
+		"Consent: {n} of {total}": "Freigegeben: {n} von {total}",
+		"Without backup this week: {n}": "Ohne Sicherung diese Woche: {n}",
+		"Last: {date}": "Zuletzt: {date}",
+		"No server backup yet": "Noch keine Server-Sicherung",
+		"Leads see all time calendars": "Leitung sieht alle Zeitkalender",
+		"Off: leads no longer receive the members’ time calendars; the apps withdraw the share at their next sync.": "Aus: Die Leitung bekommt die Zeitkalender der Mitglieder nicht mehr freigegeben; die Apps nehmen die Freigabe beim nächsten Abgleich zurück.",
+		"Backup required": "Sicherung angeordnet",
+		"The administration requires members to enable the backup.": "Die Verwaltung hat angeordnet, dass Mitglieder die Sicherung einschalten.",
+		"Yes": "Ja",
+		"No": "Nein"
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

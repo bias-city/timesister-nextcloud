@@ -9,6 +9,8 @@
 //   TS_SQL          optional: Befehl, der SQL auf stdin nimmt und Zeilen ausgibt,
 //                   z. B. "docker exec -i timesister-next-db-1 mariadb -N -unextcloud -pncpw nextcloud"
 //                   oder "sqlite3 ../../data/nextcloud.db". Ohne: DB-Prüfungen entfallen.
+//   TS_OCC          optional: Befehl für occ, z. B.
+//                   "docker exec -u www-data timesister-next-app-1 php occ". Ohne: Job-Prüfungen entfallen.
 import { execSync } from 'node:child_process'
 
 export const NC = (process.env.NC_URL || 'http://localhost:8081').replace(/\/$/, '')
@@ -95,4 +97,27 @@ export function sql(query) {
 		return null
 	}
 	return execSync(process.env.TS_SQL, { input: query + '\n', encoding: 'utf8' }).trim()
+}
+
+/** occ über TS_OCC, sonst null. Argumente werden einzeln in '…' gesetzt. */
+export function occ(...args) {
+	if (!process.env.TS_OCC) {
+		return null
+	}
+	const quoted = args.map((a) => `'${String(a).replace(/'/g, `'\\''`)}'`).join(' ')
+	return execSync(`${process.env.TS_OCC} ${quoted}`, { encoding: 'utf8' }).trim()
+}
+
+/**
+ * WebDAV/CalDAV-Anfrage unter /remote.php/dav. `path` ohne führenden
+ * Schrägstrich, Segmente schon kodiert.
+ * @returns {Promise<{status:number, text:string}>}
+ */
+export async function dav(who, method, path, body, headers = {}) {
+	const res = await fetch(`${NC}/remote.php/dav/${path}`, {
+		method,
+		headers: { Authorization: 'Basic ' + Buffer.from(`${who.user}:${who.pass}`).toString('base64'), ...headers },
+		body,
+	})
+	return { status: res.status, text: await res.text() }
 }

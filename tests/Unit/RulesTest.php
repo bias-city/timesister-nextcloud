@@ -114,6 +114,21 @@ class RulesTest extends TestCase {
 		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate($with(str_repeat('e', 65)))));
 	}
 
+	public function testTeamSettings(): void {
+		$this->assertSame(['leads_see_calendars' => true, 'backup_required' => false], TeamRules::SETTINGS, 'Standardwerte');
+		$this->assertSame([], TeamRules::settings(['name' => 'x']), 'fehlt: unverändert');
+		$this->assertSame([], TeamRules::settings(['settings' => null]));
+		$this->assertSame([], TeamRules::settings(['settings' => []]));
+		$this->assertSame(['backup_required' => true], TeamRules::settings(['settings' => ['backup_required' => true]]));
+		$this->assertSame(['leads_see_calendars' => false, 'backup_required' => false],
+			TeamRules::settings(['settings' => ['leads_see_calendars' => false, 'backup_required' => false]]));
+		$this->assertSame('422 invalid', self::code(fn () => TeamRules::settings(['settings' => ['leads_see_calendars' => 1]])));
+		$this->assertSame('422 invalid', self::code(fn () => TeamRules::settings(['settings' => ['backup_required' => 'true']])));
+		$this->assertSame('422 invalid', self::code(fn () => TeamRules::settings(['settings' => ['unbekannt' => true]])));
+		$this->assertSame('422 invalid', self::code(fn () => TeamRules::settings(['settings' => [true]])));
+		$this->assertSame('422 invalid', self::code(fn () => TeamRules::settings(['settings' => 'an'])));
+	}
+
 	public function testTime(): void {
 		$this->assertSame('2026-09-26T08:15:00Z', Time::iso(gmmktime(8, 15, 0, 9, 26, 2026)));
 		$this->assertNull(Time::iso(null));

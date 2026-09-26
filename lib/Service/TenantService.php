@@ -21,6 +21,8 @@ use OCP\IUserSession;
 final class TenantService {
 	/** @var list<array{tenant_id:int,role:string,gid:string}>|null */
 	private ?array $roleRows = null;
+	/** @var array<int,array<string,string>> Team → uid → Rolle */
+	private array $members = [];
 
 	public function __construct(
 		private IUserSession $userSession,
@@ -56,6 +58,7 @@ final class TenantService {
 	/** Nach Änderungen an den Teams. */
 	public function reset(): void {
 		$this->roleRows = null;
+		$this->members = [];
 	}
 
 	public function tenant(int $id): Tenant {
@@ -114,6 +117,11 @@ final class TenantService {
 
 	/** @return array<string,string> uid → stärkste Rolle im Team */
 	public function memberRoles(int $tenantId): array {
+		return $this->members[$tenantId] ??= $this->loadMemberRoles($tenantId);
+	}
+
+	/** @return array<string,string> */
+	private function loadMemberRoles(int $tenantId): array {
 		$byRole = [];
 		foreach ($this->roleGroupsOf($tenantId) as $role => $gid) {
 			$group = $gid === null ? null : $this->groupManager->get($gid);
@@ -124,17 +132,40 @@ final class TenantService {
 		return MembershipResolver::strongestRoles($byRole);
 	}
 
+	/** @return list<string> Konten mit Rolle admin, nach Kennung */
+	public function adminsOf(int $tenantId): array {
+		$roles = array_filter($this->memberRoles($tenantId), static fn (string $r) => $r === Role::ADMIN);
+		$admins = array_map('strval', array_keys($roles));
+		sort($admins, SORT_STRING);
+		return $admins;
+	}
+
+	/** Das Sicherungs-Konto: die Wahl, solange sie admin ist, sonst der erste admin. */
+	public function backupOwner(Tenant $t): ?string {
+		return BackupRules::pickOwner($t->getBackupOwner(), $this->adminsOf($t->getId()));
+	}
+
 	public function displayName(string $uid): string {
 		return $this->userManager->getDisplayName($uid) ?? $uid;
 	}
 
-	/** @return array{id:int,name:string,slug:string,groups:array<string,?string>} */
+	/** @return array{id:int,name:string,slug:string,groups:array<string,?string>,backup_owner:?string,settings:array{leads_see_calendars:bool,backup_required:bool}} */
 	public function presentTeam(Tenant $t): array {
 		return [
 			'id' => $t->getId(),
 			'name' => $t->getName(),
 			'slug' => $t->getSlug(),
 			'groups' => $this->groupsOf($t->getId()),
+			'backup_owner' => $this->backupOwner($t),
+			'settings' => self::settingsOf($t),
+		];
+	}
+
+	/** @return array{leads_see_calendars:bool,backup_required:bool} */
+	public static function settingsOf(Tenant $t): array {
+		return [
+			'leads_see_calendars' => $t->getLeadsSeeCalendars() === 1,
+			'backup_required' => $t->getBackupRequired() === 1,
 		];
 	}
 }

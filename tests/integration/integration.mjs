@@ -3,7 +3,8 @@
 // Integrationsprüfung der App gegen eine laufende Test-Nextcloud mit den
 // Konten aus seed.mjs. Prüft jede Zeile der Rechte-Tabelle aus API.md und
 // jeden Endpunkt, dazu Teamgrenze, Konflikte, Batch, Delta, Verlauf,
-// Sicherungen, Lebenszeichen und Parallelität.
+// Sicherungen (mit Freigabe, sichtbarer Kopie und Wochenjob), Lebenszeichen
+// und Parallelität.
 //
 //   NC_URL=http://localhost:8081 node tests/integration/integration.mjs
 //
@@ -12,10 +13,12 @@ import { datensaetze } from './teil-datensaetze.mjs'
 import { rest } from './teil-rest.mjs'
 import { teams } from './teil-teams.mjs'
 import { konten } from './teil-konten.mjs'
+import { sicherungen } from './teil-sicherungen.mjs'
 import { summary } from './harness.mjs'
 
 await teams()
 await konten()
 await datensaetze()
 await rest()
+await sicherungen()
 process.exit(summary())

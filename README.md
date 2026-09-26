@@ -19,7 +19,9 @@ master data, teams and roles; no UI apart from an admin settings section.*
 | Admin-Seite | `lib/Settings`, `templates/admin.php`, `js/admin.js`, `css/admin.css` |
 | Übersetzungen der Admin-Seite | `l10n/de.json` (du), `l10n/de_DE.json` (Sie) |
 | Konto/Gruppe gelöscht | `lib/Listener` |
-| Aufbewahrung (täglich) | `lib/BackgroundJob/Retention.php` |
+| Sicherungen: Export, Ablagen, Freigabe, eigene Kopie | `lib/Service/Backup*`, `CalendarExporter`, `IcsJoiner`, `ProtectedStore`, `VisibleCopy`, `ConsentService`, `OwnCopyService`, `WeekMarks` |
+| Wochensicherung (stündlich prüfen) | `lib/BackgroundJob/WeeklyBackup.php` |
+| Aufbewahrung (täglich): Verlauf, Staffel der Sicherungen (`Thinning`) | `lib/BackgroundJob/Retention.php` |
 
 Voraussetzungen: Nextcloud 33–34, PHP ≥ 8.2, keine anderen Apps.
 
@@ -34,11 +36,27 @@ composer run test:unit      # reine Klassen, ohne Nextcloud
 NC_URL=http://localhost:8081 composer run test:integration   # gegen eine Test-Nextcloud
 ```
 
+Wochenjob und Ausdünnen prüft die Integration nur mit `TS_OCC` (Befehl für
+`occ`, z. B. `docker exec -u www-data timesister-next-app-1 php occ`).
+
 Die Integration legt zwei Teams (`pb`, `at`) mit Konten `Test-2026-<konto>!`
 an und läuft nur gegen `localhost`. Mit `TS_SQL` (Befehl, der SQL auf stdin
 liest) prüft sie zusätzlich die Vermerke in der Datenbank.
 
 Neue Nextcloud-Version und App Store: [`UPDATE.md`](UPDATE.md).
+
+## Sicherungen und Updatefestigkeit
+
+Der Server exportiert den Zeitkalender mit `OCP\Calendar\ICalendarExport`
+(seit Nextcloud 32). Laut OCP liefert `export()` Sabre-`VCalendar`-Objekte;
+die App ruft davon nur `serialize()` auf und setzt die Texte selbst zusammen
+(`IcsJoiner`, zeilenweise, ohne Sabre). Psalm kennt Sabre nicht, darum steht
+genau diese Klasse in `psalm.xml` unter `UndefinedDocblockClass`. Ebenso
+erbt `OCP\Files\IRootFolder` das nicht mitgelieferte `OC\Hooks\Emitter`;
+`MissingDependency` ist nur für `lib/Service/VisibleCopy.php` aus.
+
+Dateien in Heimen von Personen löscht die App nur, wenn sie in
+`ts_backup_files` stehen und die Datei-ID noch auf denselben Pfad zeigt.
 
 ## Übersetzung
 
