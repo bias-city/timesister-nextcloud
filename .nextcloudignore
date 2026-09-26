@@ -1,0 +1,15 @@
+# Nicht mit der App ausliefern
+/.git
+/.github
+/.gitignore
+/.nextcloudignore
+/.phpunit.cache
+/composer.json
+/composer.lock
+/docs
+/phpunit.xml
+/psalm.xml
+/tests
+/tools
+/UPDATE.md
+/vendor

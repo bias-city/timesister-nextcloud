@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<!--
+  SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+	<id>timesister</id>
+	<name>TimeSister</name>
+	<summary>Stammdaten, Teams und Rechte für die Zeiterfassung TimeSister</summary>
+	<description><![CDATA[Die Server-Seite von TimeSister: Sie speichert Stammdaten (Personen, Standorte, Projekte, Kunden, Einstellungen) als Datensätze mit Version, führt getrennte Teams über je vier Nextcloud-Gruppen, prüft die Rechte auf dem Server, bewahrt Kalendersicherungen auf und sammelt die Lebenszeichen der Clients.
+
+Kalender, Buchungen und Auswertungen bleiben in CalDAV und in der Mac-App. Die App legt keine Konten an und rechnet keine Stunden.]]></description>
+	<version>0.1.0</version>
+	<licence>AGPL-3.0-or-later</licence>
+	<author homepage="https://bias.city">B/IAS – Basel Institut für angewandte Stadtforschung</author>
+	<namespace>TimeSister</namespace>
+	<category>tools</category>
+	<category>organization</category>
+	<website>https://bias.city/timesister</website>
+	<bugs>https://github.com/bias-city/timesister-nextcloud/issues</bugs>
+	<repository>https://github.com/bias-city/timesister-nextcloud</repository>
+	<dependencies>
+		<php min-version="8.2"/>
+		<nextcloud min-version="33" max-version="34"/>
+	</dependencies>
+	<background-jobs>
+		<job>OCA\TimeSister\BackgroundJob\Retention</job>
+	</background-jobs>
+	<settings>
+		<admin>OCA\TimeSister\Settings\AdminSettings</admin>
+		<admin-section>OCA\TimeSister\Settings\AdminSection</admin-section>
+	</settings>
+</info>

@@ -1,0 +1,38 @@
+{
+	"name": "timesister/nc-app",
+	"description": "TimeSister – Nextcloud-App für Stammdaten, Teams und Rechte",
+	"type": "project",
+	"license": "AGPL-3.0-or-later",
+	"autoload": {
+		"psr-4": {
+			"OCA\\TimeSister\\": "lib/"
+		}
+	},
+	"autoload-dev": {
+		"psr-4": {
+			"OCA\\TimeSister\\Tests\\": "tests/"
+		}
+	},
+	"require": {
+		"php": ">=8.2"
+	},
+	"require-dev": {
+		"nextcloud/ocp": "dev-stable34",
+		"phpunit/phpunit": "^10.5 || ^11.5 || ^12.0",
+		"vimeo/psalm": "^6.0"
+	},
+	"scripts": {
+		"lint": "find . -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 php -l",
+		"psalm": "psalm --threads=1 --no-cache",
+		"psalm:all": "bash tools/psalm-all.sh",
+		"test:unit": "phpunit -c phpunit.xml --no-coverage",
+		"test:integration": "node tests/integration/seed.mjs && node tests/integration/integration.mjs"
+	},
+	"config": {
+		"sort-packages": true,
+		"platform": {
+			"php": "8.2.27"
+		},
+		"optimize-autoloader": true
+	}
+}

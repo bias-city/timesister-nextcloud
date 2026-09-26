@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+<!--
+  SPDX-License-Identifier: AGPL-3.0-or-later
+
+  Statische Prüfung gegen die öffentlichen Schnittstellen (nextcloud/ocp).
+  tools/psalm-all.sh prüft gegen jede Version aus appinfo/info.xml und master.
+  phpVersion = kleinste PHP-Fassung der unterstützten Nextcloud-Versionen
+  (die CI vergleicht das mit nextcloud-version-matrix).
+  findUnusedIssueHandlerSuppression ist aus, weil dieselbe Datei gegen
+  mehrere Versionen läuft: Was in einer Version nötig ist, fehlt in der nächsten.
+-->
+<psalm
+	errorLevel="2"
+	resolveFromConfigFile="true"
+	phpVersion="8.2"
+	findUnusedCode="false"
+	findUnusedBaselineEntry="true"
+	findUnusedIssueHandlerSuppression="false"
+	ensureOverrideAttribute="false"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="https://getpsalm.org/schema/config"
+	xsi:schemaLocation="https://getpsalm.org/schema/config vendor/vimeo/psalm/config.xsd"
+>
+	<projectFiles>
+		<directory name="lib" />
+		<ignoreFiles>
+			<directory name="vendor" />
+		</ignoreFiles>
+	</projectFiles>
+	<extraFiles>
+		<directory name="vendor/nextcloud/ocp" />
+	</extraFiles>
+	<issueHandlers>
+		<!-- Veraltetes gilt als Fehler: Was Nextcloud als deprecated markiert,
+		     fällt mit einer der nächsten Hauptversionen weg. -->
+		<DeprecatedClass errorLevel="error" />
+		<DeprecatedConstant errorLevel="error" />
+		<DeprecatedFunction errorLevel="error" />
+		<DeprecatedInterface errorLevel="error" />
+		<DeprecatedMethod errorLevel="error" />
+		<DeprecatedProperty errorLevel="error" />
+		<DeprecatedTrait errorLevel="error" />
+		<!-- @internal in OCP ist so verboten wie \OC\. -->
+		<InternalClass errorLevel="error" />
+		<InternalMethod errorLevel="error" />
+		<InternalProperty errorLevel="error" />
+		<!-- Entity::$id setzt Nextcloud beim Laden, nicht der Konstruktor. -->
+		<PropertyNotSetInConstructor>
+			<errorLevel type="suppress">
+				<directory name="lib/Db" />
+			</errorLevel>
+		</PropertyNotSetInConstructor>
+		<!-- Doctrine liefert nextcloud/ocp nicht mit; ISchemaWrapper gibt bis
+		     Nextcloud 34 Doctrines Tabellen-Objekte zurück. Nur die Migration. -->
+		<UndefinedDocblockClass>
+			<errorLevel type="suppress">
+				<referencedClass name="Doctrine\DBAL\Schema\Table" />
+				<referencedClass name="Doctrine\DBAL\Schema\Schema" />
+			</errorLevel>
+		</UndefinedDocblockClass>
+	</issueHandlers>
+</psalm>

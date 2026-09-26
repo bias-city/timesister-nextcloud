@@ -1,0 +1,90 @@
+# Claude im Update-Weg (anthropics/claude-code-action, Hauptversion v1).
+# Läuft bei Issues mit Label nc-update, bei „@claude“ in Kommentaren und
+# wenn die Frühwarnung es aufruft. Aus, solange das Secret ANTHROPIC_API_KEY
+# fehlt. Legt nichts an ausser einem Zweig und einem Pull-Request.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+name: Claude
+
+on:
+  issues:
+    types: [opened, labeled]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  workflow_call:
+    inputs:
+      issue_number:
+        type: number
+        required: true
+      version:
+        type: string
+        required: true
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claude-${{ inputs.issue_number || github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    # Nur im Repo der App; nur wenn es wirklich um Claude geht (spart Minuten).
+    if: >-
+      github.repository == 'bias-city/timesister-nextcloud' && (
+        inputs.issue_number ||
+        (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'nc-update')) ||
+        (github.event_name != 'issues' && contains(github.event.comment.body, '@claude'))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      enabled: ${{ steps.k.outputs.enabled }}
+    steps:
+      - id: k
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else echo "enabled=false" >> "$GITHUB_OUTPUT"; echo "::notice::Claude ist aus: Secret ANTHROPIC_API_KEY fehlt."; fi
+
+  claude:
+    needs: gate
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      # Damit Claude psalm, PHPUnit und tools/*.sh selbst laufen lassen kann.
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.2'
+          coverage: none
+          tools: composer
+
+      - run: composer install --no-interaction --no-progress
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          label_trigger: nc-update
+          trigger_phrase: '@claude'
+          # Aufruf aus der Frühwarnung: fester Auftrag. Sonst leer, dann gilt das Issue.
+          prompt: >-
+            ${{ inputs.issue_number && format('Lies UPDATE.md und bring die App auf Nextcloud {0}. Grundlage ist Issue #{1}. Arbeite die Checkliste ab, lass composer run psalm:all und composer run test:unit laufen und öffne einen Pull-Request, der Issue #{1} schliesst.', inputs.version, inputs.issue_number) || '' }}
+          claude_args: >-
+            --max-turns 60
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(composer:*),Bash(php:*),Bash(bash tools/*),Bash(tools/*),Bash(vendor/bin/*),Bash(git:*),Bash(gh pr:*),Bash(gh issue:*)"

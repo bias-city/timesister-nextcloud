@@ -1,0 +1,276 @@
+# Frühwarnung: prüft die App wöchentlich gegen die neueste Nextcloud-
+# Veröffentlichung und gegen master. Schlägt etwas fehl, eröffnet sie ein
+# Issue mit dem Label nc-update (ohne Doppel) und übergibt eine neue
+# Hauptversion an Claude (claude.yml), falls ANTHROPIC_API_KEY gesetzt ist.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+name: Frühwarnung Nextcloud
+
+on:
+  schedule:
+    - cron: '17 5 * * 1' # montags 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fruehwarnung
+  cancel-in-progress: true
+
+env:
+  APP_NAME: timesister
+
+jobs:
+  ziel:
+    # Nur im Repo der App, nicht in Forks.
+    if: github.repository == 'bias-city/timesister-nextcloud'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.z.outputs.tag }}
+      major: ${{ steps.z.outputs.major }}
+      matrix: ${{ steps.z.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: appinfo/
+
+      - name: Neueste Nextcloud und PHP-Fassungen
+        id: z
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$(gh api repos/nextcloud/server/releases/latest --jq .tag_name)
+          ver=${tag#v}; major=${ver%%.*}
+          php_of() {
+            id=$(curl -fsSL "https://raw.githubusercontent.com/nextcloud/server/$1/lib/versioncheck.php" \
+              | sed -n 's/.*PHP_VERSION_ID < \([0-9]*\).*/\1/p' | head -n1)
+            echo "$((id / 10000)).$(((id / 100) % 100))"
+          }
+          matrix=$(jq -cn --arg tag "$tag" --arg ver "$ver" --arg major "$major" \
+            --arg pr "$(php_of "$tag")" --arg pm "$(php_of master)" '{include: [
+              {name: ("Nextcloud " + $ver), kind: "release", server: $tag, ocp: ("dev-stable" + $major), php: $pr, major: $major},
+              {name: "Nextcloud master", kind: "master", server: "master", ocp: "dev-master", php: $pm, major: ""}]}')
+          { echo "tag=$tag"; echo "major=$major"; echo "matrix=$matrix"; } >> "$GITHUB_OUTPUT"
+          echo "Ziel: $tag (Hauptversion $major) und master"
+
+  pruefen:
+    needs: ziel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.ziel.outputs.matrix) }}
+    name: ${{ matrix.name }}
+    steps:
+      - name: Checkout server ${{ matrix.server }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+          repository: nextcloud/server
+          ref: ${{ matrix.server }}
+
+      - name: Checkout app
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: apps/${{ env.APP_NAME }}
+
+      - name: Set up php ${{ matrix.php }}
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: bz2, ctype, curl, dom, fileinfo, gd, iconv, intl, json, libxml, mbstring, openssl, pcntl, posix, session, simplexml, xmlreader, xmlwriter, zip, zlib, sqlite, pdo_sqlite
+          coverage: none
+          ini-file: development
+          ini-values: disable_functions=, post_max_size=64M, upload_max_filesize=64M, memory_limit=1G
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Jede Prüfung läuft weiter, auch wenn eine vorher scheitert; das
+      # Ergebnis sammelt der Schritt „Bericht“, der letzte Schritt entscheidet.
+      - name: Versionsgrenze in info.xml
+        id: grenze
+        if: matrix.kind == 'release'
+        continue-on-error: true
+        working-directory: apps/${{ env.APP_NAME }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          max=$(grep -o '<nextcloud [^>]*>' appinfo/info.xml | sed -n 's/.*max-version="\([0-9]*\)".*/\1/p')
+          if [ "${{ matrix.major }}" -gt "$max" ]; then
+            echo "info.xml: max-version $max, aber Nextcloud ${{ matrix.major }} ist erschienen." | tee "$GITHUB_WORKSPACE/logs/grenze.log"
+            exit 1
+          fi
+
+      - name: Composer und nextcloud/ocp:${{ matrix.ocp }}
+        id: composer
+        continue-on-error: true
+        working-directory: apps/${{ env.APP_NAME }}
+        run: |
+          set -o pipefail; mkdir -p "$GITHUB_WORKSPACE/logs"
+          { composer remove nextcloud/ocp --dev --no-scripts --no-interaction \
+            && composer install --no-interaction --no-progress \
+            && composer require --dev "nextcloud/ocp:${{ matrix.ocp }}" --ignore-platform-reqs --with-dependencies --no-interaction; } 2>&1 \
+            | tee "$GITHUB_WORKSPACE/logs/composer.log"
+
+      - name: Psalm
+        id: psalm
+        continue-on-error: true
+        working-directory: apps/${{ env.APP_NAME }}
+        run: |
+          set -o pipefail
+          composer run psalm -- --monochrome --no-progress --output-format=compact 2>&1 | tee "$GITHUB_WORKSPACE/logs/psalm.log"
+
+      - name: Nextcloud installieren und App einschalten
+        id: install
+        continue-on-error: true
+        run: |
+          set -o pipefail; mkdir -p data
+          { ./occ maintenance:install --database=sqlite --database-name=nextcloud --admin-user admin --admin-pass admin \
+            && ./occ app:enable --force ${{ env.APP_NAME }} \
+            && ./occ config:system:set trusted_domains 1 --value=127.0.0.1; } 2>&1 | tee logs/install.log
+
+      - name: PHPUnit
+        id: unit
+        continue-on-error: true
+        working-directory: apps/${{ env.APP_NAME }}
+        run: |
+          set -o pipefail
+          composer run test:unit 2>&1 | tee "$GITHUB_WORKSPACE/logs/unit.log"
+
+      - name: Integration
+        id: integration
+        continue-on-error: true
+        env:
+          NC_URL: http://127.0.0.1:8080
+          NC_ADMIN_PASS: admin
+          TS_SQL: sqlite3 ${{ github.workspace }}/data/nextcloud.db
+        run: |
+          set -o pipefail
+          php -S 127.0.0.1:8080 > php-server.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/status.php >/dev/null && break; sleep 1; done
+          cd apps/${{ env.APP_NAME }}
+          composer run test:integration 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee "$GITHUB_WORKSPACE/logs/integration.log"
+
+      - name: Bericht
+        if: always()
+        env:
+          NAME: ${{ matrix.name }}
+          KIND: ${{ matrix.kind }}
+          O_grenze: ${{ steps.grenze.outcome }}
+          O_composer: ${{ steps.composer.outcome }}
+          O_psalm: ${{ steps.psalm.outcome }}
+          O_install: ${{ steps.install.outcome }}
+          O_unit: ${{ steps.unit.outcome }}
+          O_integration: ${{ steps.integration.outcome }}
+        run: |
+          mkdir -p "bericht-$KIND"; out="bericht-$KIND/bericht.md"
+          echo "### $NAME" > "$out"; failed=0
+          for s in grenze composer psalm install unit integration; do
+            o=$(printenv "O_$s" || true)
+            [ "$o" = failure ] || continue
+            failed=1
+            echo "" >> "$out"; echo "**Fehlgeschlagen: $s**" >> "$out"; echo '```' >> "$out"
+            [ -f "logs/$s.log" ] && grep -v '^\s*$' "logs/$s.log" | sed 's/\x1b\[[0-9;]*m//g' | tail -n 40 >> "$out"
+            echo '```' >> "$out"
+          done
+          [ "$failed" = 1 ] && touch "bericht-$KIND/fehlgeschlagen"
+          [ "$failed" = 0 ] && echo "" >> "$out" && echo "Alle Prüfungen bestanden." >> "$out"
+          cat "$out" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bericht sichern
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bericht-${{ matrix.kind }}
+          path: bericht-${{ matrix.kind }}/
+          retention-days: 14
+
+      - name: Ergebnis
+        if: always()
+        run: test ! -f "bericht-${{ matrix.kind }}/fehlgeschlagen"
+
+  melden:
+    needs: [ziel, pruefen]
+    if: always() && needs.pruefen.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      issue: ${{ steps.m.outputs.issue }}
+      neu: ${{ steps.m.outputs.neu }}
+      release: ${{ steps.m.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: UPDATE.md
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: bericht-*
+
+      - name: Issue eröffnen oder ergänzen
+        id: m
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.ziel.outputs.tag }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          ver=${TAG#v}; major=${ver%%.*}
+          if [ -f bericht-release/fehlgeschlagen ]; then
+            release=true; title="Nextcloud $major: App anpassen (Prüfung gegen $ver fehlgeschlagen)"
+          else
+            release=false; title="Nextcloud master: App-Prüfung fehlgeschlagen"
+          fi
+          {
+            echo "Die Frühwarnung ist fehlgeschlagen: $RUN_URL"
+            echo ""
+            echo "Neueste Veröffentlichung: **$ver**. Geprüft wurde dagegen und gegen master."
+            echo ""
+            for k in release master; do [ -f "bericht-$k/bericht.md" ] && cat "bericht-$k/bericht.md" && echo ""; done
+            echo "## Checkliste (UPDATE.md)"
+            echo ""
+            sed -n '/<!-- checkliste -->/,/<!-- \/checkliste -->/p' UPDATE.md | grep -v '<!--'
+            echo ""
+            echo "## Auftrag für Claude"
+            echo ""
+            echo "> Lies UPDATE.md und bring die App auf Nextcloud $major."
+          } > body.md
+          gh label create nc-update --color D93F0B --description "Neue Nextcloud-Version: App anpassen" 2>/dev/null || true
+          existing=$(gh issue list --label nc-update --state open --limit 50 --json number,title \
+            --jq ".[] | select(.title == \"$title\") | .number" | head -n1)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Wieder fehlgeschlagen: $RUN_URL"
+            issue=$existing; neu=false
+          else
+            url=$(gh issue create --title "$title" --label nc-update --body-file body.md)
+            issue=${url##*/}; neu=true
+          fi
+          { echo "issue=$issue"; echo "neu=$neu"; echo "release=$release"; } >> "$GITHUB_OUTPUT"
+
+  claude:
+    # Issues, die ein Workflow mit GITHUB_TOKEN anlegt, lösen keine weiteren
+    # Workflows aus – darum ruft die Frühwarnung Claude selbst auf. Nur bei
+    # einer neuen Veröffentlichung, nicht bei master; claude.yml prüft das Secret.
+    needs: [ziel, melden]
+    if: always() && needs.melden.outputs.neu == 'true' && needs.melden.outputs.release == 'true'
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    uses: ./.github/workflows/claude.yml
+    with:
+      issue_number: ${{ fromJSON(needs.melden.outputs.issue) }}
+      version: ${{ needs.ziel.outputs.major }}
+    secrets: inherit

@@ -1,0 +1,48 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* Nur Nextclouds CSS-Variablen: hell und dunkel ohne eigene Farben. */
+
+#timesister-admin { max-width: 960px; }
+#timesister-admin h3 { margin: 24px 0 8px; font-weight: bold; }
+#timesister-admin .ts-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#timesister-admin .ts-head h3 { margin-bottom: 8px; }
+#timesister-admin .ts-muted { color: var(--color-text-maxcontrast); }
+
+#timesister-admin table { width: 100%; border-collapse: collapse; }
+#timesister-admin th,
+#timesister-admin td {
+	text-align: left; vertical-align: top;
+	padding: 8px 10px; border-bottom: 1px solid var(--color-border);
+}
+#timesister-admin th { color: var(--color-text-maxcontrast); font-weight: normal; }
+#timesister-admin td.ts-num { text-align: right; font-variant-numeric: tabular-nums; }
+#timesister-admin td.ts-right { text-align: right; white-space: nowrap; }
+#timesister-admin .ts-roles { display: grid; grid-template-columns: max-content 1fr max-content; gap: 2px 12px; }
+#timesister-admin .ts-roles .ts-count { text-align: right; color: var(--color-text-maxcontrast); font-variant-numeric: tabular-nums; }
+#timesister-admin .ts-slug { font-family: monospace; color: var(--color-text-maxcontrast); }
+
+#timesister-admin .ts-bad { color: var(--color-error-text, var(--color-error)); font-weight: bold; }
+#timesister-admin .ts-ok { color: var(--color-success-text, var(--color-success)); }
+#timesister-admin .ts-error { color: var(--color-error-text, var(--color-error)); min-height: 1.2em; margin: 8px 0 0; }
+
+#timesister-admin .ts-form {
+	margin: 16px 0; padding: 16px;
+	border: 1px solid var(--color-border); border-radius: var(--border-radius-large);
+	background: var(--color-main-background);
+}
+#timesister-admin .ts-form h3 { margin-top: 0; }
+#timesister-admin .ts-grid { display: grid; grid-template-columns: max-content minmax(200px, 360px); gap: 8px 16px; align-items: center; }
+#timesister-admin .ts-grid input,
+#timesister-admin .ts-grid select { width: 100%; margin: 0; }
+#timesister-admin .ts-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+#timesister-admin button.ts-icon {
+	width: 34px; height: 34px; min-height: 34px; padding: 0;
+	display: inline-flex; align-items: center; justify-content: center;
+	vertical-align: middle; color: var(--color-main-text);
+}
+#timesister-admin ul.ts-list { margin: 0; padding: 0; list-style: none; }
+#timesister-admin ul.ts-list li { padding: 1px 0; }
+
+@media (max-width: 640px) {
+	#timesister-admin .ts-grid { grid-template-columns: 1fr; }
+}

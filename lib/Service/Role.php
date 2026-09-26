@@ -1,0 +1,45 @@
+<?php
+
+declare(strict_types=1);
+
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+namespace OCA\TimeSister\Service;
+
+/** Die vier Rollen eines Teams, von schwach nach stark. */
+final class Role {
+	public const USER = 'user';
+	public const LEAD = 'lead';
+	public const SUBADMIN = 'subadmin';
+	public const ADMIN = 'admin';
+
+	/** Alle Rollen, schwächste zuerst. */
+	public const ALL = [self::USER, self::LEAD, self::SUBADMIN, self::ADMIN];
+
+	public static function isValid(string $role): bool {
+		return in_array($role, self::ALL, true);
+	}
+
+	public static function rank(string $role): int {
+		$i = array_search($role, self::ALL, true);
+		if ($i === false) {
+			throw new \InvalidArgumentException('Unbekannte Rolle');
+		}
+		return $i;
+	}
+
+	/** Die stärkere von zwei Rollen. */
+	public static function stronger(string $a, string $b): string {
+		return self::rank($a) >= self::rank($b) ? $a : $b;
+	}
+
+	/** subadmin und admin verwalten das Team. */
+	public static function manages(string $role): bool {
+		return self::rank($role) >= self::rank(self::SUBADMIN);
+	}
+
+	/** lead und darüber lesen alles. */
+	public static function readsAll(string $role): bool {
+		return self::rank($role) >= self::rank(self::LEAD);
+	}
+}
