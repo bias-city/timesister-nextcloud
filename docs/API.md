@@ -274,3 +274,12 @@ Präzisierungen, die die App so umsetzt. Nichts oben Stehendes ändert sich.
   markiert das Team als „Zuordnung gebrochen“ (Admin-Seite, rot).
 - **Drosselung:** Schreibende Endpunkte höchstens 300 Aufrufe je Minute und
   Konto, `POST /backups` 60; darüber antwortet Nextcloud mit `429`.
+
+- **Form der Einstellungen** (aus dem Fork, 26.09.2026): `setting/targethours`
+  hat als `data` `{"entries": [{"from", "weekly_hours", "note"}]}`,
+  `setting/settings` hat `{"vacation_code": …}`.
+- **Gruppenadmins:** Team-Admins und Verwaltung brauchen in Nextcloud
+  Gruppenadmin-Rechte auf die vier Gruppen ihres Teams. Rollen, Konten und
+  Austritte laufen über Nextclouds Provisioning-API. Nextcloud lässt
+  Gruppenadmins niemanden aus der letzten Gruppe nehmen, die sie verwalten
+  (OCS 105); das kann nur ein Nextcloud-Admin.
