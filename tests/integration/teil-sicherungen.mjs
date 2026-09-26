@@ -39,8 +39,24 @@ function runJob(name) {
 	return true
 }
 
+/**
+ * Den Zeitkalender `zeit-<uid>` mit einem Termin anlegen, falls er fehlt.
+ * Sonst legt ihn die Mac-App an; in einer frischen Nextcloud (CI) fehlt er.
+ */
+async function zeitkalender(who) {
+	const cal = `calendars/${encodeURIComponent(who.user)}/zeit-${encodeURIComponent(who.user)}/`
+	if ((await dav(who, 'PROPFIND', cal, undefined, { Depth: '0' })).status === 207) return
+	const mk = await dav(who, 'MKCALENDAR', cal)
+	const ev = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//TimeSister//Integration//DE', 'BEGIN:VEVENT',
+		`UID:integration-${who.user}`, 'DTSTAMP:20260901T080000Z', 'DTSTART:20260901T080000Z', 'DTEND:20260901T090000Z',
+		'SUMMARY:Integration', 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n')
+	const put = await dav(who, 'PUT', `${cal}integration.ics`, ev, { 'Content-Type': 'text/calendar' })
+	check(`Zeitkalender zeit-${who.user} angelegt`, mk.status === 201 && put.status === 201, `MKCALENDAR ${mk.status}, PUT ${put.status}`)
+}
+
 export async function sicherungen() {
 	head('Freigabe der Sicherung')
+	await zeitkalender(U1)
 	const prior1 = (await ocs(U1, 'GET', '/backups/consent')).data
 	const prior2 = (await ocs(U2, 'GET', '/backups/consent')).data
 	const own1 = (await ocs(U1, 'GET', '/backups/own-copy')).data
