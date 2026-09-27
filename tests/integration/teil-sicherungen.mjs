@@ -72,10 +72,19 @@ export async function sicherungen() {
 		await ocs(U1, 'PUT', '/backups/consent', { consent: false })
 		const now0 = await ocs(U1, 'POST', '/backups/now', {})
 		check('without consent: POST /backups/now → 403 with the sentence from the contract', now0.status === 403 && now0.data?.error === 'forbidden' && now0.data?.message === REFUSED, now0.text)
-		const now0de = await ocs(U1, 'POST', '/backups/now', {}, { lang: 'de' })
-		check('same call with Accept-Language: de → the German sentence (translation end to end)', now0de.status === 403 && now0de.data?.message === REFUSED_DE, now0de.text)
-		const now0deDE = await ocs(U1, 'POST', '/backups/now', {}, { lang: 'de-DE' })
-		check('same call with Accept-Language: de-DE (formal) → the same German sentence', now0deDE.status === 403 && now0deDE.data?.message === REFUSED_DE, now0deDE.text)
+		// Nextcloud stores the Accept-Language of an account's first login as its
+		// language and prefers it afterwards; so the account language decides here.
+		const userPath = `/ocs/v2.php/cloud/users/${encodeURIComponent(U1.user)}`
+		const langBefore = (await ocs(ADMIN, 'GET', userPath)).data?.language || 'en'
+		try {
+			for (const [lang, what] of [['de', 'account language de'], ['de_DE', 'account language de_DE (formal)']]) {
+				await ocs(ADMIN, 'PUT', userPath, { key: 'language', value: lang })
+				const r = await ocs(U1, 'POST', '/backups/now', {})
+				check(`same call with ${what} → the German sentence (translation end to end)`, r.status === 403 && r.data?.message === REFUSED_DE, r.text)
+			}
+		} finally {
+			await ocs(ADMIN, 'PUT', userPath, { key: 'language', value: langBefore })
+		}
 		const up0 = await ocs(U1, 'POST', '/backups', { taken_on: '2099-12-29', ics_base64: b64('BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n') })
 		check('without consent: POST /backups → 403 with the sentence', up0.status === 403 && up0.data?.message === REFUSED, up0.text)
 		expect('consent without notice', await ocs(U1, 'PUT', '/backups/consent', { consent: true }), 422, 'invalid')
