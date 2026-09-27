@@ -7,21 +7,22 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Service;
 
 /**
- * Bestimmt Team und Rolle eines Kontos (Fassung 2). Rein.
+ * Determines an account's team and role (API version 2). Pure.
  *
- * - Mitglied: in der Teamgruppe oder Gruppenadmin davon, und nicht
- *   ausgetreten (`left_at` in ts_members).
- * - kein Team: `no_team`; zwei Teams: `ambiguous_team`.
- * - Rolle: `admin`, wer die Teamgruppe verwaltet; sonst die App-Rolle
- *   `subadmin` oder `lead`; sonst `user`.
- * - Nur Zeilen mit `team` aus ts_role_groups zählen, alte (Fassung 1) nicht.
+ * - Member: in the team group or a group admin of it, and not left
+ *   (`left_at` in ts_members).
+ * - No team: `no_team`; two teams: `ambiguous_team`.
+ * - Role: `admin` for whoever manages the team group; otherwise the app
+ *   role `subadmin` or `lead`; otherwise `user`.
+ * - Only rows with `team` from ts_role_groups count, old ones (API
+ *   version 1) do not.
  */
 final class MembershipResolver {
 	/**
-	 * @param list<string> $userGroupIds Gruppen des Kontos
-	 * @param list<string> $subAdminGroupIds Gruppen, die das Konto in Nextcloud verwaltet
-	 * @param list<array{tenant_id:int,role:string,gid:string}> $rows alle Zeilen aus ts_role_groups
-	 * @param array<int,array{role:?string,left_at:?int}> $entries Team → Eintrag des Kontos aus ts_members
+	 * @param list<string> $userGroupIds the account's groups
+	 * @param list<string> $subAdminGroupIds groups the account manages in Nextcloud
+	 * @param list<array{tenant_id:int,role:string,gid:string}> $rows all rows from ts_role_groups
+	 * @param array<int,array{role:?string,left_at:?int}> $entries team → the account's entry from ts_members
 	 * @return array{tenant_id:int,role:string}
 	 * @throws ApiException
 	 */
@@ -34,7 +35,7 @@ final class MembershipResolver {
 			if (!$admin && !isset($in[$gid])) {
 				continue;
 			}
-			// Ausgetreten: gehört nicht mehr zu diesem Team, auch wenn es in der Gruppe steht.
+			// Left: no longer belongs to this team, even if listed in the group.
 			if (($entries[$tenant]['left_at'] ?? null) !== null) {
 				continue;
 			}
@@ -52,7 +53,7 @@ final class MembershipResolver {
 
 	/**
 	 * @param list<array{tenant_id:int,role:string,gid:string}> $rows
-	 * @return array<int,string> Team → Teamgruppe
+	 * @return array<int,string> team → team group
 	 */
 	public static function teamGroups(array $rows): array {
 		$out = [];
@@ -64,7 +65,7 @@ final class MembershipResolver {
 		return $out;
 	}
 
-	/** Rolle aus Gruppenadmin und App-Rolle; unbekannte App-Rollen gelten als `user`. */
+	/** Role from group admin and app role; unknown app roles count as `user`. */
 	public static function roleOf(bool $admin, ?string $appRole): string {
 		if ($admin) {
 			return Role::ADMIN;
@@ -73,11 +74,11 @@ final class MembershipResolver {
 	}
 
 	/**
-	 * Alle Mitglieder eines Teams, auch Ausgetretene, nach Kennung.
+	 * All members of a team, including those who left, by identifier.
 	 *
-	 * @param list<string> $groupUsers Konten der Teamgruppe
-	 * @param list<string> $subAdmins Gruppenadmins der Teamgruppe
-	 * @param array<string,array{role:?string,left_at:?int}> $entries uid → Eintrag aus ts_members
+	 * @param list<string> $groupUsers accounts of the team group
+	 * @param list<string> $subAdmins group admins of the team group
+	 * @param array<string,array{role:?string,left_at:?int}> $entries uid → entry from ts_members
 	 * @return array<string,array{role:string,left_at:?int}>
 	 */
 	public static function members(array $groupUsers, array $subAdmins, array $entries): array {
@@ -96,7 +97,7 @@ final class MembershipResolver {
 
 	/**
 	 * @param array<string,array{role:string,left_at:?int}> $members
-	 * @return array<string,string> uid → Rolle, ohne Ausgetretene
+	 * @return array<string,string> uid → role, without those who left
 	 */
 	public static function activeRoles(array $members): array {
 		$out = [];

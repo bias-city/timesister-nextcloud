@@ -11,7 +11,7 @@ use OCA\TimeSister\Db\ClientStatusMapper;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\DB\Exception as DbException;
 
-/** Lebenszeichen der Clients und „Wer fehlt“. */
+/** Status reports of the clients and "who is missing". */
 final class StatusService {
 	public function __construct(
 		private ClientStatusMapper $status,
@@ -23,8 +23,8 @@ final class StatusService {
 	}
 
 	/**
-	 * Lebenszeichen des Aufrufers. Nur die geschickten Felder ändern sich;
-	 * `null` löscht ein Feld.
+	 * The caller's status report. Only the fields sent change; `null`
+	 * clears a field.
 	 *
 	 * @param array<string,mixed> $in
 	 * @return array{seen_at:string}
@@ -60,7 +60,7 @@ final class StatusService {
 				$new ? $this->status->insert($s) : $this->status->update($s);
 				return ['seen_at' => (string)Time::iso($now)];
 			} catch (DbException $e) {
-				// Zwei Lebenszeichen gleichzeitig: das zweite aktualisiert.
+				// Two status reports at the same time: the second updates.
 				if ($e->getReason() !== DbException::REASON_UNIQUE_CONSTRAINT_VIOLATION || $attempt >= 2) {
 					throw $e;
 				}
@@ -68,7 +68,7 @@ final class StatusService {
 		}
 	}
 
-	/** @return list<array<string,mixed>> alle Mitglieder, auch ohne Lebenszeichen */
+	/** @return list<array<string,mixed>> all members, even without a status report */
 	public function list(Membership $m): array {
 		$this->policy->requireTeamRead($m);
 		$byUid = $this->status->findByTenant($m->tenantId);

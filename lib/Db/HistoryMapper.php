@@ -17,7 +17,7 @@ final class HistoryMapper extends QBMapper {
 		parent::__construct($db, 'ts_history', History::class);
 	}
 
-	/** @return list<History> neueste zuerst */
+	/** @return list<History> newest first */
 	public function findFor(int $tenantId, string $kind, string $key, int $limit = 100): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
@@ -44,8 +44,8 @@ final class HistoryMapper extends QBMapper {
 	}
 
 	/**
-	 * Fassungen älter als `$cutoff` löschen – aber nie die neueste eines
-	 * Datensatzes (die mit der Fassung des Datensatzes selbst).
+	 * Delete versions older than `$cutoff` – but never the newest one of a
+	 * record (the one matching the record's own version).
 	 */
 	public function prune(int $cutoff): int {
 		$total = 0;

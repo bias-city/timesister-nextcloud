@@ -1,6 +1,6 @@
-# Nach Nextclouds Vorlage psalm-matrix (github.com/nextcloud/.github, workflow-templates).
-# Psalm gegen jede Hauptversion von min bis max aus appinfo/info.xml.
-# master prüft nur die wöchentliche Frühwarnung (fruehwarnung.yml).
+# After Nextcloud's template psalm-matrix (github.com/nextcloud/.github, workflow-templates).
+# Psalm against every major version from min to max in appinfo/info.xml.
+# Only the weekly early warning (fruehwarnung.yml) checks master.
 # SPDX-FileCopyrightText: 2022-2024 Nextcloud GmbH and Nextcloud contributors
 # SPDX-License-Identifier: MIT
 

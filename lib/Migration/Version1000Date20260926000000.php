@@ -13,8 +13,8 @@ use OCP\Migration\IOutput;
 use OCP\Migration\SimpleMigrationStep;
 
 /**
- * Die sechs Tabellen der App (Plan 3.2). Zeiten als Unix-Sekunden (UTC),
- * JSON als Text.
+ * The app's six tables (plan 3.2). Times as Unix seconds (UTC), JSON as
+ * text.
  */
 final class Version1000Date20260926000000 extends SimpleMigrationStep {
 	public function changeSchema(IOutput $output, Closure $schemaClosure, array $options): ?ISchemaWrapper {
@@ -40,7 +40,7 @@ final class Version1000Date20260926000000 extends SimpleMigrationStep {
 			$t->addColumn('role', Types::STRING, ['notnull' => true, 'length' => 16]);
 			$t->addColumn('gid', Types::STRING, ['notnull' => true, 'length' => 64]);
 			$t->setPrimaryKey(['id']);
-			// Eine Gruppe gehört zu höchstens einem Team, eine Rolle hat genau eine Gruppe.
+			// A group belongs to at most one team, a role has exactly one group.
 			$t->addUniqueIndex(['gid'], 'ts_rg_gid');
 			$t->addUniqueIndex(['tenant_id', 'role'], 'ts_rg_role');
 		}

@@ -10,9 +10,9 @@ use OCP\AppFramework\Db\Entity;
 use OCP\DB\Types;
 
 /**
- * Eine Kalendersicherung. Die Datei liegt in IAppData unter
- * `t<Team>/<Konto>/<Tag>.ics`; der Name kommt nie aus der Anfrage. Die
- * sichtbare Kopie liegt bei `fileOwner` unter `filePath`.
+ * A calendar backup. The file lives in IAppData under
+ * `t<team>/<account>/<day>.ics`; the name never comes from the request. The
+ * visible copy lives with `fileOwner` under `filePath`.
  *
  * @method int getTenantId()
  * @method void setTenantId(int $tenantId)

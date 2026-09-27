@@ -1,79 +1,86 @@
-# TimeSister für Nextcloud
+# TimeSister for Nextcloud
 
-Die Server-Seite der Zeiterfassung TimeSister: Stammdaten als Datensätze mit
-Version, getrennte Teams über je eine Nextcloud-Gruppe (Admins sind deren
-Gruppenadmins, Leitung und Verwaltung führt die App), Rechteprüfung auf dem
-Server, Verlauf, Kalendersicherungen und Lebenszeichen der Clients.
-Schnittstelle: [`docs/API.md`](docs/API.md).
+Server side of the TimeSister time tracker (macOS): master data as
+versioned records, separate teams via one Nextcloud group each (Admins are
+that group's group admins; Lead and Manager are managed by the app),
+permission checks on the server, history, calendar backups and status
+reports from clients. No UI apart from an admin settings section.
+API: [`docs/API.md`](docs/API.md).
 
-*Server side of the TimeSister time tracker (macOS). OCS API for versioned
-master data, teams and roles; no UI apart from an admin settings section.*
+## Structure
 
-## Aufbau
-
-| Teil | Wo |
+| Part | Where |
 |---|---|
-| OCS-Controller (`/ocs/v2.php/apps/timesister/api/v1`) | `lib/Controller` |
-| Team, Rolle, Rechte, Prüfungen, Konflikte | `lib/Service` (reine Klassen ohne Nextcloud: `AccessPolicy`, `MembershipResolver`, `ProjectAccess`, `RecordValidator`, `VersionCheck`, `*Rules`) |
-| App-Rollen und Austritt (Fassung 2) | `MemberService`, Tabelle `ts_members` |
-| Tabellen `ts_*`, Mapper | `lib/Db`, `lib/Migration` |
-| Admin-Seite | `lib/Settings`, `templates/admin.php`, `js/admin.js`, `css/admin.css` |
-| Übersetzungen der Admin-Seite | `l10n/de.json` (du), `l10n/de_DE.json` (Sie) |
-| Konto/Gruppe gelöscht | `lib/Listener` |
-| Sicherungen: Export, Ablagen, Freigabe, eigene Kopie | `lib/Service/Backup*`, `CalendarExporter`, `IcsJoiner`, `ProtectedStore`, `VisibleCopy`, `ConsentService`, `OwnCopyService`, `WeekMarks` |
-| Wochensicherung (stündlich prüfen) | `lib/BackgroundJob/WeeklyBackup.php` |
-| Aufbewahrung (täglich): Verlauf, Staffel der Sicherungen (`Thinning`) | `lib/BackgroundJob/Retention.php` |
+| OCS controller (`/ocs/v2.php/apps/timesister/api/v1`) | `lib/Controller` |
+| Team, role, permissions, checks, conflicts | `lib/Service` (pure classes without Nextcloud: `AccessPolicy`, `MembershipResolver`, `ProjectAccess`, `RecordValidator`, `VersionCheck`, `*Rules`) |
+| App roles and leaving (API version 2) | `MemberService`, table `ts_members` |
+| Tables `ts_*`, mappers | `lib/Db`, `lib/Migration` |
+| Admin page | `lib/Settings`, `templates/admin.php`, `js/admin.js`, `css/admin.css` |
+| Translations (admin page, API messages) | `l10n/de.json` (informal German, "du"), `l10n/de_DE.json` (formal, "Sie") |
+| Account/group deleted | `lib/Listener` |
+| Backups: export, storage, consent, own copy | `lib/Service/Backup*`, `CalendarExporter`, `IcsJoiner`, `ProtectedStore`, `VisibleCopy`, `ConsentService`, `OwnCopyService`, `WeekMarks` |
+| Weekly backup (checked hourly) | `lib/BackgroundJob/WeeklyBackup.php` |
+| Retention (daily): history, backup tiers (`Thinning`) | `lib/BackgroundJob/Retention.php` |
 
-Voraussetzungen: Nextcloud 33–34, PHP ≥ 8.2, keine anderen Apps.
+Requirements: Nextcloud 33–34, PHP ≥ 8.2, no other apps.
 
-## Entwickeln
+## Development
 
 ```sh
 composer install
 composer run lint           # php -l
-composer run psalm          # gegen die Stubs aus composer.json
-composer run psalm:all      # gegen jede Version aus info.xml und master
-composer run test:unit      # reine Klassen, ohne Nextcloud
-NC_URL=http://localhost:8081 composer run test:integration   # gegen eine Test-Nextcloud
+composer run psalm          # against the stubs from composer.json
+composer run psalm:all      # against every version from info.xml, and master
+composer run test:unit      # pure classes, without Nextcloud
+NC_URL=http://localhost:8081 composer run test:integration   # against a test Nextcloud
 ```
 
-Wochenjob und Ausdünnen prüft die Integration nur mit `TS_OCC` (Befehl für
-`occ`, z. B. `docker exec -u www-data timesister-next-app-1 php occ`).
+The integration test checks the weekly job and thinning only with `TS_OCC`
+(command for `occ`, e.g. `docker exec -u www-data timesister-next-app-1 php occ`).
 
-Die Integration legt zwei Teams (`pb`, `at`) mit Konten `Test-2026-<konto>!`
-an und läuft nur gegen `localhost`. Mit `TS_SQL` (Befehl, der SQL auf stdin
-liest) prüft sie zusätzlich die Vermerke in der Datenbank.
+The integration test creates two teams (`pb`, `at`) with accounts
+`Test-2026-<account>!` and only runs against `localhost`. With `TS_SQL` (a
+command that reads SQL on stdin) it also checks the entries in the database.
 
-Neue Nextcloud-Version und App Store: [`UPDATE.md`](UPDATE.md).
+New Nextcloud version and App Store: [`UPDATE.md`](UPDATE.md).
 
-## Sicherungen und Updatefestigkeit
+## Backups and update resilience
 
-Der Server exportiert den Zeitkalender mit `OCP\Calendar\ICalendarExport`
-(seit Nextcloud 32). Laut OCP liefert `export()` Sabre-`VCalendar`-Objekte;
-die App ruft davon nur `serialize()` auf und setzt die Texte selbst zusammen
-(`IcsJoiner`, zeilenweise, ohne Sabre). Psalm kennt Sabre nicht, darum steht
-genau diese Klasse in `psalm.xml` unter `UndefinedDocblockClass`. Ebenso
-erbt `OCP\Files\IRootFolder` das nicht mitgelieferte `OC\Hooks\Emitter`;
-`MissingDependency` ist nur für `lib/Service/VisibleCopy.php` aus.
+The server exports the time calendar with `OCP\Calendar\ICalendarExport`
+(since Nextcloud 32). Per OCP, `export()` returns Sabre `VCalendar` objects;
+the app only calls `serialize()` on them and assembles the text itself
+(`IcsJoiner`, line by line, without Sabre). Psalm doesn't know Sabre, so
+exactly this class is listed in `psalm.xml` under `UndefinedDocblockClass`.
+Likewise, `OCP\Files\IRootFolder` inherits the not-included
+`OC\Hooks\Emitter`; `MissingDependency` is suppressed only for
+`lib/Service/VisibleCopy.php`.
 
-Dateien in Heimen von Personen löscht die App nur, wenn sie in
-`ts_backup_files` stehen und die Datei-ID noch auf denselben Pfad zeigt.
+The app only deletes files in people's home storage when they are listed in
+`ts_backup_files` and the file ID still points to the same path.
 
-## Übersetzung
+## Translations
 
-Quellsprache der Admin-Seite ist Englisch. Template und Settings-Klassen
-übersetzen mit `IL10N` (`$l->t()`, `$l->n()`); was `js/admin.js` selbst
-schreibt, kommt als Wörterbuch im Initial-State `l10n` vom Server, ohne
-`t()`/`OC.L10N`. Nextcloud liest für PHP nur `l10n/<sprache>.json`; die
-`.js`-Varianten bräuchte nur `OC.L10N`, sie fehlen mit Absicht (fehlende
-Übersetzungsskripte übergeht Nextcloud still). `tests/Unit/L10nTest.php`
-prüft, dass jeder Text in beiden Dateien steht und jeder Schlüssel des
-Skripts geliefert wird.
+Source texts are English. The admin page translates with `IL10N`
+(`$l->t()`, `$l->n()`); what `js/admin.js` writes itself comes as a
+dictionary in the initial state `l10n` from the server, without
+`OC.L10N`. Error messages of the API are English sources in `ApiException`
+and `Message` (placeholders as `{name}`), translated only when the answer
+goes out. Nextcloud reads `l10n/<language>.json`: `de.json` (informal
+German, "du") and `de_DE.json` (formal, "Sie"); the `.js` variants would
+only matter for `OC.L10N` and are left out on purpose.
+`tests/Unit/L10nTest.php` checks that every source text is in both files
+and that no translation is left over. Log messages stay English.
 
-Die Fehlermeldungen der Schnittstelle (`message`) bleiben deutsch, wie
-`docs/API.md` es festlegt; die Mac-App zeigt sie direkt.
+To add a language: create `l10n/<lang>.json` in the same format and add
+the language to `L10nTest::LANGUAGES`.
 
-## Lizenz
+The API's error messages (`message`, see [`docs/API.md`](docs/API.md)) come
+in the account's language (Nextcloud language setting, else
+`Accept-Language`, else English). Clients decide by `error`, never by
+wording.
 
-AGPL-3.0-or-later, siehe [`LICENSE`](LICENSE). © B/IAS – Basel Institut für
+## License
+
+AGPL-3.0-or-later, see [`LICENSE`](LICENSE). © B/IAS – Basel Institut für
 angewandte Stadtforschung.
+</content>

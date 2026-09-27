@@ -29,18 +29,18 @@ class RecordValidatorTest extends TestCase {
 	/** @return array<string,array{string,bool}> */
 	public static function keys(): array {
 		return [
-			'einfach' => ['alice', true],
-			'Mail' => ['alice.muster@example.org', true],
-			'Plus und Minus' => ['a+b-c_d', true],
-			'128 Zeichen' => [str_repeat('a', 128), true],
-			'ein Zeichen' => ['x', true],
-			'129 Zeichen' => [str_repeat('a', 129), false],
-			'leer' => ['', false],
-			'Leerzeichen' => ['a b', false],
-			'Schrägstrich' => ['a/b', false],
-			'Punkte-Pfad' => ['../x', false],
-			'Umlaut' => ['müller', false],
-			'Doppelpunkt' => ['a:b', false],
+			'simple' => ['alice', true],
+			'mail' => ['alice.muster@example.org', true],
+			'plus and minus' => ['a+b-c_d', true],
+			'128 characters' => [str_repeat('a', 128), true],
+			'one character' => ['x', true],
+			'129 characters' => [str_repeat('a', 129), false],
+			'empty' => ['', false],
+			'space' => ['a b', false],
+			'slash' => ['a/b', false],
+			'dot path' => ['../x', false],
+			'umlaut' => ['müller', false],
+			'colon' => ['a:b', false],
 		];
 	}
 
@@ -98,7 +98,7 @@ class RecordValidatorTest extends TestCase {
 		$this->assertSame('422 invalid', self::code(fn () => RecordValidator::validate('person', 'a', self::obj('{"login":"a","accounts":"alice"}'))));
 		$this->assertSame('422 invalid', self::code(fn () => RecordValidator::validate('person', 'a', self::obj('{"login":"a","accounts":[1]}'))));
 		$this->assertSame('422 invalid', self::code(fn () => RecordValidator::validate('person', 'a', self::obj('{"login":"a","accounts":{"x":"alice"}}'))));
-		// Bei anderen Arten ist `accounts` nur Inhalt.
+		// For other kinds, `accounts` is just content.
 		$this->assertSame([], RecordValidator::validate('project', 'P', self::obj('{"id":"P","accounts":["x"]}'))['accounts']);
 	}
 

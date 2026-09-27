@@ -10,9 +10,9 @@ use OCP\AppFramework\Db\Entity;
 use OCP\DB\Types;
 
 /**
- * Eine Datei, die die App im Heim einer Person angelegt hat (Kopie beim
- * Sicherungs-Konto oder im eigenen Ordner). Löschen darf die App nur, was
- * hier steht, und nur, solange die Datei-ID noch auf diesen Pfad zeigt.
+ * A file the app created in a person's home (copy with the backup owner or
+ * in the own folder). The app may only delete what is listed here, and only
+ * as long as the file ID still points to this path.
  *
  * @method int getTenantId()
  * @method void setTenantId(int $tenantId)

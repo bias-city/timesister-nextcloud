@@ -1,80 +1,84 @@
-> **Kopie.** Massgeblich ist `nc-app/API.md` im Monorepo, bis das Repo
-> `bias-city/timesister-nextcloud` getrennt ist. Danach gilt diese Datei.
+> **Copy.** The authoritative version is `nc-app/API.md` in the monorepo
+> until the repository `bias-city/timesister-nextcloud` is split off. After that, this file applies.
 
-# TimeSister-Server – Schnittstelle, Fassung 1 (Vertrag)
+# TimeSister Server – API Version 1 (Contract)
 
-Stand 26.09.2026. Dieser Vertrag gilt für die Nextcloud-App `timesister`
-(`nc-app/timesister/`) und den Mac-Fork „TimeSister Next“ (`core/`). Wer davon
-abweicht, ändert zuerst diese Datei. Plan und Begründung: `PLAN-NC-APP.md`.
+As of 2026-09-27. This contract applies to the Nextcloud app `timesister`
+(`nc-app/timesister/`) and the Mac fork "TimeSister Next" (`core/`). Whoever
+deviates from it changes this file first. Plan and rationale: `PLAN-NC-APP.md`.
 
-## Allgemein
+## General
 
-- Basis: `/ocs/v2.php/apps/timesister/api/v1`
-- Anmeldung: HTTP Basic mit Nextcloud-Konto und App-Passwort, wie heute.
-- Pflicht-Header: `OCS-APIRequest: true`, `Accept: application/json`.
-  Rümpfe als `Content-Type: application/json`.
-- Antwort im OCS-Umschlag: `{"ocs":{"meta":{"status","statuscode","message"},"data":…}}`.
-  Mit OCS v2 entspricht der HTTP-Status dem `statuscode`. Beschrieben ist unten
-  immer nur `data`.
-- Fehler: HTTP 400, 403, 404, 409, 413 oder 422, mit
-  `data = { "error": "<code>", "message": "<deutscher Satz>" , …}`.
+- Base: `/ocs/v2.php/apps/timesister/api/v1`
+- Login: HTTP Basic with Nextcloud account and app password, as today.
+- Required headers: `OCS-APIRequest: true`, `Accept: application/json`.
+  Bodies as `Content-Type: application/json`.
+- Response in the OCS envelope: `{"ocs":{"meta":{"status","statuscode","message"},"data":…}}`.
+  With OCS v2 the HTTP status matches `statuscode`. Below, only `data` is
+  described.
+- Errors: HTTP 400, 403, 404, 409, 413 or 422, with
+  `data = { "error": "<code>", "message": "<sentence in the account's language>", …}`.
   Codes: `no_team`, `ambiguous_team`, `forbidden`, `not_found`, `conflict`,
-  `invalid`, `too_large`.
-- Zeiten als ISO 8601 in UTC (`2026-09-26T08:15:00Z`), Tage als `YYYY-MM-DD`.
+  `invalid`, `too_large`. `message` is a sentence in the account's language:
+  Nextcloud's language setting for the account, else the `Accept-Language`
+  header, else English. English is the source text; German comes from
+  `l10n/de.json` (informal) and `de_DE.json` (formal). Clients decide on the
+  `error` code, never on the wording.
+- Times as ISO 8601 in UTC (`2026-09-26T08:15:00Z`), days as `YYYY-MM-DD`.
 
-## Fähigkeit
+## Capability
 
-Nextclouds Capabilities (`/ocs/v1.php/cloud/capabilities`) enthalten:
+Nextcloud's capabilities (`/ocs/v1.php/cloud/capabilities`) contain:
 
 ```json
 "timesister": { "api": 1, "version": "0.1.0" }
 ```
 
-Fehlt der Eintrag, ist die App nicht installiert oder ausgeschaltet.
+If the entry is missing, the app is not installed or is disabled.
 
-## Teams und Rollen
+## Teams and roles
 
-- Ein **Team** hat `id`, `name`, `slug` und genau vier Rollen-Gruppen:
-  `user`, `lead`, `subadmin`, `admin`, je eine bestehende Nextcloud-Gruppe.
-  Eine Gruppe gehört zu höchstens einem Team.
-- Dazu optional eine **Konten-Gruppe** `accounts`, ebenfalls eine bestehende
-  Nextcloud-Gruppe. Alle Konten des Teams stehen darin; sie ist **keine**
-  Rolle. Die Team-Admins verwalten sie als Gruppenadmins mit. So bleibt jedes
-  Konto in einer ihrer Gruppen, und sie können jede Rollen-Gruppe entziehen
-  (Nextcloud-Regel OCS 105, siehe Nachträge). Sie darf keinem anderen Team
-  gehören, weder als Rolle noch als Konten-Gruppe (`409 conflict`), und keine
-  der vier Rollen-Gruppen desselben Teams sein (`422 invalid`).
-- Ein Konto gehört zu dem Team, in dessen Rollen-Gruppen es steht. Steht es in
-  Gruppen von zwei Teams: `409 ambiguous_team`. In keiner: `403 no_team`.
-  Die Konten-Gruppe zählt dafür nie: Wer nur in ihr steht, bekommt
-  `403 no_team`; wer in der Konten-Gruppe von Team A und in einer Rollen-Gruppe
-  von Team B steht, gehört zu B.
-- `groups` in `/me`, `/team` und `/admin/teams` nennt `accounts` nur, wenn
-  das Team eine Konten-Gruppe hat; sonst fehlt das Feld.
-- Die Rolle ist die stärkste Rolle aus diesen Gruppen:
+- A **team** has `id`, `name`, `slug` and exactly four role groups:
+  `user`, `lead`, `subadmin`, `admin`, each an existing Nextcloud group.
+  A group belongs to at most one team.
+- Optionally also an **accounts group** `accounts`, likewise an existing
+  Nextcloud group. All of the team's accounts are in it; it is **not** a
+  role. The team admins also manage it as group admins. This way every
+  account stays in one of its groups, and they can remove any role group
+  (Nextcloud rule OCS 105, see addenda). It may not belong to any other
+  team, either as a role or as the accounts group (`409 conflict`), and may
+  not be one of the same team's four role groups (`422 invalid`).
+- An account belongs to the team whose role groups it is in. If it is in
+  groups of two teams: `409 ambiguous_team`. In none: `403 no_team`. The
+  accounts group never counts for this: whoever is only in it gets
+  `403 no_team`; whoever is in team A's accounts group and in a role group
+  of team B belongs to B.
+- `groups` in `/me`, `/team` and `/admin/teams` names `accounts` only if the
+  team has an accounts group; otherwise the field is missing.
+- The role is the strongest role from these groups:
   `admin` > `subadmin` > `lead` > `user`.
-- Nextclouds Admin ist **nicht** automatisch Rolle in einem Team.
-- Das Team ergibt sich **immer** aus der Mitgliedschaft des Aufrufers, nie aus
-  der Anfrage.
+- Nextcloud's admin is **not** automatically a role in a team.
+- The team is **always** derived from the caller's membership, never from
+  the request.
 
-## Datensätze
+## Records
 
-| `kind` | Schlüssel | Inhalt (`data`) |
+| `kind` | key | content (`data`) |
 |---|---|---|
-| `person` | `login` der Person (wie heute die Dateinamen in `people/`) | Person, englische Felder wie in `marke::FELDER` |
-| `region` | `id` | Standort mit `holidays` |
-| `project` | `id` | Projekt samt `subprojects`, `budgets`, `milestones` |
-| `customer` | `id` | Kunde samt `contacts`, `cost_centers`, `quotes` |
-| `setting` | `targethours` oder `settings` | Sollzeit bzw. Einstellungen (`vacation_code`) |
+| `person` | person's `login` (as today the file names in `people/`) | person, English fields as in `marke::FELDER` |
+| `region` | `id` | location with `holidays` |
+| `project` | `id` | project including `subprojects`, `budgets`, `milestones` |
+| `customer` | `id` | customer including `contacts`, `cost_centers`, `quotes` |
+| `setting` | `targethours` or `settings` | target hours or settings (`vacation_code`) |
 
-- Schlüssel: `^[A-Za-z0-9@._+-]{1,128}$`.
-- `data` ist ein JSON-Objekt, höchstens 256 KB. Pflicht: bei `person` ein
-  Feld `login` gleich dem Schlüssel, bei `region`, `project`, `customer` ein
-  Feld `id` gleich dem Schlüssel. Sonst `422 invalid`.
-- **Eigene Person:** Der Datensatz, dessen Schlüssel gleich der Nextcloud-
-  Kennung des Aufrufers ist oder dessen `data.accounts` sie enthält.
+- Key: `^[A-Za-z0-9@._+-]{1,128}$`.
+- `data` is a JSON object, at most 256 KB. Required: for `person` a field
+  `login` equal to the key, for `region`, `project`, `customer` a field `id`
+  equal to the key. Otherwise `422 invalid`.
+- **Own person:** the record whose key equals the caller's Nextcloud user
+  ID, or whose `data.accounts` contains it.
 
-Ein Datensatz in Antworten:
+A record in responses:
 
 ```json
 { "kind": "person", "key": "alice", "version": 3, "revision": 118,
@@ -82,26 +86,26 @@ Ein Datensatz in Antworten:
   "data": { … } }
 ```
 
-`data` ist bei Grabsteinen (`deleted: true`) `null`. `version` zählt je
-Datensatz ab 1. `revision` ist der Stand des Teams nach dieser Schreibung; sie
-steigt mit jeder Schreibung im Team.
+`data` is `null` for tombstones (`deleted: true`). `version` counts per
+record from 1. `revision` is the team's state after this write; it
+increases with every write in the team.
 
-## Rechte
+## Permissions
 
 | | user | lead | subadmin, admin |
 |---|---|---|---|
-| `setting`, `region`, `project` | lesen | lesen | lesen, schreiben |
-| `person`, eigene | lesen | lesen | lesen, schreiben |
-| `person`, fremde | – | lesen | lesen, schreiben |
-| `customer` | – | lesen | lesen, schreiben |
-| Verlauf | eigene Person | eigene Person | alle |
-| Kalendersicherungen | eigene | eigene | alle |
-| Lebenszeichen melden | eigenes | eigenes | eigenes |
-| Lebenszeichen lesen, Team lesen | – | – | ja |
+| `setting`, `region`, `project` | read | read | read, write |
+| `person`, own | read | read | read, write |
+| `person`, others' | – | read | read, write |
+| `customer` | – | read | read, write |
+| History | own person | own person | all |
+| Calendar backups | own | own | all |
+| Submit status report | own | own | own |
+| Read status reports, read team | – | – | yes |
 
-Nicht Lesbares erscheint in Listen nicht; direkter Zugriff gibt `403 forbidden`.
+Unreadable items do not appear in lists; direct access gives `403 forbidden`.
 
-## Endpunkte
+## Endpoints
 
 ### `GET /me`
 
@@ -115,13 +119,13 @@ Nicht Lesbares erscheint in Listen nicht; direkter Zugriff gibt `403 forbidden`.
   "person_key": "alice", "revision": 118, "server_time": "2026-09-26T08:15:00Z" }
 ```
 
-`person_key` ist `null`, wenn es keinen eigenen Personendatensatz gibt.
-`groups.accounts` fehlt, wenn das Team keine Konten-Gruppe hat.
+`person_key` is `null` if there is no own person record. `groups.accounts`
+is missing if the team has no accounts group.
 
 ### `GET /records?since=<revision>`
 
-Alle für den Aufrufer lesbaren Datensätze mit `revision > since`, samt
-Grabsteinen. `since` fehlt oder 0: alles, ohne Grabsteine.
+All records readable by the caller with `revision > since`, including
+tombstones. `since` missing or 0: everything, without tombstones.
 
 ```json
 { "revision": 118, "records": [ … ] }
@@ -129,7 +133,7 @@ Grabsteinen. `since` fehlt oder 0: alles, ohne Grabsteine.
 
 ### `GET /records/{kind}/{key}`
 
-Ein Datensatz. `404 not_found`, auch für Grabsteine.
+One record. `404 not_found`, also for tombstones.
 
 ### `PUT /records/{kind}/{key}`
 
@@ -137,17 +141,17 @@ Ein Datensatz. `404 not_found`, auch für Grabsteine.
 { "version": 3, "data": { … } }
 ```
 
-- `version` ist die Fassung, auf der die Änderung beruht. `0`: neu anlegen –
-  gibt es den Datensatz schon (auch als Grabstein mit älterer Fassung), ist das
-  ein Konflikt, ausser er ist ein Grabstein; dann entsteht er neu mit
-  `version = grabstein.version + 1`.
-- Passt `version` nicht: `409 conflict` mit
-  `data = { "error": "conflict", "message": …, "current": <Datensatz> }`.
-- Erfolg: `200` mit dem neuen Datensatz.
+- `version` is the version the change is based on. `0`: create new – if the
+  record already exists (also as a tombstone with an older version), this
+  is a conflict, unless it is a tombstone; then it is created anew with
+  `version = tombstone.version + 1`.
+- If `version` does not match: `409 conflict` with
+  `data = { "error": "conflict", "message": …, "current": <record> }`.
+- Success: `200` with the new record.
 
 ### `DELETE /records/{kind}/{key}?version=<n>`
 
-Legt einen Grabstein an. `409 conflict` wie oben. Erfolg: der Grabstein.
+Creates a tombstone. `409 conflict` as above. Success: the tombstone.
 
 ### `POST /records/batch`
 
@@ -156,14 +160,14 @@ Legt einen Grabstein an. `409 conflict` wie oben. Erfolg: der Grabstein.
               { "kind": "region", "key": "CH-BS", "version": 2, "data": null } ] }
 ```
 
-`data: null` heisst löschen. Alles oder nichts in **einer** Transaktion. Bei
-Konflikten: `409` mit `data.conflicts = [ { "kind", "key", "current" } ]`,
-nichts geschrieben. Erfolg: `{ "revision": 131, "records": [ … ] }`. Höchstens
-500 Schreibungen je Aufruf. Nur subadmin und admin.
+`data: null` means delete. All or nothing in **one** transaction. On
+conflicts: `409` with `data.conflicts = [ { "kind", "key", "current" } ]`,
+nothing written. Success: `{ "revision": 131, "records": [ … ] }`. At most
+500 writes per call. subadmin and admin only.
 
 ### `GET /records/{kind}/{key}/history`
 
-Die Fassungen, neueste zuerst, höchstens 100:
+The versions, newest first, at most 100:
 
 ```json
 [ { "version": 3, "deleted": false, "modified_by": "admin",
@@ -176,8 +180,8 @@ Die Fassungen, neueste zuerst, höchstens 100:
 { "version": 2, "current": 3 }
 ```
 
-Schreibt die Fassung 2 als neue Fassung 4. `current` wie `version` beim `PUT`.
-Nur subadmin und admin.
+Writes version 2 as the new version 4. `current` like `version` in `PUT`.
+subadmin and admin only.
 
 ### `POST /backups`
 
@@ -185,9 +189,9 @@ Nur subadmin und admin.
 { "taken_on": "2026-09-22", "ics_base64": "QkVHSU46VkNBTEVOREFS…" }
 ```
 
-Kalendersicherung des Aufrufers. Höchstens 20 MB nach dem Dekodieren
-(`413 too_large`). Muss mit `BEGIN:VCALENDAR` beginnen (`422 invalid`). Eine
-Sicherung je Konto und Tag; eine zweite am selben Tag ersetzt die erste.
+Calendar backup of the caller. At most 20 MB after decoding
+(`413 too_large`). Must start with `BEGIN:VCALENDAR` (`422 invalid`). One
+backup per account and day; a second on the same day replaces the first.
 
 ```json
 { "id": 17, "uid": "alice", "taken_on": "2026-09-22", "size": 48213, "sha256": "…" }
@@ -195,12 +199,12 @@ Sicherung je Konto und Tag; eine zweite am selben Tag ersetzt die erste.
 
 ### `GET /backups?uid=<uid>`
 
-Liste ohne Inhalt, neueste zuerst. Ohne `uid`: die eigenen. Fremde nur für
-subadmin und admin.
+List without content, newest first. Without `uid`: the caller's own.
+Others' only for subadmin and admin.
 
 ### `GET /backups/{id}`
 
-Wie oben, dazu `ics_base64`.
+As above, plus `ics_base64`.
 
 ### `POST /status`
 
@@ -209,11 +213,11 @@ Wie oben, dazu `ics_base64`.
   "calendar_url": "https://…/remote.php/dav/calendars/alice/zeit-alice/" }
 ```
 
-Lebenszeichen des Aufrufers. Antwort: `{ "seen_at": "…" }`.
+Status report of the caller. Response: `{ "seen_at": "…" }`.
 
 ### `GET /status`
 
-Alle Mitglieder des Teams, auch ohne Lebenszeichen:
+All team members, including those without a status report:
 
 ```json
 [ { "uid": "carol", "display_name": "Carol Test", "role": "user",
@@ -229,477 +233,486 @@ Alle Mitglieder des Teams, auch ohne Lebenszeichen:
   "members": { "user": ["carol"], "lead": ["alice"], "subadmin": [], "admin": ["pbadmin"] } }
 ```
 
-`members` nennt jedes Konto nur unter seiner stärksten Rolle. Konten, die nur
-in der Konten-Gruppe stehen, sind keine Mitglieder und fehlen hier.
-`groups.accounts` wie bei `/me`.
+`members` names each account only under its strongest role. Accounts that
+are only in the accounts group are not members and are missing here.
+`groups.accounts` as in `/me`.
 
-## Verwaltung der Teams (nur Nextcloud-Admins)
+## Team administration (Nextcloud admins only)
 
-Für die Admin-Seite und die Einrichtungsskripte, unter demselben Basis-Pfad:
+For the admin page and the setup scripts, under the same base path:
 
-| Methode | Pfad | Rumpf |
+| Method | Path | Body |
 |---|---|---|
-| GET | `/admin/teams` | – → Liste wie `GET /team`, ohne `members`, mit `counts` je Rolle, dazu `counts.accounts` (Mitglieder der Konten-Gruppe), wenn gesetzt |
+| GET | `/admin/teams` | – → list as in `GET /team`, without `members`, with `counts` per role, plus `counts.accounts` (members of the accounts group), if set |
 | POST | `/admin/teams` | `{ "name", "slug", "groups": { "user", "lead", "subadmin", "admin", "accounts"? } }` |
-| PUT | `/admin/teams/{id}` | wie POST; fehlt `accounts` oder ist es leer, entfällt die Konten-Gruppe |
-| DELETE | `/admin/teams/{id}` | nur ohne Datensätze, sonst `409` |
+| PUT | `/admin/teams/{id}` | as POST; if `accounts` is missing or empty, the accounts group is removed |
+| DELETE | `/admin/teams/{id}` | only without records, otherwise `409` |
 
-Die Gruppen müssen existieren (`422 invalid`) und dürfen keinem anderen Team
-gehören (`409 conflict`). `slug`: `^[a-z0-9-]{2,32}$`, eindeutig.
+The groups must exist (`422 invalid`) and may not belong to any other team
+(`409 conflict`). `slug`: `^[a-z0-9-]{2,32}$`, unique.
 
-## Nachträge aus der Umsetzung (26.09.2026)
+## Addenda from implementation (2026-09-26)
 
-Präzisierungen, die die App so umsetzt. Nichts oben Stehendes ändert sich.
+Clarifications the app implements this way. Nothing stated above changes.
 
-- **Admin-Endpunkte für Nicht-Admins:** Das `403` kommt von Nextcloud selbst,
-  bevor die App läuft. `data` ist dann leer (`[]`), die Meldung steht in
-  `meta.message`. Alle anderen Fehler haben `data.error`.
-- **Grössen:** `data` über 256 KB → `413 too_large`. Rumpf eines `PUT` oder
-  Restore höchstens 1 MB, eines Batch höchstens 50 MB, mehr als 500
-  Schreibungen → `413 too_large`.
-- **Rumpf:** `kind`, `key` und `id` stehen im Pfad; stehen sie im Rumpf →
-  `400 invalid`. Kein JSON-Objekt, `version` fehlt oder ist keine ganze Zahl
-  ≥ 0 → `400 invalid`. Schlüssel oder Art falsch → `400 invalid`.
-- **`PUT` auf einen Grabstein:** `version` darf `0` oder die Fassung des
-  Grabsteins sein; neu ist dann Grabstein + 1.
-- **`DELETE`:** `version` fehlt → `400`. Unbekannt oder schon Grabstein → `404`.
-- **Batch:** Derselbe Datensatz zweimal → `422 invalid`. Löschen eines
-  unbekannten oder schon gelöschten Datensatzes ist ein Konflikt
-  (`current` ist `null` bzw. der Grabstein). Fehler einer einzelnen Schreibung
-  nennen ihre Nummer in `message` und den Index in `data.index`. Leere Liste:
-  nichts geschrieben, Antwort mit der aktuellen Revision. Jede Schreibung
-  bekommt eine eigene Revision, fortlaufend.
-- **Restore:** Fassung unbekannt → `404`; die Fassung ist ein Grabstein → `422`.
-- **Grabsteine einer Person** behalten die Konten aus `data.accounts`: Die
-  Person bekommt ihren eigenen Grabstein im Delta.
-- **`person_key`:** Gibt es mehrere eigene Personen, zuerst die mit Schlüssel
-  = Kennung, sonst die erste nach Schlüssel.
-- **`POST /status`:** Nur die geschickten Felder ändern sich; `null` löscht
-  ein Feld. `calendar_url` nur `http(s)`, höchstens 1000 Zeichen;
-  `app_version` höchstens 32 Zeichen `A–Z a–z 0–9 . _ + -`.
-- **`GET /backups?uid=`** für ein Konto, das nicht im Team ist: leere Liste.
-  Base64 darf Zeilenumbrüche enthalten. Die Datei darf mit BOM oder
-  Leerzeilen vor `BEGIN:VCALENDAR` beginnen.
-- **Konto gelöscht:** Personendatensätze bleiben unverändert (`data`,
-  Fassung, Revision); die App vermerkt es intern (`account_deleted_at`). In
-  der Schnittstelle erscheint das bisher nicht.
-- **Verwaltung:** `POST`/`PUT /admin/teams` antworten mit dem Team wie in der
-  Liste (mit `counts`), `DELETE` mit `{ "id", "deleted": true }`. Löschen nur
-  ohne Datensätze (auch Grabsteine) **und ohne Sicherungen**, sonst `409`.
-  Jede Rolle braucht eine eigene Gruppe (`422`). Eine gelöschte Rollen-Gruppe
-  markiert das Team als „Zuordnung gebrochen“ (Admin-Seite, rot). Eine
-  gelöschte Konten-Gruppe verliert nur ihre Zuordnung; das Team gilt **nicht**
-  als gebrochen, Nextclouds Log vermerkt es.
-- **Drosselung:** Schreibende Endpunkte höchstens 300 Aufrufe je Minute und
-  Konto, `POST /backups` 60; darüber antwortet Nextcloud mit `429`.
+- **Admin endpoints for non-admins:** the `403` comes from Nextcloud itself,
+  before the app runs. `data` is then empty (`[]`), the message is in
+  `meta.message`. All other errors have `data.error`.
+- **Sizes:** `data` over 256 KB → `413 too_large`. Body of a `PUT` or
+  restore at most 1 MB, of a batch at most 50 MB, more than 500 writes →
+  `413 too_large`.
+- **Body:** `kind`, `key` and `id` are in the path; if they are in the body
+  → `400 invalid`. Not a JSON object, `version` missing or not an integer
+  ≥ 0 → `400 invalid`. Wrong key or kind → `400 invalid`.
+- **`PUT` on a tombstone:** `version` may be `0` or the tombstone's version;
+  the new one is then tombstone + 1.
+- **`DELETE`:** `version` missing → `400`. Unknown or already a tombstone →
+  `404`.
+- **Batch:** the same record twice → `422 invalid`. Deleting an unknown or
+  already deleted record is a conflict (`current` is `null` or the
+  tombstone, respectively). Errors of an individual write name its number
+  in `message` and the index in `data.index`. Empty list: nothing written,
+  response with the current revision. Each write gets its own revision,
+  sequentially.
+- **Restore:** version unknown → `404`; the version is a tombstone → `422`.
+- **Tombstones of a person** keep the accounts from `data.accounts`: the
+  person gets their own tombstone in the delta.
+- **`person_key`:** if there are several own persons, first the one with
+  key = user ID, otherwise the first by key.
+- **`POST /status`:** only the fields sent change; `null` clears a field.
+  `calendar_url` only `http(s)`, at most 1000 characters; `app_version` at
+  most 32 characters `A–Z a–z 0–9 . _ + -`.
+- **`GET /backups?uid=`** for an account not in the team: empty list.
+  Base64 may contain line breaks. The file may start with a BOM or blank
+  lines before `BEGIN:VCALENDAR`.
+- **Account deleted:** person records remain unchanged (`data`, version,
+  revision); the app notes it internally (`account_deleted_at`). This does
+  not yet appear in the API.
+- **Administration:** `POST`/`PUT /admin/teams` respond with the team as in
+  the list (with `counts`), `DELETE` with `{ "id", "deleted": true }`.
+  Deletion only without records (including tombstones) **and without
+  backups**, otherwise `409`. Every role needs its own group (`422`). A
+  deleted role group marks the team as "mapping broken" (admin page, red).
+  A deleted accounts group only loses its mapping; the team does **not**
+  count as broken, Nextcloud's log notes it.
+- **Throttling:** writing endpoints at most 300 calls per minute and
+  account, `POST /backups` 60; beyond that Nextcloud responds with `429`.
 
-- **Form der Einstellungen** (aus dem Fork, 26.09.2026): `setting/targethours`
-  hat als `data` `{"entries": [{"from", "weekly_hours", "note"}]}`,
-  `setting/settings` hat `{"vacation_code": …}`.
-- **Gruppenadmins:** Team-Admins und Verwaltung brauchen in Nextcloud
-  Gruppenadmin-Rechte auf die vier Gruppen ihres Teams und auf die
-  Konten-Gruppe. Rollen, Konten und Austritte laufen über Nextclouds
-  Provisioning-API. Nextcloud lässt Gruppenadmins niemanden aus der letzten
-  Gruppe nehmen, die sie verwalten (OCS 105). Mit der Konten-Gruppe bleibt das
-  Konto in einer verwalteten Gruppe: Alle vier Rollen-Gruppen lassen sich
-  entziehen, danach gibt `/me` für das Konto `403 no_team`. Ohne
-  Konten-Gruppe kann die letzte Rolle nur ein Nextcloud-Admin entziehen.
+- **Form of settings** (from the fork, 2026-09-26): `setting/targethours`
+  has as `data` `{"entries": [{"from", "weekly_hours", "note"}]}`,
+  `setting/settings` has `{"vacation_code": …}`.
+- **Group admins:** team admins and managers need Nextcloud group-admin
+  rights on their team's four groups and on the accounts group. Roles,
+  accounts and leaving run through Nextcloud's provisioning API. Nextcloud
+  does not let group admins remove anyone from the last group they manage
+  (OCS 105). With the accounts group, the account stays in a managed
+  group: all four role groups can be removed, after which `/me` returns
+  `403 no_team` for the account. Without an accounts group, only a
+  Nextcloud admin can remove the last role.
 
-## Sicherungen, Fassung 1.1 (26.09.2026)
+## Backups, version 1.1 (2026-09-26)
 
-Vorgabe des Nutzers: Die Sicherungen entstehen auf dem Server, liegen als
-Dateien je Person in einem Ordner beim Admin und lassen sich zurückspielen.
+User's requirement: backups are created on the server, stored as files per
+person in a folder at the admin's, and can be restored.
 
-- **Der Server sichert selbst.** Ein Hintergrundjob exportiert einmal je
-  Kalenderwoche den Zeitkalender jedes Teammitglieds mit Nextclouds
-  öffentlicher Schnittstelle `OCP\Calendar\ICalendarExport` (seit Nextcloud
-  32). Welcher Kalender: `calendar_url` aus dem letzten Lebenszeichen, sonst
-  der Kalender mit der URI `zeit-<uid>` im Heim des Kontos. `source` einer
-  solchen Sicherung ist `"server"`, hochgeladene haben `"client"`.
-  `POST /backups` bleibt für Clients bestehen, der Mac-Fork nutzt es nicht mehr.
-- **Zwei Ablagen.** Geschützt wie bisher in `IAppData` (daraus liest die
-  Schnittstelle), dazu **sichtbar** als Datei im Ordner des
-  Sicherungs-Kontos des Teams: `TimeSister-Sicherungen/<Anzeigename> (<uid>)/<YYYY-MM-DD>.ics`.
-  Das Sicherungs-Konto (`backup_owner`) wählt der Nextcloud-Admin auf der
-  Admin-Seite unter den Konten mit Rolle `admin`; ohne Wahl der erste
-  `admin` des Teams nach Kennung. Die sichtbare Kopie darf dort gelöscht
-  werden; die geschützte bleibt.
-- `GET /backups` und `GET /backups/{id}` nennen zusätzlich `source` und
-  `file_path` (Pfad im Ordner des Sicherungs-Kontos, oder `null`).
-  `GET /team` nennt `backup_owner`.
-- `POST /backups/now` mit `{ "uid"? }`: sofort sichern. Ohne `uid` das
-  eigene Konto; fremde nur subadmin und admin. Antwort wie ein Eintrag aus
-  `GET /backups`.
-- **Kein Zurückspielen auf dem Server** (Entscheidung des Nutzers,
-  26.09.2026: „der Weg über alte Termine reicht vollkommen“). Die Person
-  spielt eine Sicherung in ihrer Mac-App über „Alte Termine“ zurück, das
-  den Zeitkalender mit eigenen Rechten ersetzt; die Mac-App holt die Datei
-  dafür mit `GET /backups/{id}`. Admins finden die Dateien im Ordner des
-  Sicherungs-Kontos.
-- **Freigabe durch die Person** (Vorgabe des Nutzers, 26.09.2026: „der NC user
-  muss generell einen Button haben, der das Backup beim Admin freigibt. das
-  kann er zurückziehen, bis dahin gespeicherte termine bleiben aber im
-  backup“). Standard ist **keine** Freigabe.
+- **The server backs up itself.** A background job exports each team
+  member's time calendar once per calendar week using Nextcloud's public
+  API `OCP\Calendar\ICalendarExport` (since Nextcloud 32). Which calendar:
+  `calendar_url` from the last status report, otherwise the calendar with
+  URI `zeit-<uid>` in the account's home. `source` of such a backup is
+  `"server"`, uploaded ones have `"client"`. `POST /backups` remains for
+  clients, the Mac fork no longer uses it.
+- **Two locations.** Protected as before in `IAppData` (the API reads from
+  there), plus **visible** as a file in the folder of the team's backup
+  owner: `TimeSister Backups/<display name> (<uid>)/<YYYY-MM-DD>.ics`
+  (previously `TimeSister-Sicherungen/…`; existing files stay in the old
+  folder, their recorded `file_path` remains valid, and thinning deletes
+  them as before; new copies go into the new folder). The Nextcloud admin
+  chooses the backup owner (`backup_owner`) on the admin page among
+  accounts with role `admin`; without a choice, the team's first `admin`
+  by user ID. The visible copy may be deleted there; the protected one
+  remains.
+- `GET /backups` and `GET /backups/{id}` additionally name `source` and
+  `file_path` (path within the backup owner's folder, or `null`).
+  `GET /team` names `backup_owner`.
+- `POST /backups/now` with `{ "uid"? }`: back up immediately. Without `uid`
+  the caller's own account; others' only subadmin and admin. Response like
+  an entry from `GET /backups`.
+- **No restoring on the server** (user's decision, 2026-09-26: "the route
+  via old appointments is entirely sufficient"). The person restores a
+  backup in their Mac app via "Old Appointments", which replaces the time
+  calendar with their own rights; the Mac app fetches the file for this
+  with `GET /backups/{id}`. Admins find the files in the backup owner's
+  folder.
+- **Consent by the person** (user's requirement, 2026-09-26: "the NC user
+  must generally have a button that gives the admin consent for the
+  backup. They can withdraw it; appointments already saved by then remain
+  in the backup"). Default is **no** consent.
   - `GET /backups/consent` → `{ "consent": bool, "since": "…"|null, "revoked_at": "…"|null }`
-    für das eigene Konto.
-  - `PUT /backups/consent` mit `{ "consent": true|false }`, nur für das
-    eigene Konto. Antwort wie `GET`.
-  - Ohne Freigabe sichert der Hintergrundjob das Konto nicht, und
-    `POST /backups/now` sowie `POST /backups` antworten `403 forbidden` mit
-    dem Satz „Die Person hat die Sicherung beim Admin nicht freigegeben.“
-  - Zurückziehen hält nur künftige Sicherungen an. Vorhandene bleiben in
-    beiden Ablagen und unterliegen der normalen Aufbewahrung.
-  - `GET /status` nennt je Mitglied `backup_consent` (bool) und
-    `backup_consent_since`.
-- **Bestätigte Aufklärung** (Vorgabe des Nutzers, 26.09.2026: Einschalten nur
-  über einen ausdrücklichen Dialog, in dem die Person „Freigabe“ eintippt und
-  über ihre Personendaten aufgeklärt wird). `PUT /backups/consent` mit
-  `consent: true` verlangt zusätzlich `notice` (Kennung der Fassung des
-  Aufklärungstexts, z. B. `"2026-09-26"`, höchstens 32 Zeichen, sonst
-  `422 invalid`). Der Server speichert sie mit Zeitpunkt; `GET /backups/consent`
-  und `GET /status` nennen sie als `notice` bzw. `backup_consent_notice`.
-  Zurückziehen braucht keine `notice`.
-- **Kopie im eigenen Ordner** (Vorschlag des Nutzers, 26.09.2026: „wahlweise
-  zusätzliche ics beim User als Kopie in einen Folder“). Unabhängig von der
-  Freigabe beim Admin, ohne Dialog, Standard aus.
+    for the caller's own account.
+  - `PUT /backups/consent` with `{ "consent": true|false }`, only for the
+    caller's own account. Response like `GET`.
+  - Without consent, the background job does not back up the account, and
+    `POST /backups/now` and `POST /backups` respond `403 forbidden` with
+    the sentence "The person has not agreed to backups with the admin."
+    (translated per account language; clients act on `error: forbidden`,
+    never on the wording).
+  - Withdrawing only stops future backups. Existing ones remain in both
+    locations and are subject to normal retention.
+  - `GET /status` names `backup_consent` (bool) and `backup_consent_since`
+    per member.
+- **Confirmed disclosure** (user's requirement, 2026-09-26: enabling only
+  via an explicit dialog in which the person types "consent" and is
+  informed about their personal data). `PUT /backups/consent` with
+  `consent: true` additionally requires `notice` (identifier of the
+  version of the disclosure text, e.g. `"2026-09-26"`, at most 32
+  characters, otherwise `422 invalid`). The server stores it with a
+  timestamp; `GET /backups/consent` and `GET /status` name it as `notice`
+  and `backup_consent_notice`, respectively. Withdrawing needs no `notice`.
+- **Copy in the person's own folder** (user's suggestion, 2026-09-26:
+  "optionally an additional ics for the user as a copy in a folder").
+  Independent of consent with the admin, without a dialog, default off.
   - `GET /backups/own-copy` → `{ "enabled": bool }`, `PUT /backups/own-copy`
-    mit `{ "enabled": bool }`, nur für das eigene Konto.
-  - Ist sie an, legt der Wochenjob die Sicherung zusätzlich als
-    `TimeSister-Sicherungen/<YYYY-MM-DD>.ics` in den eigenen Dateien der Person
-    ab. Ohne Freigabe beim Admin entsteht **nur** diese Kopie, nichts in
-    `IAppData` oder beim Admin.
-  - `POST /backups/now` ohne `uid` sichert auch dann, wenn nur die eigene
-    Kopie an ist, und legt dann nur sie an; die Antwort nennt dann
-    `{ "own_copy": "<Pfad>" }` statt eines Listeneintrags.
-  - Dateien im eigenen Ordner löscht der Server nie; die Person verwaltet sie.
-  - `GET /status` nennt `own_copy` (bool) je Mitglied nicht - das geht die
-    Verwaltung nichts an.
-- **Nur bei Änderungen, dann ausdünnen** (Vorgabe des Nutzers, 26.09.2026:
-  „es sollen auch inkrementelle Backups sein … sie müssen bereinigt werden“).
-  Gilt für alle drei Ablagen (geschützt, beim Admin, eigener Ordner) und
-  ersetzt „Dateien im eigenen Ordner löscht der Server nie“.
-  - Eine neue Sicherung entsteht nur, wenn sich der Kalender seit der
-    letzten dieser Ablage geändert hat (Vergleich der Prüfsumme). Sonst
-    bleibt es bei der vorhandenen.
-  - Ausdünnen: alle der letzten 8 Wochen; danach die jüngste je
-    Kalendermonat bis 12 Monate; danach die jüngste je Kalenderjahr.
-  - Frist für die geschützte Kopie und die beim Admin: Team-Einstellung
-    `backup_retention_years` (1 bis 10, Standard 1), auf der Admin-Seite;
-    `GET /team` nennt sie. Ältere werden gelöscht. Im eigenen Ordner bleiben
-    die Jahressicherungen ohne Frist.
-  - Gelöscht werden **nur** Dateien, die die App selbst angelegt hat und
-    deren Datei-ID sie sich gemerkt hat. Verschobene oder umbenannte Dateien
-    und alles andere bleiben unberührt; Ordner werden nie gelöscht. Löschen
-    in Dateien von Personen geht über Nextclouds Papierkorb.
-- **Staffel, endgültig** (Nutzer, 26.09.2026: „inkrementell meine ich die
-  vollständigen ics kalender als datei. 4 Wochen, 12 Monate, 5 Jahre“).
-  Ersetzt die Zahlen und `backup_retention_years` aus dem vorigen Punkt; die
-  Team-Einstellung entfällt. Jede Sicherung ist eine **vollständige**
-  `.ics`-Datei. Für alle drei Ablagen gleich:
-  - alle Sicherungen der letzten **4 Wochen**;
-  - danach die jüngste je Kalendermonat bis **12 Monate** zurück;
-  - danach die jüngste je Kalenderjahr bis **5 Jahre** zurück;
-  - älter als 5 Jahre: löschen.
-  Weiterhin: neue Sicherung nur bei Änderung; gelöscht wird nur, was die
-  App selbst angelegt und sich gemerkt hat.
-- **Jahresstufe 10 Jahre** (Nutzer, 26.09.2026: „mache 10 Jahre draus aber min
-  was das gesetz sagt“). Ersetzt „bis 5 Jahre“: die jüngste je Kalenderjahr bis
-  **10 Jahre** zurück, älter löschen. Die Grenze ist eine Konstante
-  (`JAHRE = 10`); verlangt ein anwendbares Gesetz mehr, wird sie angehoben,
-  nie unter die gesetzliche Mindestfrist.
+    with `{ "enabled": bool }`, only for the caller's own account.
+  - If it is on, the weekly job additionally places the backup as
+    `TimeSister Backups/<YYYY-MM-DD>.ics` (previously
+    `TimeSister-Sicherungen/…`, see above) in the person's own files.
+    Without consent with the admin, **only** this copy is created, nothing
+    in `IAppData` or at the admin's.
+  - `POST /backups/now` without `uid` also backs up when only the own copy
+    is on, and then creates only that; the response then names
+    `{ "own_copy": "<path>" }` instead of a list entry.
+  - The server never deletes files in the person's own folder; the person
+    manages them.
+  - `GET /status` does not name `own_copy` (bool) per member – that is
+    none of the administration's business.
+- **Only on changes, then thinned** (user's requirement, 2026-09-26:
+  "backups should also be incremental … they need to be cleaned up").
+  Applies to all three locations (protected, at the admin's, own folder)
+  and replaces "the server never deletes files in the own folder".
+  - A new backup is created only if the calendar has changed since the
+    last one in this location (checksum comparison). Otherwise the
+    existing one stays.
+  - Thinning: all of the last 8 weeks; after that the newest per calendar
+    month up to 12 months; after that the newest per calendar year.
+  - Retention period for the protected copy and the one at the admin's:
+    team setting `backup_retention_years` (1 to 10, default 1), on the
+    admin page; `GET /team` names it. Older ones are deleted. In the own
+    folder, the yearly backups remain without a limit.
+  - Only files the app itself created and whose file ID it has recorded
+    are deleted. Moved or renamed files and everything else remain
+    untouched; folders are never deleted. Deleting files owned by persons
+    goes through Nextcloud's trash.
+- **Final tiering** (user, 2026-09-26: "by incremental I mean the complete
+  ics calendars as files. 4 weeks, 12 months, 5 years"). Replaces the
+  numbers and `backup_retention_years` from the previous point; the team
+  setting is removed. Every backup is a **complete** `.ics` file. The same
+  for all three locations:
+  - all backups of the last **4 weeks**;
+  - after that the newest per calendar month back to **12 months**;
+  - after that the newest per calendar year back to **5 years**;
+  - older than 5 years: deleted.
+  Still applies: new backup only on change; only what the app itself
+  created and recorded is deleted.
+- **10-year yearly tier** (user, 2026-09-26: "make it 10 years but at
+  least what the law requires"). Replaces "up to 5 years": the newest per
+  calendar year back to **10 years**, older deleted. The limit is a
+  constant (`JAHRE = 10`); if an applicable law requires more, it is
+  raised, never below the legal minimum retention period.
 
-## Nachträge zu 1.1 aus der Umsetzung (26.09.2026)
+## Addenda to 1.1 from implementation (2026-09-26)
 
-Präzisierungen, die die App (0.2.1) so umsetzt. Nichts oben Stehendes ändert sich.
+Clarifications the app (0.2.1) implements this way. Nothing stated above
+changes.
 
-- **Tage und Wochen** in UTC; die ISO-Woche geht von Montag bis Sonntag.
-- **Welcher Kalender:** `calendar_url` zählt nur, wenn sie im Heim des Kontos
-  selbst liegt (`…/remote.php/dav/calendars/<uid>/<uri>/`); sonst gilt
-  `zeit-<uid>`. So sichert der Server nie einen Kalender, den das Konto
-  nicht sieht.
-- **Export:** `ICalendarExport` liefert je Termin ein eigenes VCALENDAR; der
-  Server setzt daraus eine vollständige `.ics` zusammen (eigener Kopf,
-  `PRODID:-//B/IAS//TimeSister Server-Sicherung//DE`, jede VTIMEZONE einmal,
-  dann alle Termine). Er läuft ohne Benutzerkontext (Wochenjob) und im
-  Anfragekontext jedes berechtigten Kontos. Ein leerer Kalender ergibt eine
-  gültige leere Sicherung. Kein Zeitkalender → `404 not_found`
-  („Für dieses Konto gibt es keinen Zeitkalender.“), über 20 MB → `413 too_large`.
-- **Nur bei Änderung:** Verglichen wird die Prüfsumme der ganzen `.ics` mit
-  der zuletzt geschriebenen Sicherung derselben Ablage. Die Kopie beim Admin
-  entsteht immer zusammen mit der geschützten. Die eigene Kopie gilt nur als
-  vorhanden, solange die gemerkte Datei noch an ihrem Pfad liegt; hat die
-  Person sie gelöscht oder verschoben, entsteht eine neue.
-- **`POST /backups/now`:** Rumpf darf fehlen. Fremdes Konto: user und lead
-  `403`, nicht im Team `404`, ohne Freigabe `403` mit dem Satz oben. Ist der
-  Kalender unverändert, antwortet es mit dem vorhandenen letzten Eintrag
-  (`taken_on` kann älter sein). Eigenes Konto mit Freigabe **und** eigener
-  Kopie: der Eintrag und dazu `own_copy`. Für ein fremdes Konto schreibt der
-  Endpunkt nie in dessen eigenen Ordner; das tut nur der Wochenjob. Drosselung
-  20 Aufrufe je Minute.
-- **`POST /backups`** (Client) bleibt Fassung 1: immer gespeichert, eine je
-  Tag, ohne Vergleich der Prüfsumme; `source: "client"`. Auch dafür entsteht
-  die Kopie beim Sicherungs-Konto.
-- **`file_path`** ist relativ zum Heim des Sicherungs-Kontos. `null`, wenn das
-  Team kein Konto mit Rolle `admin` hat oder die Kopie nicht geschrieben
-  werden konnte (etwa Speicherplatz); die geschützte Sicherung entsteht
-  trotzdem. Ein Wechsel des Sicherungs-Kontos verschiebt keine vorhandenen
-  Dateien.
-- **Wochenjob:** stündlich; je Konto und Ablage höchstens eine Prüfung je
-  ISO-Woche (vermerkt als Nextcloud-Einstellung des Kontos), höchstens 100
-  Konten je Lauf. Wer mitten in der Woche freigibt oder die eigene Kopie
-  einschaltet, wird beim nächsten stündlichen Lauf gesichert.
-- **`backup_owner`** in `GET /team` und `GET /admin/teams` ist das wirksame
-  Konto: die Wahl, solange sie `admin` ist, sonst der erste `admin` nach
-  Kennung, ohne `admin` `null`. `POST`/`PUT /admin/teams` nehmen
-  `backup_owner`: fehlt es, bleibt die Wahl; `null` oder leer heisst
-  automatisch; sonst muss das Konto in der `admin`-Gruppe des Teams stehen
-  (`422 invalid`).
-- **`PUT /backups/consent`:** `consent` kein Wahrheitswert → `400 invalid`;
-  `uid` im Rumpf → `400 invalid`; `notice` fehlt, leer, länger als 32 Zeichen
-  oder mit Steuerzeichen → `422 invalid`. Erneutes Freigeben ersetzt `notice`
-  und behält `since`. Zurückziehen setzt `since` auf `null` und `revoked_at`;
-  `notice` bleibt. Die Freigabe gilt je Team; wird das Konto gelöscht, fällt
-  sie weg (ein neues Konto mit derselben Kennung muss neu freigeben).
-- **`PUT /backups/own-copy`:** `enabled` kein Wahrheitswert oder `uid` im
-  Rumpf → `400 invalid`. Gespeichert als Nextcloud-Einstellung des Kontos;
-  sie fällt mit dem Konto weg. Die Admin-Seite zeigt sie nicht.
-- **Ausdünnen:** täglich im Aufbewahrungsjob, Grenzen einschliesslich:
-  heute − 28 Tage, heute − 12 Monate, heute − 10 Jahre (`Thinning::JAHRE`).
-  Die jüngste je Monat bzw. Jahr zählt innerhalb ihrer Stufe. Tage in der
-  Zukunft bleiben. Die geschützte Ablage wird je Team und Konto ausgedünnt
-  (Zeile, Datei in `IAppData` und ihre Kopien beim Admin), die eigenen Kopien
-  je Konto. Ersetzt die bisherige Frist von einem Jahr.
-- **Merkliste:** Tabelle `ts_backup_files` mit Konto, Ablage (`admin`/`own`),
-  Besitzer der Datei, Datei-ID, Pfad, Tag und Prüfsumme. Eine Datei wird nur
-  gelöscht, wenn ihre Datei-ID noch auf genau diesen Pfad zeigt, über die
-  Node-API (Papierkorb). Ordner nie.
-- **Admin-Seite:** je Team „Sicherungen ablegen bei“ (automatisch oder ein
-  Admin des Teams) und im Zustand: Zahl mit Freigabe, davon ohne Sicherung in
-  dieser Woche (geprüft und unverändert zählt als gesichert), letzte
-  Server-Sicherung.
-- **`POST /backups/{id}/restore`** gibt es nicht (Zurückspielen macht die
-  Mac-App). Befund aus einem Versuch vor dieser Entscheidung:
-  `ICreateFromString::createFromString` schreibt über
-  `getCalendarsForPrincipal('principals/users/<uid>')` ohne Benutzerkontext in
-  den eigenen Kalender des Kontos.
+- **Days and weeks** in UTC; the ISO week runs Monday to Sunday.
+- **Which calendar:** `calendar_url` only counts if it is in the account's
+  own home (`…/remote.php/dav/calendars/<uid>/<uri>/`); otherwise
+  `zeit-<uid>` applies. This way the server never backs up a calendar the
+  account cannot see.
+- **Export:** `ICalendarExport` returns a separate VCALENDAR per
+  appointment; the server assembles a complete `.ics` from these (own
+  header, `PRODID:-//B/IAS//TimeSister Server Backup//EN`, each VTIMEZONE
+  once, then all appointments). It runs without a user context (weekly
+  job) and in the request context of each authorized account. An empty
+  calendar yields a valid empty backup. No time calendar → `404 not_found`
+  ("This account has no time calendar."), over 20 MB → `413 too_large`.
+- **Only on change:** the checksum of the whole `.ics` is compared with
+  the last backup written in the same location. The copy at the admin's is
+  always created together with the protected one. The own copy counts as
+  existing only as long as the recorded file is still at its path; if the
+  person deleted or moved it, a new one is created.
+- **`POST /backups/now`:** body may be omitted. Another account: user and
+  lead `403`, not in the team `404`, without consent `403` with the
+  sentence above. If the calendar is unchanged, it responds with the
+  existing last entry (`taken_on` may be older). Own account with consent
+  **and** own copy: the entry plus `own_copy`. For another account, the
+  endpoint never writes to that account's own folder; only the weekly job
+  does that. Throttling 20 calls per minute.
+- **`POST /backups`** (client) remains version 1: always stored, one per
+  day, without checksum comparison; `source: "client"`. This too creates
+  the copy at the backup owner's.
+- **`file_path`** is relative to the backup owner's home. `null` if the
+  team has no account with role `admin` or the copy could not be written
+  (e.g. storage space); the protected backup is created regardless. A
+  change of backup owner does not move existing files.
+- **Weekly job:** hourly; at most one check per account and location per
+  ISO week (recorded as a Nextcloud setting of the account), at most 100
+  accounts per run. Whoever grants consent or enables the own copy
+  mid-week is backed up on the next hourly run.
+- **`backup_owner`** in `GET /team` and `GET /admin/teams` is the
+  effective account: the chosen one, as long as it is `admin`, otherwise
+  the first `admin` by user ID, without `admin` `null`. `POST`/`PUT
+  /admin/teams` accept `backup_owner`: if missing, the choice stays;
+  `null` or empty means automatic; otherwise the account must be in the
+  team's `admin` group (`422 invalid`).
+- **`PUT /backups/consent`:** `consent` not a boolean → `400 invalid`;
+  `uid` in the body → `400 invalid`; `notice` missing, empty, longer than
+  32 characters or with control characters → `422 invalid`. Granting
+  consent again replaces `notice` and keeps `since`. Withdrawing sets
+  `since` to `null` and `revoked_at`; `notice` stays. Consent applies per
+  team; if the account is deleted, it lapses (a new account with the same
+  user ID must give consent again).
+- **`PUT /backups/own-copy`:** `enabled` not a boolean or `uid` in the
+  body → `400 invalid`. Stored as a Nextcloud setting of the account; it
+  lapses with the account. The admin page does not show it.
+- **Thinning:** daily in the retention job, inclusive limits: today − 28
+  days, today − 12 months, today − 10 years (`Thinning::JAHRE`). The
+  newest per month or year counts within its tier. Days in the future
+  remain. The protected location is thinned per team and account (row,
+  file in `IAppData` and its copies at the admin's), own copies per
+  account. Replaces the previous one-year retention period.
+- **Record list:** table `ts_backup_files` with account, location
+  (`admin`/`own`), owner of the file, file ID, path, day and checksum. A
+  file is deleted only if its file ID still points to exactly this path,
+  via Nextcloud's node API (trash). Folders never.
+- **Admin page:** per team "store backups at" (automatic or a team admin)
+  and in the status: count with consent, of those without a backup this
+  week (checked and unchanged counts as backed up), latest server backup.
+- **`POST /backups/{id}/restore`** does not exist (restoring is done by
+  the Mac app). Finding from an attempt before this decision:
+  `ICreateFromString::createFromString` writes via
+  `getCalendarsForPrincipal('principals/users/<uid>')` without a user
+  context into the account's own calendar.
 
-## Team-Einstellungen, Fassung 1.2 (26.09.2026)
+## Team settings, version 1.2 (2026-09-26)
 
-Entscheidungen des Nutzers nach dem Datenschutzbericht:
+User's decisions after the privacy report:
 
-- `settings` eines Teams, in `GET /me`, `GET /team` und `GET /admin/teams`,
-  setzbar über `POST`/`PUT /admin/teams` (fehlend = unverändert):
-  - `leads_see_calendars` (bool, Standard **true**): Die Leitung bekommt die
-    Zeitkalender aller Teammitglieder freigegeben. Aus: Die Clients nehmen
-    die Freigabe an die Lead-Gruppe beim nächsten Abgleich zurück (die an die
-    Admin-Gruppe bleibt).
-  - `backup_required` (bool, Standard **false**): Die Verwaltung hat die
-    Sicherung beim Admin angeordnet. Die Mac-App zeigt das im
-    Freigabe-Dialog und beim Ausschalten.
-- Neue Fassung der Aufklärung: `notice` `"2026-09-26.2"` (Wortlaut aus
-  `BERICHT-DATENSCHUTZ-2026-09-26.md`, 3.1, mit der Staffel bis 10 Jahre).
+- A team's `settings`, in `GET /me`, `GET /team` and `GET /admin/teams`,
+  settable via `POST`/`PUT /admin/teams` (missing = unchanged):
+  - `leads_see_calendars` (bool, default **true**): the leads are given
+    the time calendars of all team members shared with them. Off: clients
+    withdraw the share to the lead group on the next sync (the one to the
+    admin group remains).
+  - `backup_required` (bool, default **false**): management has mandated
+    consent for backups with the admin. The Mac app shows this in the
+    consent dialog and when switching it off.
+- New version of the disclosure: `notice` `"2026-09-26.2"` (wording from
+  `BERICHT-DATENSCHUTZ-2026-09-26.md`, 3.1, with the tiering up to 10
+  years).
 
-## Nachträge zu 1.2 aus der Umsetzung (26.09.2026)
+## Addenda to 1.2 from implementation (2026-09-26)
 
 - `settings` = `{ "leads_see_calendars": bool, "backup_required": bool }`,
-  immer mit beiden Schlüsseln. In `GET /me` steht es auf oberster Ebene (wie
-  `groups`), in `GET /team` und `GET /admin/teams` im Team-Objekt.
-- `POST`/`PUT /admin/teams`: fehlt `settings` oder ist es `null`, bleibt es
-  (beim Anlegen: Standardwerte); fehlt ein Schlüssel, bleibt dieser.
-  Unbekannter Schlüssel, kein Wahrheitswert oder kein Objekt → `422 invalid`.
-- Gespeichert in `ts_tenants` (Migration 1003, App 0.2.2); bestehende Teams
-  haben die Standardwerte.
-- `notice` `"2026-09-26.2"` wird angenommen; die Regel bleibt: 1 bis 32
-  Zeichen ohne Steuerzeichen.
+  always with both keys. In `GET /me` it is at the top level (like
+  `groups`), in `GET /team` and `GET /admin/teams` inside the team object.
+- `POST`/`PUT /admin/teams`: if `settings` is missing or `null`, it stays
+  (on creation: default values); if a key is missing, it stays. Unknown
+  key, not a boolean or not an object → `422 invalid`.
+- Stored in `ts_tenants` (migration 1003, app 0.2.2); existing teams have
+  the default values.
+- `notice` `"2026-09-26.2"` is accepted; the rule remains: 1 to 32
+  characters without control characters.
 
-## Teams und Rollen, Fassung 2 (26.09.2026) – ersetzt die Rollen-Gruppen
+## Teams and roles, version 2 (2026-09-26) – replaces the role groups
 
-Entscheidung des Nutzers: je Team nur **zwei** Gruppen, Rollen in der App,
-Freigaben setzt die App der Eigentümerin durch. `api` steigt auf **2**
-(Capabilities `timesister: { api: 2, … }`). TimeSister Next hat nur
-Testdaten; es gibt keinen Übergang von Fassung 1.
+User's decision: only **two** groups per team, roles live in the app, the
+app enforces the owner's shares. `api` rises to **2** (capabilities
+`timesister: { api: 2, … }`). TimeSister Next has only test data; there is
+no migration from version 1.
 
-**Gruppen je Team** (`groups`):
-- `team`: alle Mitglieder. Team-Admins sind Gruppenadmins dieser Gruppe
-  (Konten anlegen).
-- `zeit`: die App-Admins. Jede Person gibt ihren Zeitkalender an diese
-  Gruppe frei. Team-Admins sind auch hier Gruppenadmins.
-- Beide bestehende Nextcloud-Gruppen, verschieden, keinem anderen Team
-  zugeordnet (`409`), sonst `422`. Die Rollen-Gruppen `user`, `lead`,
-  `subadmin`, `admin` und die Konten-Gruppe `accounts` entfallen.
+**Groups per team** (`groups`):
+- `team`: all members. Team admins are group admins of this group (create
+  accounts).
+- `zeit`: the app admins. Each person shares their time calendar with this
+  group. Team admins are also group admins here.
+- Both are existing Nextcloud groups, different, not assigned to any other
+  team (`409`), otherwise `422`. The role groups `user`, `lead`,
+  `subadmin`, `admin` and the accounts group `accounts` are removed.
 
-**Mitgliedschaft und Rolle:**
-- Mitglied ist, wer in `team` oder `zeit` steht und nicht als ausgetreten
-  vermerkt ist (`left_at`). Sonst `403 no_team`; in Gruppen zweier Teams
+**Membership and role:**
+- A member is whoever is in `team` or `zeit` and is not recorded as having
+  left (`left_at`). Otherwise `403 no_team`; in groups of two teams
   `409 ambiguous_team`.
-- Rolle: `admin`, wer in `zeit` steht. Sonst die App-Rolle `subadmin` oder
-  `lead`, sonst `user`.
-- App-Rollen und Austritt speichert die App (Tabelle, additiv). In der
-  Benutzerverwaltung von Nextcloud erscheinen sie nicht.
+- Role: `admin` for whoever is in `zeit`. Otherwise the app role
+  `subadmin` or `lead`, otherwise `user`.
+- The app stores app roles and leaving (table, additive). They do not
+  appear in Nextcloud's user management.
 
-**Endpunkte:**
-- `GET /me`: wie bisher, `groups` = `{ team, zeit }`, dazu `leads`: die
-  Kennungen aller Mitglieder mit Rolle `lead` (für die Freigaben), und
-  `calendar_share` (siehe unten).
-- `GET /team`: `members: [ { uid, display_name, role, left_at } ]` (auch
-  Ausgetretene, mit Datum), `groups`, `settings`, `backup_owner`.
-- `PUT /team/members/{uid}` mit `{ "role"?: "user"|"lead"|"subadmin", "left"?: bool }`:
-  subadmin und admin; `subadmin` vergeben nur admin. Das Konto muss in
-  `team` oder `zeit` stehen (sonst `404`). `admin` ist keine App-Rolle: Das
-  ist die Mitgliedschaft in `zeit` (über Nextcloud). `left: true` vermerkt
-  den Austritt (Konto bleibt in den Gruppen, gehört aber nicht mehr zum
-  Team); `left: false` nimmt wieder auf. Antwort: der Eintrag wie in `/team`.
-- `GET /me/calendar-share` → `{ "enabled": bool }`, `PUT` mit
-  `{ "enabled": bool }`: Schalter der Person „Zeitkalender für das Team
-  freigeben“, Standard **true**, nur das eigene Konto, gespeichert auf dem
-  Server.
-- `POST /status` nimmt zusätzlich `calendar_shared` (bool, tatsächlicher
-  Stand), `GET /status` nennt es je Mitglied.
+**Endpoints:**
+- `GET /me`: as before, `groups` = `{ team, zeit }`, plus `leads`: the
+  user IDs of all members with role `lead` (for the shares), and
+  `calendar_share` (see below).
+- `GET /team`: `members: [ { uid, display_name, role, left_at } ]` (also
+  those who left, with date), `groups`, `settings`, `backup_owner`.
+- `PUT /team/members/{uid}` with `{ "role"?: "user"|"lead"|"subadmin", "left"?: bool }`:
+  subadmin and admin; only admin grants `subadmin`. The account must be in
+  `team` or `zeit` (otherwise `404`). `admin` is not an app role: that is
+  membership in `zeit` (via Nextcloud). `left: true` records leaving
+  (account stays in the groups but no longer belongs to the team); `left:
+  false` rejoins. Response: the entry as in `/team`.
+- `GET /me/calendar-share` → `{ "enabled": bool }`, `PUT` with
+  `{ "enabled": bool }`: the person's "share time calendar with the team"
+  switch, default **true**, own account only, stored on the server.
+- `POST /status` additionally accepts `calendar_shared` (bool, actual
+  state), `GET /status` names it per member.
 - `POST`/`PUT /admin/teams`: `{ name, slug, groups: { team, zeit }, settings?, backup_owner? }`.
 
-**Freigaben (Aufgabe der Mac-App der Eigentümerin, bei jedem Abgleich):**
-- Ist `calendar_share` an: Freigabe an die Gruppe `zeit` und, wenn
-  `settings.leads_see_calendars`, an jede Kennung aus `leads`; jeweils mit
-  dem Recht wie bisher an Admin- bzw. Lead-Gruppe. Fehlende oder geänderte
-  App-Freigaben werden wiederhergestellt, auch wenn die Person sie in der
-  Nextcloud-Oberfläche entfernt hat. Freigaben an nicht mehr berechtigte
-  Kennungen, die die App selbst gesetzt hat, werden entfernt. Andere
-  Freigaben der Person bleiben unberührt.
-- Ist er aus: Die App entfernt ihre Freigaben und setzt keine neuen.
+**Shares (the owner's Mac app's task, on every sync):**
+- If `calendar_share` is on: share with the group `zeit` and, if
+  `settings.leads_see_calendars`, with every user ID from `leads`; each
+  with the right as before to the admin or lead group. Missing or changed
+  app shares are restored, even if the person removed them in the
+  Nextcloud interface. Shares to user IDs no longer authorized, which the
+  app itself set, are removed. Other shares by the person remain
+  untouched.
+- If it is off: the app removes its shares and sets no new ones.
 
-### Nachtrag zu Fassung 2: keine Zeit-Gruppe (26.09.2026)
+### Addendum to version 2: no time group (2026-09-26)
 
-Der Nutzer: „braucht es die zeit gruppe für die admins überhaupt?!“ – nein.
-Ersetzt die Gruppe `zeit` in allen Punkten oben:
+The user: "does the time group even need to exist for the admins?!" – no.
+Replaces the `zeit` group in all points above:
 
-- Je Team **eine** Gruppe: `groups` = `{ team }`.
-- **Admin des Teams ist, wer in Nextcloud Gruppenadmin der Teamgruppe ist**
-  (`OCP\Group\ISubAdmin`). Das braucht es ohnehin zum Anlegen von Konten.
-  Admins ernennt der Nextcloud-Admin in der Benutzerverwaltung; die App
-  vergibt `admin` nicht.
-- Mitglied ist, wer in `team` steht oder Gruppenadmin von `team` ist, und
-  nicht ausgetreten ist.
-- `/me` nennt neben `leads` auch `admins` (Kennungen). Die Mac-App der
-  Eigentümerin gibt ihren Zeitkalender **einzeln** an jede Kennung aus
-  `admins` frei (Recht wie bisher an die Admin-Gruppe) und, wenn
-  `leads_see_calendars`, an jede aus `leads`. Das Kundenadressbuch ebenso.
-- `PUT /team/members/{uid}`: `role` nur `user`, `lead`, `subadmin`;
-  `subadmin` vergeben nur Admins.
+- One group per team: `groups` = `{ team }`.
+- **The team's admin is whoever is a Nextcloud group admin of the team
+  group** (`OCP\Group\ISubAdmin`). This is needed anyway to create
+  accounts. The Nextcloud admin appoints admins in user management; the
+  app does not grant `admin`.
+- A member is whoever is in `team` or is a group admin of `team`, and has
+  not left.
+- `/me` also names `admins` (user IDs) alongside `leads`. The owner's Mac
+  app shares its time calendar **individually** with every user ID from
+  `admins` (right as before to the admin group) and, if
+  `leads_see_calendars`, with every one from `leads`. The customer address
+  book likewise.
+- `PUT /team/members/{uid}`: `role` only `user`, `lead`, `subadmin`; only
+  admins grant `subadmin`.
 - `POST`/`PUT /admin/teams`: `groups: { team }`.
 
-### Nachtrag zu Fassung 2: Budgets erben die Rechte des Projekts (26.09.2026)
+### Addendum to version 2: budgets inherit the project's permissions (2026-09-26)
 
-Der Nutzer: „Budgets die ein Projekt haben erben die Rechte“. Budgets stehen
-im Projektdatensatz (`data.budgets`); die Leitung eines Projekts steht in
-`data.leads` (Personenschlüssel, über `login`/`accounts` der Person einem
-Konto zugeordnet).
+The user: "budgets belonging to a project inherit its permissions."
+Budgets are in the project record (`data.budgets`); a project's leads are
+in `data.leads` (person keys, linked to an account via the person's
+`login`/`accounts`).
 
-- **Lesen:** `data.budgets` bekommen subadmin, admin und die Leitungen
-  **dieses** Projekts. Allen anderen liefert der Server den Projektdatensatz
-  ohne das Feld `budgets` (in `/records`, `/records/{kind}/{key}` und im
-  Verlauf).
-- **Schreiben:** Eine Leitung des Projekts darf `PUT /records/project/{key}`,
-  wenn sich gegenüber der aktuellen Fassung **nur** `budgets` ändert; sonst
-  `403 forbidden` („Projektleitungen dürfen nur die Budgets ihrer Projekte
-  ändern.“). subadmin und admin wie bisher. Batch und Restore bleiben
+- **Read:** `data.budgets` is available to subadmin, admin and the leads
+  of **this** project. Everyone else is served the project record by the
+  server without the `budgets` field (in `/records`, `/records/{kind}/{key}`
+  and in history).
+- **Write:** A lead of the project may `PUT /records/project/{key}` if,
+  compared to the current version, **only** `budgets` changes; otherwise
+  `403 forbidden` ("Only project leads may change the budgets of their
+  projects."). subadmin and admin as before. Batch and restore remain
   subadmin/admin.
-- Ändert sich `data.leads`, entsteht ohnehin eine neue Fassung; neu
-  zugewiesene Leitungen bekommen damit beim nächsten Delta das Projekt mit
-  Budgets, entfernte ohne.
+- If `data.leads` changes, a new version is created anyway; newly assigned
+  leads then get the project with budgets on the next delta, removed ones
+  without.
 
-### Nachtrag zu Fassung 2: Projekte nur für Leitung und Admin, sonst Buchungskatalog (26.09.2026)
+### Addendum to version 2: projects only for leads and admin, otherwise booking catalog (2026-09-26)
 
-Der Nutzer: „wer kein PL oder Admin ist sieht keinen Projektdatensatz. nur
-seine eigenen Daten“. Verschärft den Nachtrag „Budgets erben die Rechte“:
+The user: "whoever is not a PL or admin does not see a project record.
+only their own data." Tightens the "budgets inherit permissions" addendum:
 
-- **Voller Projektdatensatz** nur für admin, subadmin und die Leitungen
-  **dieses** Projekts.
-- **Alle anderen** (user; lead für fremde Projekte) bekommen nur den
-  **Buchungskatalog**: `data` enthält ausschliesslich `schema`, `id`,
-  `name`, `codes`, `subprojects`, `start`, `end`, `status`, `mapping`. Es
-  fehlen `description`, `cost_center`, `customer`, `quote`, `leads`,
-  `budget`, `milestones`, `budgets`. Grund: Ohne Codes, Unterprojekte und
-  Zuordnungsregeln kann die Mac-App Termine nicht verbuchen.
-- Gilt für `/records`, das Delta, `/records/project/{key}` und den Verlauf
-  (Verlauf eines Projekts: nur admin, subadmin, Leitung des Projekts).
-- Schreiben unverändert: Leitung nur `budgets` ihres Projekts; alles andere
-  subadmin/admin.
+- **Full project record** only for admin, subadmin and the leads of
+  **this** project.
+- **Everyone else** (user; lead for other projects) gets only the
+  **booking catalog**: `data` contains only `schema`, `id`, `name`,
+  `codes`, `subprojects`, `start`, `end`, `status`, `mapping`. Missing are
+  `description`, `cost_center`, `customer`, `quote`, `leads`, `budget`,
+  `milestones`, `budgets`. Reason: without codes, subprojects and mapping
+  rules the Mac app cannot book appointments.
+- Applies to `/records`, the delta, `/records/project/{key}` and history
+  (history of a project: only admin, subadmin, the project's leads).
+- Writing unchanged: leads only `budgets` of their project; everything
+  else subadmin/admin.
 
-### Nachtrag zu Fassung 2: Projektleitung ist Admin im Projekt (26.09.2026)
+### Addendum to version 2: project leads are admin within the project (2026-09-26)
 
-Der Nutzer: „Doch dürfen sie. PL sind Admin im Projekt.“ Ersetzt die Regel
-„Leitung darf nur `budgets` ändern“:
+The user: "Yes they may. PLs are admin within the project." Replaces the
+rule "leads may only change `budgets`":
 
-- Eine Leitung des Projekts darf `PUT /records/project/{key}` mit **allen**
-  Feldern (auch `leads`, `customer`, `codes`, `subprojects`, `budgets`,
-  `milestones`). `id` muss gleich dem Schlüssel bleiben.
-- Anlegen (`version: 0` für einen neuen Schlüssel), Löschen, Batch und
-  Restore bleiben subadmin/admin.
-- Geprüft wird gegen die Leitung der **aktuellen** Fassung auf dem Server,
-  nicht gegen die neue: Wer sich selbst aus `leads` nimmt, darf das noch
-  schreiben und sieht danach nur den Katalog.
+- A lead of the project may `PUT /records/project/{key}` with **all**
+  fields (also `leads`, `customer`, `codes`, `subprojects`, `budgets`,
+  `milestones`). `id` must remain equal to the key.
+- Creating (`version: 0` for a new key), deleting, batch and restore
+  remain subadmin/admin.
+- Checked against the leads of the **current** version on the server, not
+  the new one: whoever removes themselves from `leads` may still write
+  this and afterwards sees only the catalog.
 
-## Nachträge zu Fassung 2 aus der Umsetzung (26.09.2026)
+## Addenda to version 2 from implementation (2026-09-26)
 
-App 0.3.0. Präzisierungen; nichts oben Stehendes ändert sich.
+App 0.3.0. Clarifications; nothing stated above changes.
 
-- **Mitgliedschaft:** Ausgetretene zählen für die Eindeutigkeit nicht. Wer
-  aus Team A ausgetreten ist und in der Teamgruppe von Team B steht, gehört
-  zu B; `409 ambiguous_team` nur bei zwei Teams ohne Austritt. Auch ein
-  Admin mit vermerktem Austritt bekommt `403 no_team`.
-- **Alte Zuordnungen:** Nur `team` zählt. Zeilen aus Fassung 1 (`user`,
-  `lead`, `subadmin`, `admin`, `accounts`) werden ignoriert; `PUT
-  /admin/teams/{id}` nimmt sie aus der Zuordnung, die Nextcloud-Gruppen
-  bleiben. Eine Gruppe mit alter Zuordnung zu einem anderen Team gilt als
-  vergeben (`409`).
-- **`groups`** in `POST`/`PUT /admin/teams`: genau `{ "team": "<gid>" }`.
-  Andere Schlüssel oder keine Teamgruppe → `422 invalid`. `backup_owner`
-  muss Gruppenadmin der Teamgruppe sein (`422`).
-- **`/me`:** `admins` und `leads` sind die Kennungen aller nicht
-  ausgetretenen Mitglieder mit dieser Rolle, sortiert, der Aufrufer
-  eingeschlossen.
-- **`/team`:** `members` nach Kennung; bei Ausgetretenen ist `role` die
-  Rolle, die sie hätten, `left_at` eine ISO-Zeit, sonst `null`. Wer eine
-  App-Rolle hat, aber nicht mehr in der Teamgruppe steht, fehlt; kommt das
-  Konto zurück, gilt die gespeicherte Rolle wieder.
-- **`GET /status`** nennt nur nicht Ausgetretene. `calendar_shared` ist
-  `true`, `false` oder `null` (nie gemeldet); im `POST` löscht `null` den
-  Wert, kein Wahrheitswert → `422 invalid`.
-- **`PUT /team/members/{uid}`**, Prüfung in dieser Reihenfolge:
-  - user oder lead → `403 forbidden`;
-  - weder `role` noch `left` → `400 invalid`;
-  - `role` nicht `user`, `lead` oder `subadmin` (auch `admin`), `left` kein
-    Wahrheitswert → `422 invalid`;
-  - Konto weder in der Teamgruppe noch ihr Gruppenadmin → `404 not_found`;
-  - `subadmin` vergeben und Einträge von Verwaltung und Admins ändern
-    (Rolle und Austritt) nur Admins, den eigenen Austritt vermerkt niemand
-    selbst → `403 forbidden`.
+- **Membership:** those who left do not count for uniqueness. Whoever left
+  team A and is in team B's team group belongs to B; `409 ambiguous_team`
+  only for two teams without leaving. Even an admin recorded as having
+  left gets `403 no_team`.
+- **Old mappings:** only `team` counts. Rows from version 1 (`user`,
+  `lead`, `subadmin`, `admin`, `accounts`) are ignored; `PUT
+  /admin/teams/{id}` removes them from the mapping, the Nextcloud groups
+  remain. A group with an old mapping to another team counts as taken
+  (`409`).
+- **`groups`** in `POST`/`PUT /admin/teams`: exactly `{ "team": "<gid>" }`.
+  Other keys or no team group → `422 invalid`. `backup_owner` must be a
+  group admin of the team group (`422`).
+- **`/me`:** `admins` and `leads` are the user IDs of all members with
+  this role who have not left, sorted, including the caller.
+- **`/team`:** `members` by user ID; for those who left, `role` is the
+  role they would have, `left_at` an ISO time, otherwise `null`. Whoever
+  has an app role but is no longer in the team group is missing; if the
+  account returns, the stored role applies again.
+- **`GET /status`** names only those who have not left. `calendar_shared`
+  is `true`, `false` or `null` (never reported); in the `POST`, `null`
+  clears the value, not a boolean → `422 invalid`.
+- **`PUT /team/members/{uid}`**, checked in this order:
+  - user or lead → `403 forbidden`;
+  - neither `role` nor `left` → `400 invalid`;
+  - `role` not `user`, `lead` or `subadmin` (also `admin`), `left` not a
+    boolean → `422 invalid`;
+  - account neither in the team group nor its group admin →
+    `404 not_found`;
+  - granting `subadmin` and changing entries of managers and admins (role
+    and leaving) only by admins, nobody records their own leaving →
+    `403 forbidden`.
 
-  `role: "user"` löscht die App-Rolle. `left: true` auf schon Ausgetretene
-  behält das erste Datum.
-- **Admin-Seite:** `PUT /admin/teams/{id}/members/{uid}` mit demselben
-  Rumpf und denselben Prüfungen; der Nextcloud-Admin hat die Rechte eines
-  Team-Admins. Unbekanntes Team → `404`.
+  `role: "user"` clears the app role. `left: true` on someone already
+  marked as left keeps the first date.
+- **Admin page:** `PUT /admin/teams/{id}/members/{uid}` with the same
+  body and the same checks; the Nextcloud admin has a team admin's
+  rights. Unknown team → `404`.
 - **`GET /admin/teams`:** `counts` = `{ user, lead, subadmin, admin, left }`.
-- **Konto gelöscht:** App-Rolle und Austritt fallen weg, ein neues Konto mit
-  derselben Kennung erbt nichts. `calendar_share` ist eine
-  Nextcloud-Einstellung des Kontos (`IUserConfig`, Schlüssel
-  `calendar_share`) und fällt mit ihm weg.
-- **Projekte:**
-  - Personenschlüssel für `leads`: die eigene Kennung und die Schlüssel
-    lebender Personen mit ihr in `accounts`, wie bei „eigene Person“. Jede
-    Rolle zählt, auch `user`.
-  - Katalog: die Felder der Liste, soweit vorhanden; alle anderen, auch
-    künftige, fehlen.
-  - Verlauf: Leitung nach der aktuellen Fassung, dann voll. Bei einem
-    Grabstein nur Verwaltung und Admin.
-  - Ohne Verwaltungsrolle prüft `PUT /records/project/{key}` zuerst Pfad
-    und Rumpf (`400`/`422`), dann die Leitung. Keine Leitung, Grabstein oder
-    neuer Schlüssel → `403 forbidden`, Satz: „Ein Projekt ändern nur
-    Verwaltung, Admin und seine Leitung; neue Projekte legen Verwaltung und
-    Admin an.“
-  - Die Antwort auf den `PUT` ist voll, auch wenn sich die Leitung dabei
-    herausnimmt. `409 conflict` nennt `current` voll.
-- **Gespeichert:** Tabelle `ts_members(tenant_id, uid, role, left_at,
-  updated_by, updated_at)` und Spalte `ts_client_status.calendar_shared`,
-  Migration 1004, App 0.3.0, nur hinzufügend.
+- **Account deleted:** app role and leaving are dropped, a new account
+  with the same user ID inherits nothing. `calendar_share` is a Nextcloud
+  setting of the account (`IUserConfig`, key `calendar_share`) and is
+  dropped with it.
+- **Projects:**
+  - Person keys for `leads`: the caller's own key and the keys of living
+    persons with it in `accounts`, as with "own person". Every role
+    counts, even `user`.
+  - Catalog: the fields from the list, where present; all others,
+    including future ones, are missing.
+  - History: leads per the current version, then full. For a tombstone,
+    only managers and admin.
+  - Without a management role, `PUT /records/project/{key}` first checks
+    path and body (`400`/`422`), then the lead. No lead, tombstone or new
+    key → `403 forbidden`, sentence: "Only managers, admins and the
+    project's leads change a project; managers and admins create new
+    ones."
+  - The response to the `PUT` is full, even if the lead removes
+    themselves in it. `409 conflict` names `current` in full.
+- **Stored:** table `ts_members(tenant_id, uid, role, left_at, updated_by,
+  updated_at)` and column `ts_client_status.calendar_shared`, migration
+  1004, app 0.3.0, additive only.

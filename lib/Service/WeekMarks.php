@@ -10,9 +10,9 @@ use OCA\TimeSister\AppInfo\Application;
 use OCP\Config\IUserConfig;
 
 /**
- * Wann der Wochenjob ein Konto je Ablage zuletzt geprüft hat, als
- * Nextcloud-Einstellung des Kontos. So exportiert er höchstens einmal je
- * ISO-Woche, auch wenn sich nichts geändert hat und keine Datei entsteht.
+ * When the weekly job last checked an account for each store, as a
+ * Nextcloud setting of the account. This way it exports at most once per
+ * ISO week, even when nothing changed and no file is created.
  */
 final class WeekMarks {
 	public const ADMIN = 'admin';

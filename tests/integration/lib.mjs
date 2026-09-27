@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Gemeinsames für seed.mjs und integration.mjs. Node ≥ 18 (fetch), keine
-// Abhängigkeiten. Läuft nur gegen localhost – nie gegen einen echten Server.
+// Shared by seed.mjs and integration.mjs. Node ≥ 18 (fetch), no
+// dependencies. Runs only against localhost – never against a real server.
 //
-//   NC_URL          Nextcloud, Standard http://localhost:8081 (docker-next)
-//   NC_ADMIN_USER   Standard admin
-//   NC_ADMIN_PASS   Standard admin123 (CI: admin)
-//   TS_SQL          optional: Befehl, der SQL auf stdin nimmt und Zeilen ausgibt,
-//                   z. B. "docker exec -i timesister-next-db-1 mariadb -N -unextcloud -pncpw nextcloud"
-//                   oder "sqlite3 ../../data/nextcloud.db". Ohne: DB-Prüfungen entfallen.
-//   TS_OCC          optional: Befehl für occ, z. B.
-//                   "docker exec -u www-data timesister-next-app-1 php occ". Ohne: Job-Prüfungen entfallen.
+//   NC_URL          Nextcloud, default http://localhost:8081 (docker-next)
+//   NC_ADMIN_USER   default admin
+//   NC_ADMIN_PASS   default admin123 (CI: admin)
+//   TS_SQL          optional: a command that takes SQL on stdin and prints rows,
+//                   e.g. "docker exec -i timesister-next-db-1 mariadb -N -unextcloud -pncpw nextcloud"
+//                   or "sqlite3 ../../data/nextcloud.db". Without it: DB checks are skipped.
+//   TS_OCC          optional: a command for occ, e.g.
+//                   "docker exec -u www-data timesister-next-app-1 php occ". Without it: job checks are skipped.
 import { execSync } from 'node:child_process'
 
 export const NC = (process.env.NC_URL || 'http://localhost:8081').replace(/\/$/, '')
@@ -19,22 +19,22 @@ export const API = '/ocs/v2.php/apps/timesister/api/v1'
 
 const host = new URL(NC).hostname
 if (!['localhost', '127.0.0.1', '::1', '[::1]'].includes(host)) {
-	console.error(`Abbruch: ${NC} ist nicht lokal. Diese Prüfung läuft nur gegen eine Test-Nextcloud.`)
+	console.error(`Aborting: ${NC} is not local. This check only runs against a test Nextcloud.`)
 	process.exit(2)
 }
 
-/** Passwort der Testkonten: Test-2026-<konto>! */
+/** Password of the test accounts: Test-2026-<account>! */
 export const pw = (uid) => `Test-2026-${uid}!`
 export const as = (uid) => ({ user: uid, pass: pw(uid) })
 
-/** Die Teams aus docker-next/aufsetzen.sh (Fassung 2: eine Teamgruppe je Team). */
+/** The teams from docker-next/aufsetzen.sh (version 2: one team group per team). */
 export const TEAMS = [
 	{ name: 'Planungsbüro', slug: 'pb', prefix: 'pb' },
 	{ name: 'Atelier', slug: 'at', prefix: 'at' },
 ]
 /**
- * Konto, Anzeigename, Team, Rolle. Alle stehen in der Teamgruppe; admin
- * ist Gruppenadmin der Teamgruppe, lead und subadmin sind App-Rollen.
+ * Account, display name, team, role. All are in the team group; admin
+ * is the team group's group admin, lead and subadmin are app roles.
  */
 export const ACCOUNTS = [
 	['pbadmin', 'Petra Brunner', 'pb', 'admin'],
@@ -47,20 +47,23 @@ export const ACCOUNTS = [
 	['atuser1', 'Tim Test', 'at', 'user'],
 ]
 
-/** Die Teamgruppe eines Teams. */
+/** A team's team group. */
 export const teamGroupOf = (prefix) => `${prefix}-team`
-/** `groups` wie in /me, /team und /admin/teams. */
+/** `groups` as in /me, /team and /admin/teams. */
 export const groupsOf = (prefix) => ({ team: teamGroupOf(prefix) })
 
 /**
- * Eine OCS-Anfrage. `path` beginnt mit `/ocs/…` oder ist relativ zur App-API.
+ * An OCS request. `path` starts with `/ocs/…` or is relative to the app API.
+ * `Accept-Language` defaults to `en` so checks do not depend on the
+ * environment; pass `{ lang: 'de' }` to ask for another language.
  * @returns {Promise<{status:number, data:any, meta:any, text:string}>}
  */
-export async function ocs(who, method, path, body, { form = false, raw } = {}) {
+export async function ocs(who, method, path, body, { form = false, raw, lang = 'en' } = {}) {
 	const url = NC + (path.startsWith('/ocs/') ? path : API + path)
 	const headers = {
 		'OCS-APIRequest': 'true',
 		Accept: 'application/json',
+		'Accept-Language': lang,
 		Authorization: 'Basic ' + Buffer.from(`${who.user}:${who.pass}`).toString('base64'),
 	}
 	let payload
@@ -87,7 +90,7 @@ export async function ocs(who, method, path, body, { form = false, raw } = {}) {
 	return { status: res.status, data: json?.ocs?.data ?? null, meta: json?.ocs?.meta ?? null, text }
 }
 
-/** SQL über TS_SQL, sonst null. */
+/** SQL via TS_SQL, otherwise null. */
 export function sql(query) {
 	if (!process.env.TS_SQL) {
 		return null
@@ -95,7 +98,7 @@ export function sql(query) {
 	return execSync(process.env.TS_SQL, { input: query + '\n', encoding: 'utf8' }).trim()
 }
 
-/** occ über TS_OCC, sonst null. Argumente werden einzeln in '…' gesetzt. */
+/** occ via TS_OCC, otherwise null. Arguments are each put in '…'. */
 export function occ(...args) {
 	if (!process.env.TS_OCC) {
 		return null
@@ -105,8 +108,8 @@ export function occ(...args) {
 }
 
 /**
- * WebDAV/CalDAV-Anfrage unter /remote.php/dav. `path` ohne führenden
- * Schrägstrich, Segmente schon kodiert.
+ * A WebDAV/CalDAV request under /remote.php/dav. `path` without a leading
+ * slash, segments already encoded.
  * @returns {Promise<{status:number, text:string}>}
  */
 export async function dav(who, method, path, body, headers = {}) {

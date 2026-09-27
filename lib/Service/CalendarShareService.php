@@ -10,8 +10,8 @@ use OCA\TimeSister\AppInfo\Application;
 use OCP\Config\IUserConfig;
 
 /**
- * Schalter der Person „Zeitkalender für das Team freigeben“ (Fassung 2).
- * Standard an; gespeichert als Nextcloud-Einstellung des Kontos.
+ * The person's "share time calendar with the team" switch (API version 2).
+ * Default on; stored as a Nextcloud setting of the account.
  */
 final class CalendarShareService {
 	private const KEY = 'calendar_share';
@@ -31,18 +31,18 @@ final class CalendarShareService {
 	}
 
 	/**
-	 * Nur für das eigene Konto: Die Kennung kommt aus der Anmeldung.
+	 * Only for the own account: the identifier comes from the login.
 	 *
 	 * @param array<string,mixed> $in
 	 * @return array{enabled:bool}
 	 */
 	public function set(string $uid, array $in): array {
 		if (array_key_exists('uid', $in)) {
-			throw ApiException::badRequest('Der Schalter gilt nur für das eigene Konto; „uid“ gehört nicht in den Rumpf.');
+			throw ApiException::ownAccountOnly();
 		}
 		$enabled = $in['enabled'] ?? null;
 		if (!is_bool($enabled)) {
-			throw ApiException::badRequest('„enabled“ muss true oder false sein.');
+			throw ApiException::notBool('enabled', true);
 		}
 		$this->config->setValueBool($uid, Application::APP_ID, self::KEY, $enabled);
 		return ['enabled' => $enabled];

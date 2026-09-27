@@ -13,7 +13,7 @@ use OCA\TimeSister\Service\TeamRules;
 use OCA\TimeSister\Service\Time;
 use PHPUnit\Framework\TestCase;
 
-/** Sicherungen, Lebenszeichen, Teams, Zeiten. */
+/** Backups, heartbeat, teams, times. */
 class RulesTest extends TestCase {
 	private static function code(callable $fn): string {
 		try {
@@ -40,7 +40,7 @@ class RulesTest extends TestCase {
 		$bom = "\xEF\xBB\xBF\r\n" . $ics;
 		$this->assertSame($bom, BackupRules::decode(base64_encode($bom)));
 		$this->assertSame('422 invalid', self::code(fn () => BackupRules::decode(base64_encode('BEGIN:VCARD'))));
-		$this->assertSame('422 invalid', self::code(fn () => BackupRules::decode('%%%nicht base64%%%')));
+		$this->assertSame('422 invalid', self::code(fn () => BackupRules::decode('%%%not base64%%%')));
 		$this->assertSame('422 invalid', self::code(fn () => BackupRules::decode('')));
 		$this->assertSame('422 invalid', self::code(fn () => BackupRules::decode(null)));
 	}
@@ -56,7 +56,7 @@ class RulesTest extends TestCase {
 	public function testBackupFolderNeverAPath(): void {
 		$this->assertSame('u-alice', BackupRules::folderFor('alice'));
 		$this->assertSame('u-a.muster@example.org', BackupRules::folderFor('a.muster@example.org'));
-		foreach (['..', '.', '.hidden', 'a/b', "o'neil", 'mit leer'] as $uid) {
+		foreach (['..', '.', '.hidden', 'a/b', "o'neil", 'has space'] as $uid) {
 			$f = BackupRules::folderFor($uid);
 			$this->assertMatchesRegularExpression('/^h-[0-9a-f]{64}$/', $f, $uid);
 		}
@@ -97,7 +97,7 @@ class RulesTest extends TestCase {
 		$this->assertSame('422 invalid', self::code(fn () => TeamRules::validate(['name' => '  '] + $ok)));
 	}
 
-	/** Fassung 2: nur `team`; Rollen-, Konten- und Zeit-Gruppen gibt es nicht mehr. */
+	/** Version 2: only `team`; role, account and time groups no longer exist. */
 	public function testTeamGroupOnly(): void {
 		$with = fn (mixed $groups): array => ['name' => 'T', 'slug' => 'tt', 'groups' => $groups];
 		foreach ([[], ['team' => ''], ['team' => 7], ['team' => str_repeat('g', 65)], 'pb-team', null] as $bad) {
@@ -109,8 +109,8 @@ class RulesTest extends TestCase {
 	}
 
 	public function testTeamSettings(): void {
-		$this->assertSame(['leads_see_calendars' => true, 'backup_required' => false], TeamRules::SETTINGS, 'Standardwerte');
-		$this->assertSame([], TeamRules::settings(['name' => 'x']), 'fehlt: unverändert');
+		$this->assertSame(['leads_see_calendars' => true, 'backup_required' => false], TeamRules::SETTINGS, 'default values');
+		$this->assertSame([], TeamRules::settings(['name' => 'x']), 'missing: unchanged');
 		$this->assertSame([], TeamRules::settings(['settings' => null]));
 		$this->assertSame([], TeamRules::settings(['settings' => []]));
 		$this->assertSame(['backup_required' => true], TeamRules::settings(['settings' => ['backup_required' => true]]));

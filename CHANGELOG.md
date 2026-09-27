@@ -1,72 +1,84 @@
-# Änderungen
+# Changes
 
-## 0.3.0 – unveröffentlicht
+## 0.4.0 – unreleased
 
-Schnittstelle Fassung 2 (`api: 2`), ohne Übergang von Fassung 1:
+- API unchanged (`api: 2`).
+- Roles are called User, Lead, Manager and Admin in every language (admin page, app description).
+- Error messages have English source texts and are translated with Nextcloud's l10n (`de`, `de_DE`); `message` comes in the account's language (Nextcloud language setting, else `Accept-Language`, else English). Clients decide by `error`, never by wording.
+- New visible backup copies go to the folder "TimeSister Backups" (was "TimeSister-Sicherungen"). Existing files stay where they are; their tracked paths remain valid and thinning removes them as before.
+- Server backups carry `PRODID:-//B/IAS//TimeSister Server Backup//EN`.
+- Log messages, code comments and tests are in English.
 
-- Je Team **eine** Teamgruppe (`groups: { team }`). Admin des Teams ist,
-  wer in Nextcloud Gruppenadmin der Teamgruppe ist (`ISubAdmin`); `lead` und
-  `subadmin` und der Austritt stehen in der App (Tabelle `ts_members`).
-  Rollen-, Konten- und Zeit-Gruppen entfallen; alte Zeilen in
-  `ts_role_groups` bleiben stehen und werden ignoriert.
-- `/me` mit `admins`, `leads` und `calendar_share`; `/team` mit
-  `members: [{ uid, display_name, role, left_at }]`, auch Ausgetretene.
-- `PUT /team/members/{uid}` (Verwaltung und Admin; `subadmin` vergeben nur
-  Admins), dazu `PUT /admin/teams/{id}/members/{uid}` für die Admin-Seite.
-- `GET`/`PUT /me/calendar-share` (Standard an), `calendar_shared` in
+## 0.3.0 – unreleased
+
+API version 2 (`api: 2`), no transition from version 1:
+
+- **One** team group per team (`groups: { team }`). The team's Admin is
+  whoever is that team group's group admin in Nextcloud (`ISubAdmin`); the
+  `lead` and `subadmin` roles and leaving live in the app (table
+  `ts_members`). Role, account and time groups are dropped; old rows in
+  `ts_role_groups` stay and are ignored.
+- `/me` with `admins`, `leads` and `calendar_share`; `/team` with
+  `members: [{ uid, display_name, role, left_at }]`, including those who
+  left.
+- `PUT /team/members/{uid}` (Manager and Admin; only Admins grant
+  `subadmin`), plus `PUT /admin/teams/{id}/members/{uid}` for the admin
+  page.
+- `GET`/`PUT /me/calendar-share` (default on), `calendar_shared` in
   `POST`/`GET /status`.
-- Projekte voll nur für Verwaltung, Admin und die Leitungen des Projekts,
-  sonst der Buchungskatalog; die Leitung ändert ihr Projekt ganz, legt aber
-  keine neuen an. Verlauf eines Projekts auch für seine Leitung.
-- Admin-Seite: ein Gruppenfeld, Admins als Liste mit Hinweis, Mitglieder
-  mit Rolle und Austritt (setzbar in „Team bearbeiten“), im Zustand die
-  Konten ohne freigegebenen Zeitkalender.
-- Migration `Version1004…`, nur hinzufügend (`ts_members`,
+- Projects in full only for Manager, Admin and the project's Leads,
+  otherwise the booking catalog; a Lead can fully edit their project but
+  not create new ones. A project's history is also available to its Lead.
+- Admin page: one group field, Admins as a list with a note, members with
+  role and leaving (settable in "Edit team"), in the status the accounts
+  without a shared time calendar.
+- Migration `Version1004…`, additive only (`ts_members`,
   `ts_client_status.calendar_shared`).
 
-## 0.2.2 – unveröffentlicht
+## 0.2.2 – unreleased
 
-- Schnittstelle Fassung 1.2: Team-Einstellungen `settings`
-  (`leads_see_calendars`, Standard an; `backup_required`, Standard aus) in
-  `/me`, `/team` und `/admin/teams`, setzbar über `POST`/`PUT /admin/teams`.
-- Admin-Seite: zwei Schalter im Formular „Team bearbeiten“, Zustand in der
-  Teamliste.
-- Migration `Version1003…`, nur hinzufügend.
+- API version 1.2: team settings `settings` (`leads_see_calendars`, default
+  on; `backup_required`, default off) in `/me`, `/team` and
+  `/admin/teams`, settable via `POST`/`PUT /admin/teams`.
+- Admin page: two switches in the "Edit team" form, status in the team
+  list.
+- Migration `Version1003…`, additive only.
 
-## 0.2.1 – unveröffentlicht
+## 0.2.1 – unreleased
 
-Schnittstelle Fassung 1.1, Sicherungen (0.2.0 war nur ein Zwischenstand der
-Entwicklung):
+API version 1.1, backups (0.2.0 was only a development snapshot):
 
-- Der Server sichert selbst: stündlich geprüft, je Konto höchstens einmal je
-  ISO-Woche, Export mit `ICalendarExport`, neue Sicherung nur bei geänderter
-  Prüfsumme.
-- Nur mit Freigabe der Person (`GET`/`PUT /backups/consent`, mit Fassung der
-  Aufklärung); zurückziehen löscht nichts.
-- Zwei Ablagen: geschützt in `IAppData` und sichtbar beim Sicherungs-Konto
-  des Teams (`backup_owner`, auf der Admin-Seite wählbar). Wahlweise eine
-  Kopie im eigenen Ordner (`/backups/own-copy`).
-- `POST /backups/now`, `source` und `file_path` in den Sicherungen,
-  `backup_owner` in `/team`, Freigabe in `/status`.
-- Ausdünnen statt fester Frist: 4 Wochen alle, dann monatlich bis 12 Monate,
-  dann jährlich bis 10 Jahre. Gelöscht wird nur, was die App selbst
-  angelegt und sich gemerkt hat (`ts_backup_files`), über den Papierkorb.
-- Admin-Seite: Sicherungs-Konto je Team, im Zustand Freigaben, fehlende
-  Sicherungen dieser Woche und letzte Server-Sicherung; breite Tabellen
-  scrollen waagrecht.
-- Migrationen `Version1001…` und `Version1002…`, nur hinzufügend.
+- The server backs up on its own: checked hourly, at most once per ISO
+  week per account, export with `ICalendarExport`, a new backup only on a
+  changed checksum.
+- Only with the person's consent (`GET`/`PUT /backups/consent`, with a
+  version of the disclosure text); withdrawing deletes nothing.
+- Two storage locations: protected in `IAppData` and visible with the
+  team's backup owner (`backup_owner`, selectable on the admin page).
+  Optionally an own copy in a person's own folder (`/backups/own-copy`).
+- `POST /backups/now`, `source` and `file_path` in the backups,
+  `backup_owner` in `/team`, consent in `/status`.
+- Thinning instead of a fixed retention: all of the last 4 weeks, then
+  monthly up to 12 months, then yearly up to 10 years. Only what the app
+  created and remembered itself (`ts_backup_files`) gets deleted, via the
+  trash.
+- Admin page: backup owner per team, in the status consents, backups
+  missing this week and the last server backup; wide tables scroll
+  horizontally.
+- Migrations `Version1001…` and `Version1002…`, additive only.
 
-## 0.1.0 – unveröffentlicht
+## 0.1.0 – unreleased
 
-- Erste Fassung: Schnittstelle Fassung 1 (`docs/API.md`), Teams mit vier
-  Rollen-Gruppen, Datensätze mit Fassung und Revision, Verlauf, Wiederherstellen,
-  Batch, Kalendersicherungen, Lebenszeichen, Admin-Seite, Aufbewahrung.
-- Optionale Konten-Gruppe je Team (`groups.accounts`): alle Konten des
-  Teams, keine Rolle. Als Gruppenadmins dieser Gruppe können Team-Admins jede
-  Rolle entziehen (Nextcloud-Regel OCS 105). Gespeichert als Zeile
-  `role = 'accounts'` in `ts_role_groups`, ohne Migration.
+- First version: API version 1 (`docs/API.md`), teams with four role
+  groups, records with version and revision, history, restore, batch,
+  calendar backups, status reports, admin page, retention.
+- Optional accounts group per team (`groups.accounts`): all accounts of the
+  team, no role. As group admins of this group, team Admins can revoke any
+  role (Nextcloud rule OCS 105). Stored as a row `role = 'accounts'` in
+  `ts_role_groups`, without a migration.
 - Nextcloud 33–34.
-- Admin-Seite übersetzbar: Englisch als Quelle, Deutsch mit „du“ (`de`) und
-  mit „Sie“ (`de_DE`). Fehlermeldungen der Schnittstelle bleiben deutsch.
-- App Store vorbereitet: englische und deutsche Beschreibung, Bild,
-  Workflow `appstore-build-publish.yml` (aus, solange die Secrets fehlen).
+- Admin page translatable: English as the source, German with "du" (`de`)
+  and with "Sie" (`de_DE`). API error messages remained German.
+- App Store prepared: English and German description, image, workflow
+  `appstore-build-publish.yml` (off as long as the secrets are missing).
+</content>

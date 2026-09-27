@@ -10,7 +10,7 @@ use OCA\TimeSister\AppInfo\Application;
 use OCP\App\IAppManager;
 use OCP\Capabilities\ICapability;
 
-/** `timesister: {api: 1, version}` – fehlt der Eintrag, ist die App nicht da. */
+/** `timesister: {api: 1, version}` – if the entry is missing, the app is not installed. */
 final class Capabilities implements ICapability {
 	public function __construct(
 		private IAppManager $appManager,

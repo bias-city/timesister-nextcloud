@@ -17,8 +17,8 @@ use OCP\Settings\ISettings;
 use OCP\Util;
 
 /**
- * Die Admin-Seite: Teams (über die Admin-Endpunkte) und Zustand. Ein
- * PHP-Template mit etwas Vanilla-JavaScript, ohne Build.
+ * The admin page: teams (through the admin endpoints) and status. A PHP
+ * template with a little vanilla JavaScript, without a build step.
  */
 final class AdminSettings implements ISettings {
 	public function __construct(
@@ -33,7 +33,7 @@ final class AdminSettings implements ISettings {
 	public function getForm(): TemplateResponse {
 		$this->initialState->provideInitialState('overview', [
 			'api' => Application::API_VERSION,
-			// Die Seite braucht keine OC-Globals: Adresse der Schnittstelle von hier.
+			// The page needs no OC globals: the API address comes from here.
 			'api_base' => $this->url->getWebroot() . '/ocs/v2.php/apps/' . Application::APP_ID . '/api/v1',
 			'version' => $this->appManager->getAppVersion(Application::APP_ID),
 			'locale' => str_replace('_', '-', $this->l->getLocaleCode()),
@@ -41,7 +41,7 @@ final class AdminSettings implements ISettings {
 			'state' => $this->admin->overview(),
 			'groups' => $this->admin->allGroups(),
 		]);
-		// Texte für js/admin.js: übersetzt vom Server, ohne OC.L10N.
+		// Texts for js/admin.js, translated by the server, without OC.L10N.
 		$this->initialState->provideInitialState('l10n', $this->jsTexts());
 		Util::addScript(Application::APP_ID, 'admin');
 		Util::addStyle(Application::APP_ID, 'admin');
@@ -49,21 +49,23 @@ final class AdminSettings implements ISettings {
 	}
 
 	/**
-	 * Was das Skript selbst schreibt. Schlüssel wie in js/admin.js,
-	 * Platzhalter {name} ersetzt das Skript.
+	 * What the script writes itself. Keys as in js/admin.js; the script
+	 * replaces placeholders like {name}. Roles are User, Lead, Manager and
+	 * Admin in every language.
 	 *
 	 * @return array<string, string>
 	 */
 	private function jsTexts(): array {
 		$l = $this->l;
 		return [
-			'role_user' => $l->t('Staff'),
-			'role_lead' => $l->t('Project lead'),
-			'role_subadmin' => $l->t('Office'),
+			'role_user' => $l->t('User'),
+			'role_lead' => $l->t('Lead'),
+			'role_subadmin' => $l->t('Manager'),
 			'role_admin' => $l->t('Admin'),
 			'team_group' => $l->t('Team group'),
 			'admins' => $l->t('Admins'),
 			'no_admin' => $l->t('No admin yet'),
+			'admins_after_save' => $l->t('Admins appear after saving.'),
 			'member' => $l->t('Member'),
 			'role' => $l->t('Role'),
 			'left' => $l->t('Left'),

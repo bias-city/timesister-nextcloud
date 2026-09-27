@@ -6,47 +6,51 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
-/** Prüfung einer Kalendersicherung, Woche, Namen und Sicherungs-Konto. Rein. */
+/** Checking a calendar backup, week, name and backup owner. Pure. */
 final class BackupRules {
-	public const MAX_BYTES = 20 * 1024 * 1024; // 20 MB nach dem Dekodieren
+	public const MAX_BYTES = 20 * 1024 * 1024; // 20 MB after decoding
 	public const SOURCE_CLIENT = 'client';
 	public const SOURCE_SERVER = 'server';
-	/** Ordner der sichtbaren Kopien im Heim des Sicherungs-Kontos. */
-	public const VISIBLE_ROOT = 'TimeSister-Sicherungen';
+	/**
+	 * Folder of the visible copies in the backup owner's home and in the
+	 * person's own home. Up to 0.3 it was “TimeSister-Sicherungen”; files
+	 * there stay where they are and remain tracked by their stored path.
+	 */
+	public const VISIBLE_ROOT = 'TimeSister Backups';
 
 	public static function checkDay(mixed $day): string {
 		if (!is_string($day) || !Time::isDay($day)) {
-			throw ApiException::invalid('„taken_on“ muss ein Tag im Format JJJJ-MM-TT sein.');
+			throw ApiException::invalid(Message::of('“{field}” must be a day in the format YYYY-MM-DD.', ['field' => 'taken_on']));
 		}
 		return $day;
 	}
 
 	/**
-	 * Base64 → Inhalt der `.ics`.
+	 * Base64 → contents of the `.ics`.
 	 *
-	 * @throws ApiException 413 zu gross, 422 kein Base64 oder kein Kalender
+	 * @throws ApiException 413 too large, 422 not Base64 or not a calendar
 	 */
 	public static function decode(mixed $b64): string {
 		if (!is_string($b64) || $b64 === '') {
-			throw ApiException::invalid('„ics_base64“ fehlt.');
+			throw ApiException::missing('ics_base64');
 		}
-		// Zeilenumbrüche sind in Base64 üblich; alles andere ist ein Fehler.
+		// Line breaks are common in Base64; anything else is an error.
 		$clean = preg_replace('/[\r\n\t ]+/', '', $b64);
 		if ($clean === null) {
-			throw ApiException::invalid('„ics_base64“ ist kein gültiges Base64.');
+			throw ApiException::invalid('“ics_base64” is not valid Base64.');
 		}
 		if (strlen($clean) > 4 * (int)ceil(self::MAX_BYTES / 3)) {
-			throw ApiException::tooLarge('Eine Kalendersicherung darf höchstens 20 MB gross sein.');
+			throw ApiException::tooLarge('A calendar backup may be at most 20 MB.');
 		}
 		$bin = base64_decode($clean, true);
 		if ($bin === false) {
-			throw ApiException::invalid('„ics_base64“ ist kein gültiges Base64.');
+			throw ApiException::invalid('“ics_base64” is not valid Base64.');
 		}
 		if (strlen($bin) > self::MAX_BYTES) {
-			throw ApiException::tooLarge('Eine Kalendersicherung darf höchstens 20 MB gross sein.');
+			throw ApiException::tooLarge('A calendar backup may be at most 20 MB.');
 		}
 		if (!self::isCalendar($bin)) {
-			throw ApiException::invalid('Die Sicherung muss mit BEGIN:VCALENDAR beginnen.');
+			throw ApiException::invalid('The backup must start with BEGIN:VCALENDAR.');
 		}
 		return $bin;
 	}
@@ -61,8 +65,8 @@ final class BackupRules {
 	}
 
 	/**
-	 * Ordnername für ein Konto: lesbar, wenn die Kennung harmlos ist, sonst
-	 * ein Hash. Nie ein Pfad aus der Anfrage.
+	 * Folder name for an account: readable when the identifier is harmless,
+	 * otherwise a hash. Never a path from the request.
 	 */
 	public static function folderFor(string $uid): string {
 		if (preg_match('/^[A-Za-z0-9_@-][A-Za-z0-9_.@-]{0,63}$/', $uid)) {
@@ -75,11 +79,11 @@ final class BackupRules {
 		return self::checkDay($day) . '.ics';
 	}
 
-	/** ISO-Woche eines Tages, z. B. `2026-W39` (Montag bis Sonntag). */
+	/** ISO week of a day, e.g. `2026-W39` (Monday to Sunday). */
 	public static function isoWeek(string $day): string {
 		$d = \DateTimeImmutable::createFromFormat('!Y-m-d', self::checkDay($day), new \DateTimeZone('UTC'));
 		if ($d === false) {
-			throw ApiException::invalid('Ungültiger Tag.');
+			throw ApiException::invalid('Invalid day.');
 		}
 		return $d->format('o-\WW');
 	}
@@ -89,9 +93,10 @@ final class BackupRules {
 	}
 
 	/**
-	 * Ordner- oder Dateiname aus fremdem Text: `/` und `\` werden `-`,
-	 * Steuerzeichen Leerraum, unsichtbare Formatzeichen fallen weg; kein
-	 * Punkt und kein Leerraum am Rand, höchstens `$max` Zeichen. Kann leer sein.
+	 * Folder or file name from foreign text: `/` and `\` become `-`,
+	 * control characters become space, invisible format characters are
+	 * dropped; no dot and no space at the edge, at most `$max` characters.
+	 * Can be empty.
 	 */
 	public static function cleanName(string $s, int $max = 100): string {
 		$s = mb_scrub($s, 'UTF-8');
@@ -106,7 +111,7 @@ final class BackupRules {
 		return $s;
 	}
 
-	/** `<Anzeigename> (<uid>)`, beides gesäubert. */
+	/** `<display name> (<uid>)`, both cleaned. */
 	public static function personFolder(string $displayName, string $uid): string {
 		$u = self::cleanName($uid, 64);
 		if ($u === '') {
@@ -117,9 +122,9 @@ final class BackupRules {
 	}
 
 	/**
-	 * Die Kalender-URI aus `calendar_url`, nur wenn die Adresse im Heim des
-	 * Kontos selbst liegt (`…/remote.php/dav/calendars/<uid>/<uri>/`). So
-	 * sichert der Server nie einen Kalender, den das Konto nicht sieht.
+	 * The calendar URI from `calendar_url`, only when the address lives in
+	 * the account's own home (`…/remote.php/dav/calendars/<uid>/<uri>/`).
+	 * This way the server never backs up a calendar the account cannot see.
 	 */
 	public static function calendarUriFromUrl(?string $url, string $uid): ?string {
 		if ($url === null || $url === '') {
@@ -140,8 +145,8 @@ final class BackupRules {
 	}
 
 	/**
-	 * Das Sicherungs-Konto: die Wahl, wenn sie noch admin ist, sonst der
-	 * erste admin nach Kennung; ohne admin null.
+	 * The backup owner: the chosen one, if still admin, otherwise the first
+	 * admin by identifier; null without an admin.
 	 *
 	 * @param list<string> $admins
 	 */
@@ -154,20 +159,21 @@ final class BackupRules {
 	}
 
 	/**
-	 * Rumpf von `PUT /backups/consent`. `consent` muss true oder false sein
-	 * (400); beim Einschalten ist `notice` Pflicht, 1–32 Zeichen ohne
-	 * Steuerzeichen (422). Beim Zurückziehen zählt `notice` nicht.
+	 * Body of `PUT /backups/consent`. `consent` must be true or false
+	 * (400); when turning it on, `notice` is required, 1–32 characters
+	 * without control characters (422). `notice` does not matter when
+	 * withdrawing.
 	 *
 	 * @param array<string,mixed> $in
 	 * @return array{consent:bool,notice:?string}
 	 */
 	public static function consentInput(array $in): array {
 		if (array_key_exists('uid', $in)) {
-			throw ApiException::badRequest('Die Freigabe gilt nur für das eigene Konto; „uid“ gehört nicht in den Rumpf.');
+			throw ApiException::ownAccountOnly();
 		}
 		$consent = $in['consent'] ?? null;
 		if (!is_bool($consent)) {
-			throw ApiException::badRequest('„consent“ muss true oder false sein.');
+			throw ApiException::notBool('consent', true);
 		}
 		if (!$consent) {
 			return ['consent' => false, 'notice' => null];
@@ -175,7 +181,7 @@ final class BackupRules {
 		$notice = $in['notice'] ?? null;
 		if (!is_string($notice) || $notice === '' || mb_strlen($notice) > 32
 			|| !mb_check_encoding($notice, 'UTF-8') || preg_match('/\p{Cc}/u', $notice)) {
-			throw ApiException::invalid('Zum Freigeben fehlt „notice“, die Fassung des Aufklärungstexts (höchstens 32 Zeichen).');
+			throw ApiException::invalid('Consent needs “notice”, the version of the information text (at most 32 characters).');
 		}
 		return ['consent' => true, 'notice' => $notice];
 	}

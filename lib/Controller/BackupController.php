@@ -15,24 +15,26 @@ use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\DataResponse;
+use OCP\IL10N;
 use OCP\IRequest;
 
 /**
- * Kalendersicherungen: eigene für alle, fremde nur für Verwaltung und Admin.
- * Gesichert wird nur mit Freigabe der Person.
+ * Calendar backups: own backups for everyone, others' only for manager and
+ * admin. Backups are only made with the person's consent.
  */
 final class BackupController extends BaseController {
 	public function __construct(
 		IRequest $request,
 		TenantService $tenants,
+		IL10N $l,
 		private BackupService $backups,
 		private ConsentService $consent,
 		private OwnCopyService $ownCopy,
 	) {
-		parent::__construct($request, $tenants);
+		parent::__construct($request, $tenants, $l);
 	}
 
-	/** POST /backups – die eigene Sicherung eines Tages. */
+	/** POST /backups – the own backup of one day. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/backups')]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 60, period: 60)]
@@ -55,7 +57,7 @@ final class BackupController extends BaseController {
 			$m = $this->tenants->current();
 			$uid = $this->request->getParam('uid');
 			if ($uid !== null && !is_string($uid)) {
-				throw ApiException::badRequest('„uid“ ist ungültig.');
+				throw ApiException::invalidField('uid', true);
 			}
 			return $this->backups->list($m, $uid);
 		});
@@ -68,7 +70,7 @@ final class BackupController extends BaseController {
 		return $this->run(fn () => $this->backups->get($this->tenants->current(), $id));
 	}
 
-	/** POST /backups/now – sofort auf dem Server sichern. */
+	/** POST /backups/now – back up to the server immediately. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/backups/now')]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 20, period: 60)]
@@ -78,14 +80,14 @@ final class BackupController extends BaseController {
 		});
 	}
 
-	/** GET /backups/consent – die eigene Freigabe. */
+	/** GET /backups/consent – the own consent. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/backups/consent')]
 	#[NoAdminRequired]
 	public function consent(): DataResponse {
 		return $this->run(fn () => $this->consent->get($this->tenants->current()));
 	}
 
-	/** PUT /backups/consent – die eigene Freigabe setzen oder zurückziehen. */
+	/** PUT /backups/consent – set or withdraw the own consent. */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/backups/consent')]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
@@ -97,14 +99,14 @@ final class BackupController extends BaseController {
 		});
 	}
 
-	/** GET /backups/own-copy – Kopie im eigenen Ordner, eigenes Konto. */
+	/** GET /backups/own-copy – copy in the own folder, own account. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/backups/own-copy')]
 	#[NoAdminRequired]
 	public function ownCopy(): DataResponse {
 		return $this->run(fn () => $this->ownCopy->get($this->tenants->current()->uid));
 	}
 
-	/** PUT /backups/own-copy – ein- oder ausschalten, eigenes Konto. */
+	/** PUT /backups/own-copy – turn on or off, own account. */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/backups/own-copy')]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]

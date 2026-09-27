@@ -10,7 +10,7 @@ use OCP\AppFramework\Db\Entity;
 use OCP\DB\Types;
 
 /**
- * Das letzte Lebenszeichen eines Clients.
+ * The last status report of a client.
  *
  * @method int getTenantId()
  * @method void setTenantId(int $tenantId)
@@ -36,7 +36,7 @@ final class ClientStatus extends Entity {
 	protected ?int $lastSync = null;
 	protected ?string $lastBackup = null;
 	protected ?string $calendarUrl = null;
-	/** Gemeldeter Stand der Kalenderfreigabe: 1, 0 oder null (nie gemeldet). */
+	/** Reported state of the calendar share: 1, 0 or null (never reported). */
 	protected ?int $calendarShared = null;
 	protected int $seenAt = 0;
 

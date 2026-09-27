@@ -6,7 +6,7 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
-/** Zeiten als ISO 8601 in UTC, Tage als YYYY-MM-DD. Rein. */
+/** Times as ISO 8601 in UTC, days as YYYY-MM-DD. Pure. */
 final class Time {
 	private const ISO = '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/';
 
@@ -14,7 +14,7 @@ final class Time {
 		return $ts === null ? null : gmdate('Y-m-d\TH:i:s\Z', $ts);
 	}
 
-	/** ISO 8601 mit Zeitzone → Unix-Zeit, sonst null. */
+	/** ISO 8601 with time zone → Unix time, otherwise null. */
 	public static function parseIso(string $s): ?int {
 		if (!preg_match(self::ISO, $s)) {
 			return null;
@@ -24,7 +24,7 @@ final class Time {
 		} catch (\Exception) {
 			return null;
 		}
-		// Kalendertag muss echt sein (kein 2026-02-31).
+		// Calendar day must be real (no 2026-02-31).
 		if (!self::isDay(substr($s, 0, 10))) {
 			return null;
 		}

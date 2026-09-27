@@ -17,7 +17,7 @@ final class BackupFileMapper extends QBMapper {
 		parent::__construct($db, 'ts_backup_files', BackupFile::class);
 	}
 
-	/** Die gemerkte Datei an diesem Ort, oder null. */
+	/** The tracked file at this location, or null. */
 	public function findAt(string $owner, string $path): ?BackupFile {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
@@ -27,7 +27,7 @@ final class BackupFileMapper extends QBMapper {
 		return $all[0] ?? null;
 	}
 
-	/** Die zuletzt geschriebene Datei dieser Ablage für ein Konto. */
+	/** The most recently written file of this store for an account. */
 	public function latest(string $uid, string $target): ?BackupFile {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
@@ -42,7 +42,7 @@ final class BackupFileMapper extends QBMapper {
 		}
 	}
 
-	/** @return list<BackupFile> Kopien beim Admin zu einer Sicherung */
+	/** @return list<BackupFile> copies with the admin for one backup */
 	public function adminCopies(int $tenantId, string $uid, string $day): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
@@ -53,7 +53,7 @@ final class BackupFileMapper extends QBMapper {
 		return $this->findEntities($qb);
 	}
 
-	/** @return list<BackupFile> alle Kopien im eigenen Ordner, für das Ausdünnen */
+	/** @return list<BackupFile> all copies in the own folder, for thinning */
 	public function allOwn(): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())

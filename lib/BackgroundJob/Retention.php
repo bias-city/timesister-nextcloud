@@ -14,9 +14,9 @@ use OCP\BackgroundJob\TimedJob;
 use Psr\Log\LoggerInterface;
 
 /**
- * Täglich: Verlauf älter als zwei Jahre ausdünnen (die neueste Fassung je
- * Datensatz bleibt immer), Kalendersicherungen nach der Staffel ausdünnen
- * (`Thinning`). Nur Tabellen und Dateien, die die App selbst angelegt hat.
+ * Daily: thin the history older than two years (the newest version of each
+ * record always stays), thin calendar backups by the schedule (`Thinning`).
+ * Only tables and files the app created itself.
  */
 final class Retention extends TimedJob {
 	public const HISTORY_DAYS = 730;
@@ -37,7 +37,7 @@ final class Retention extends TimedJob {
 		$history = $this->history->prune($now - self::HISTORY_DAYS * 86400);
 		$backups = $this->backups->thin(gmdate('Y-m-d', $now));
 		if ($history > 0 || $backups > 0) {
-			$this->logger->info('TimeSister: Aufbewahrung – {h} Fassungen, {b} Sicherungen entfernt', [
+			$this->logger->info('TimeSister: retention – {h} versions, {b} backups removed', [
 				'app' => 'timesister', 'h' => $history, 'b' => $backups,
 			]);
 		}

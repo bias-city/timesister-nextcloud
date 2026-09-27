@@ -10,8 +10,8 @@ use OCP\AppFramework\Db\Entity;
 use OCP\DB\Types;
 
 /**
- * App-Rolle und Austritt eines Kontos in einem Team (Fassung 2). `role` ist
- * `lead`, `subadmin` oder null (user); `admin` kommt aus Nextcloud.
+ * App role and leaving date of an account in a team (API version 2). `role`
+ * is `lead`, `subadmin` or null (user); `admin` comes from Nextcloud.
  *
  * @method int getTenantId()
  * @method void setTenantId(int $tenantId)

@@ -13,8 +13,8 @@ use OCP\Migration\IOutput;
 use OCP\Migration\SimpleMigrationStep;
 
 /**
- * Fassung 2: App-Rollen und Austritt je Konto und Team, dazu der
- * gemeldete Stand der Kalenderfreigabe. Nur hinzufügen.
+ * API version 2: app roles and leaving date per account and team, plus the
+ * reported state of the calendar share. Additive only.
  */
 final class Version1004Date20260926140000 extends SimpleMigrationStep {
 	public function changeSchema(IOutput $output, Closure $schemaClosure, array $options): ?ISchemaWrapper {
@@ -26,7 +26,7 @@ final class Version1004Date20260926140000 extends SimpleMigrationStep {
 			$t->addColumn('id', Types::BIGINT, ['autoincrement' => true, 'notnull' => true, 'length' => 20]);
 			$t->addColumn('tenant_id', Types::BIGINT, ['notnull' => true, 'length' => 20]);
 			$t->addColumn('uid', Types::STRING, ['notnull' => true, 'length' => 64]);
-			// lead, subadmin oder null (user).
+			// lead, subadmin or null (user).
 			$t->addColumn('role', Types::STRING, ['notnull' => false, 'length' => 16]);
 			$t->addColumn('left_at', Types::BIGINT, ['notnull' => false, 'length' => 20]);
 			$t->addColumn('updated_by', Types::STRING, ['notnull' => true, 'length' => 64]);
@@ -38,7 +38,7 @@ final class Version1004Date20260926140000 extends SimpleMigrationStep {
 
 		$s = $schema->getTable('ts_client_status');
 		if (!$s->hasColumn('calendar_shared')) {
-			// Null: nie gemeldet.
+			// Null: never reported.
 			$s->addColumn('calendar_shared', Types::SMALLINT, ['notnull' => false]);
 		}
 

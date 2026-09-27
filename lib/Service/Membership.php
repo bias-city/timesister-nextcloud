@@ -6,7 +6,7 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
-/** Wer fragt: Konto, Team und stärkste Rolle darin. */
+/** Who is asking: account, team and its strongest role in it. */
 final class Membership {
 	public function __construct(
 		public readonly string $uid,

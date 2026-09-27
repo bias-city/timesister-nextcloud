@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Integrationsprüfung der App gegen eine laufende Test-Nextcloud mit den
-// Konten aus seed.mjs. Prüft jede Zeile der Rechte-Tabelle aus API.md und
-// jeden Endpunkt, dazu Rollen und Austritt (Fassung 2), Projekte (Katalog
-// und Leitung), Teamgrenze, Konflikte, Batch, Delta, Verlauf,
-// Sicherungen (mit Freigabe, sichtbarer Kopie und Wochenjob), Lebenszeichen
-// und Parallelität.
+// Integration check of the app against a running test Nextcloud with the
+// accounts from seed.mjs. Checks every row of the permissions table from
+// API.md and every endpoint, plus roles and departure (version 2), projects
+// (catalog and lead), team boundary, conflicts, batch, delta, history,
+// backups (with consent, visible copy and weekly job), heartbeat
+// and concurrency.
 //
 //   NC_URL=http://localhost:8081 node tests/integration/integration.mjs
 //
-// Wiederholbar: Jeder Lauf benutzt eigene Schlüssel (Suffix aus der Zeit).
+// Repeatable: each run uses its own keys (a suffix from the time).
 import { datensaetze } from './teil-datensaetze.mjs'
 import { rest } from './teil-rest.mjs'
 import { teams } from './teil-teams.mjs'

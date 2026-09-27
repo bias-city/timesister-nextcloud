@@ -29,7 +29,7 @@ final class MemberMapper extends QBMapper {
 		}
 	}
 
-	/** @return array<string,array{role:?string,left_at:?int}> uid → Eintrag */
+	/** @return array<string,array{role:?string,left_at:?int}> uid → entry */
 	public function entriesByTenant(int $tenantId): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
@@ -41,7 +41,7 @@ final class MemberMapper extends QBMapper {
 		return $out;
 	}
 
-	/** @return array<int,array{role:?string,left_at:?int}> Team → Eintrag des Kontos */
+	/** @return array<int,array{role:?string,left_at:?int}> team → the account's entry */
 	public function entriesByUid(string $uid): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
@@ -60,7 +60,7 @@ final class MemberMapper extends QBMapper {
 		$qb->executeStatement();
 	}
 
-	/** Konto gelöscht: Ein neues Konto mit derselben Kennung erbt keine Rolle. */
+	/** Account deleted: a new account with the same identifier inherits no role. */
 	public function deleteByUid(string $uid): void {
 		$qb = $this->db->getQueryBuilder();
 		$qb->delete($this->getTableName())

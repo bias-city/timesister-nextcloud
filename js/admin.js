@@ -1,23 +1,23 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
 /*
- * TimeSister – Admin-Seite. Vanilla-JavaScript, ohne Build.
- * Teams kommen über die Admin-Endpunkte (OCS, requesttoken), der Zustand
- * als Initial-State. Kein innerHTML mit Daten: alles über textContent.
- * Texte übersetzt der Server (Initial-State „l10n“), ohne OC.L10N.
+ * TimeSister – admin page. Vanilla JavaScript, no build step.
+ * Teams come via the admin endpoints (OCS, requesttoken), the status as an
+ * initial state. No innerHTML with data: everything via textContent.
+ * The server translates texts (initial state "l10n"), without OC.L10N.
  */
 (function () {
 	'use strict'
 
-	// Fassung 2: eine Teamgruppe; admin ist, wer sie in Nextcloud verwaltet.
+	// Version 2: one team group; admin is whoever manages it in Nextcloud.
 	const ROLES = ['user', 'lead', 'subadmin', 'admin']
 	const APP_ROLES = ['user', 'lead', 'subadmin']
 
-	/** Ohne OC-Globals: das Token steht im Kopf der Seite. */
+	/** Without OC globals: the token is in the page's head. */
 	function requestToken() {
 		return document.head.dataset.requesttoken || ''
 	}
 
-	/** Initial-State lesen (base64-JSON in einem versteckten Feld). */
+	/** Read the initial state (base64 JSON in a hidden field). */
 	function loadState(key) {
 		const input = document.getElementById('initial-state-timesister-' + key)
 		if (!input) {
@@ -34,7 +34,7 @@
 
 	const TEXTS = loadState('l10n') || {}
 
-	/** Übersetzter Text zum Schlüssel; {name} wird durch vars.name ersetzt. */
+	/** Translated text for a key; {name} is replaced with vars.name. */
 	function tr(key, vars) {
 		const text = typeof TEXTS[key] === 'string' ? TEXTS[key] : key
 		return text.replace(/\{(\w+)\}/g, (m, k) => (vars && k in vars ? String(vars[k]) : m))
@@ -66,7 +66,7 @@
 		return data
 	}
 
-	/** Kleines DOM-Hilfsmittel: nur textContent, nie HTML. */
+	/** Small DOM helper: textContent only, never HTML. */
 	function h(tag, props, ...children) {
 		const node = document.createElement(tag)
 		for (const [k, v] of Object.entries(props || {})) {
@@ -92,7 +92,7 @@
 		return node
 	}
 
-	/** Papierkorb als SVG in currentColor – keine Nextcloud-Symbolklassen. */
+	/** Trash icon as SVG in currentColor – no Nextcloud icon classes. */
 	function trashIcon() {
 		const ns = 'http://www.w3.org/2000/svg'
 		const svg = document.createElementNS(ns, 'svg')
@@ -125,7 +125,7 @@
 
 	const overview = loadState('overview') || { state: [], groups: [], silent_days: 14, api: 1, version: '', api_base: '/ocs/v2.php/apps/timesister/api/v1' }
 	let teams = []
-	let editing = null // Team-ID oder null für neu
+	let editing = null // team ID, or null for a new one
 
 	const $ = (id) => document.getElementById(id)
 
@@ -138,13 +138,13 @@
 		return (overview.state || []).find((s) => s.id === id) || null
 	}
 
-	/** Anzeigename (Kennung) eines Admins aus dem Zustand, sonst die Kennung. */
+	/** Display name (uid) of an admin from the status, otherwise the uid. */
 	function adminLabel(st, uid) {
 		const a = st && st.admins ? st.admins.find((x) => x.uid === uid) : null
 		return a && a.display_name && a.display_name !== uid ? a.display_name + ' (' + uid + ')' : uid
 	}
 
-	/** Anzeigename (Kennung) eines Mitglieds. */
+	/** Display name (uid) of a member. */
 	function memberLabel(m) {
 		return m.display_name && m.display_name !== m.uid ? m.display_name + ' (' + m.uid + ')' : m.uid
 	}
@@ -180,7 +180,7 @@
 			const admins = h('div', { class: 'ts-owner' },
 				h('span', { class: 'ts-muted', text: tr('admins') + ': ' }),
 				adminList.length ? h('span', { text: adminList.map((a) => adminLabel(st, a.uid)).join(', ') }) : h('span', { class: 'ts-bad', text: tr('no_admin') }))
-			// Alle Mitglieder mit Rolle; Ausgetretene bleiben sichtbar, markiert.
+			// All members with role; those who left stay visible, marked.
 			const members = h('ul', { class: 'ts-list ts-members' }, ((st && st.members) || []).map((m) => h('li', { class: m.left_at ? 'ts-left' : '' },
 				h('span', { text: memberLabel(m) + ' ' }),
 				h('span', { class: 'ts-muted', text: tr('role_' + m.role) + (m.left_at ? ' · ' + tr('left_on', { date: formatDay(m.left_at.slice(0, 10)) }) : '') }))))
@@ -279,7 +279,7 @@
 		}
 	}
 
-	/** Sicherungs-Konto: automatisch oder einer der Admins des Teams (nur beim Bearbeiten). */
+	/** Backup owner: automatic, or one of the team's admins (only when editing). */
 	function fillOwner(team) {
 		const sel = $('ts-backup-owner')
 		const st = team ? stateOf(team.id) : null
@@ -293,18 +293,23 @@
 		sel.disabled = !st
 	}
 
-	/** Admins (nur lesen: sie kommen aus Nextclouds Benutzerverwaltung). */
+	/** Admins (read-only: they come from Nextcloud's user management). */
 	function fillAdmins(team) {
 		const st = team ? stateOf(team.id) : null
 		const list = (st && st.admins) || []
 		const box = $('ts-admins')
 		box.textContent = ''
+		// New team: the page only knows the group admins after saving.
+		if (!st) {
+			box.append(h('span', { class: 'ts-muted', text: tr('admins_after_save') }))
+			return
+		}
 		box.append(list.length
 			? h('ul', { class: 'ts-list' }, list.map((a) => h('li', { text: adminLabel(st, a.uid) })))
 			: h('span', { class: 'ts-muted', text: tr('no_admin') }))
 	}
 
-	/** Mitglieder mit App-Rolle und Austritt; ändern erst beim Sichern. */
+	/** Members with app role and leaving; changes apply only on save. */
 	function fillMembers(team) {
 		const box = $('ts-members')
 		box.textContent = ''
@@ -331,7 +336,7 @@
 			h('tbody', {}, rows)))
 	}
 
-	/** Geänderte Mitglieder: uid → { role?, left? }. */
+	/** Changed members: uid → { role?, left? }. */
 	function memberChanges() {
 		const out = new Map()
 		const put = (uid, key, value) => out.set(uid, Object.assign(out.get(uid) || {}, { [key]: value }))
@@ -358,7 +363,7 @@
 		fillAdmins(team)
 		fillMembers(team)
 		fillOwner(team)
-		// Neues Team: die Standardwerte des Vertrags (Leitung sieht alles, keine Anordnung).
+		// New team: the contract's defaults (Lead sees everything, no backup requirement).
 		const s = (team && team.settings) || {}
 		$('ts-leads-see').checked = s.leads_see_calendars !== false
 		$('ts-backup-required').checked = s.backup_required === true
@@ -382,7 +387,7 @@
 			leads_see_calendars: $('ts-leads-see').checked,
 			backup_required: $('ts-backup-required').checked,
 		}
-		// Leer heisst automatisch; bei einem neuen Team gibt es noch keine Wahl.
+		// Empty means automatic; a new team has no choice yet.
 		if (editing !== null) {
 			body.backup_owner = $('ts-backup-owner').value || null
 		}
@@ -394,7 +399,7 @@
 			} else {
 				const changes = memberChanges()
 				await api('PUT', '/admin/teams/' + editing, body)
-				// Rollen und Austritte über denselben Dienst wie PUT /team/members.
+				// Roles and leaving via the same service as PUT /team/members.
 				for (const [uid, change] of changes) {
 					try {
 						await api('PUT', '/admin/teams/' + editing + '/members/' + encodeURIComponent(uid), change)
@@ -403,7 +408,7 @@
 					}
 				}
 			}
-			// Zustand und Gruppenbelegung kommen frisch vom Server.
+			// Status and group assignment come fresh from the server.
 			window.location.reload()
 		} catch (e) {
 			$('ts-error').textContent = e.message

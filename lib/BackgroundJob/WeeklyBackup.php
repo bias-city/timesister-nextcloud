@@ -13,12 +13,12 @@ use OCP\BackgroundJob\TimedJob;
 use Psr\Log\LoggerInterface;
 
 /**
- * Stündlich prüfen: Jedes Teammitglied mit Freigabe bekommt je ISO-Woche
- * eine Server-Sicherung seines Zeitkalenders. Fehler je Konto protokolliert
- * der Dienst; die anderen Konten laufen weiter.
+ * Checked hourly: every team member with consent gets a server backup of
+ * their time calendar for each ISO week. The service logs errors per
+ * account; the other accounts keep running.
  */
 final class WeeklyBackup extends TimedJob {
-	/** Höchstens so viele Konten je Lauf; der Rest folgt in der nächsten Stunde. */
+	/** At most this many accounts per run; the rest follow in the next hour. */
 	public const MAX_PER_RUN = 100;
 
 	public function __construct(
@@ -34,7 +34,7 @@ final class WeeklyBackup extends TimedJob {
 	protected function run(mixed $argument): void {
 		$n = $this->backups->weekly(self::MAX_PER_RUN);
 		if ($n['done'] + $n['failed'] > 0) {
-			$this->logger->info('TimeSister: Wochensicherung – {done} gesichert, {failed} fehlgeschlagen, {none} ohne Zeitkalender', [
+			$this->logger->info('TimeSister: weekly backup – {done} backed up, {failed} failed, {none} without time calendar', [
 				'app' => 'timesister', 'done' => $n['done'], 'failed' => $n['failed'], 'none' => $n['no_calendar'],
 			]);
 		}

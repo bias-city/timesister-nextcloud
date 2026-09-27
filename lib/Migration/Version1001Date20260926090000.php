@@ -13,8 +13,8 @@ use OCP\Migration\IOutput;
 use OCP\Migration\SimpleMigrationStep;
 
 /**
- * Sicherungen, Fassung 1.1: Herkunft und sichtbare Kopie je Sicherung,
- * Sicherungs-Konto je Team, Freigabe je Konto. Nur hinzufügen.
+ * Backups, version 1.1: origin and visible copy per backup, backup owner
+ * per team, consent per account. Additive only.
  */
 final class Version1001Date20260926090000 extends SimpleMigrationStep {
 	public function changeSchema(IOutput $output, Closure $schemaClosure, array $options): ?ISchemaWrapper {
@@ -23,11 +23,11 @@ final class Version1001Date20260926090000 extends SimpleMigrationStep {
 
 		$t = $schema->getTable('ts_backups');
 		if (!$t->hasColumn('source')) {
-			// Bestehende Zeilen kamen alle von Clients.
+			// Existing rows all came from clients.
 			$t->addColumn('source', Types::STRING, ['notnull' => true, 'default' => 'client', 'length' => 8]);
 		}
 		if (!$t->hasColumn('file_path')) {
-			// Pfad der sichtbaren Kopie im Ordner von file_owner.
+			// Path of the visible copy in file_owner's folder.
 			$t->addColumn('file_path', Types::STRING, ['notnull' => false, 'length' => 512]);
 		}
 		if (!$t->hasColumn('file_owner')) {
@@ -47,7 +47,7 @@ final class Version1001Date20260926090000 extends SimpleMigrationStep {
 			$t->addColumn('consent', Types::SMALLINT, ['notnull' => true, 'default' => 0]);
 			$t->addColumn('since', Types::BIGINT, ['notnull' => false, 'length' => 20]);
 			$t->addColumn('revoked_at', Types::BIGINT, ['notnull' => false, 'length' => 20]);
-			// Zuletzt bestätigte Fassung des Aufklärungstexts, bleibt beim Zurückziehen.
+			// Last confirmed version of the disclosure text, stays when withdrawn.
 			$t->addColumn('notice', Types::STRING, ['notnull' => false, 'length' => 32]);
 			$t->addColumn('notice_at', Types::BIGINT, ['notnull' => false, 'length' => 20]);
 			$t->setPrimaryKey(['id']);

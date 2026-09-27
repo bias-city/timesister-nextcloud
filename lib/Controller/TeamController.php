@@ -13,19 +13,21 @@ use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\DataResponse;
+use OCP\IL10N;
 use OCP\IRequest;
 
 final class TeamController extends BaseController {
 	public function __construct(
 		IRequest $request,
 		TenantService $tenants,
+		IL10N $l,
 		private AccessPolicy $policy,
 		private MemberService $memberService,
 	) {
-		parent::__construct($request, $tenants);
+		parent::__construct($request, $tenants, $l);
 	}
 
-	/** GET /team – Name, Teamgruppe, Mitglieder mit Rolle, auch Ausgetretene. */
+	/** GET /team – name, team group, members with role, including those who left. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/team')]
 	#[NoAdminRequired]
 	public function show(): DataResponse {
@@ -38,7 +40,7 @@ final class TeamController extends BaseController {
 		});
 	}
 
-	/** PUT /team/members/{uid} – App-Rolle und Austritt; Verwaltung und Admin. */
+	/** PUT /team/members/{uid} – app role and leaving date; manager and admin. */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/team/members/{uid}')]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]

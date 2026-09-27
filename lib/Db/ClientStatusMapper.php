@@ -29,7 +29,7 @@ final class ClientStatusMapper extends QBMapper {
 		}
 	}
 
-	/** @return array<string,ClientStatus> uid → Lebenszeichen */
+	/** @return array<string,ClientStatus> uid → status report */
 	public function findByTenant(int $tenantId): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())

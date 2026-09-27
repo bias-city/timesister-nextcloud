@@ -42,7 +42,7 @@ final class BackupMapper extends QBMapper {
 		}
 	}
 
-	/** @return list<Backup> neueste zuerst */
+	/** @return list<Backup> newest first */
 	public function listFor(int $tenantId, string $uid): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
@@ -52,7 +52,7 @@ final class BackupMapper extends QBMapper {
 		return $this->findEntities($qb);
 	}
 
-	/** Die zuletzt geschriebene Sicherung eines Kontos (geschützte Ablage). */
+	/** The most recently written backup of an account (protected store). */
 	public function latestFor(int $tenantId, string $uid): ?Backup {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
@@ -67,7 +67,7 @@ final class BackupMapper extends QBMapper {
 		}
 	}
 
-	/** @return list<Backup> alle eines Teams, für das Ausdünnen */
+	/** @return list<Backup> all of a team's, for thinning */
 	public function listByTenant(int $tenantId): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
@@ -76,7 +76,7 @@ final class BackupMapper extends QBMapper {
 	}
 
 	/**
-	 * Letzter Tag einer Server-Sicherung je Konto des Teams.
+	 * Last day of a server backup for each account of the team.
 	 *
 	 * @return array<string,string> uid → YYYY-MM-DD
 	 */

@@ -6,13 +6,13 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
-/** Prüfung eines Teams aus der Verwaltung. Rein. */
+/** Checking a team from the admin side. Pure. */
 final class TeamRules {
 	public const SLUG_PATTERN = '/^[a-z0-9-]{2,32}$/';
 
 	/**
-	 * Fassung 2: `groups` = `{ team }`, eine bestehende Nextcloud-Gruppe.
-	 * Andere Schlüssel (Rollen- oder Konten-Gruppen aus Fassung 1) → 422.
+	 * API version 2: `groups` = `{ team }`, an existing Nextcloud group.
+	 * Other keys (role or account groups from API version 1) → 422.
 	 *
 	 * @param array<string,mixed> $in
 	 * @return array{name:string,slug:string,groups:array{team:string}}
@@ -20,31 +20,31 @@ final class TeamRules {
 	public static function validate(array $in): array {
 		$name = $in['name'] ?? null;
 		if (!is_string($name) || ($name = trim($name)) === '' || mb_strlen($name) > 100) {
-			throw ApiException::invalid('Der Name des Teams fehlt oder ist länger als 100 Zeichen.');
+			throw ApiException::invalid('The team name is missing or longer than 100 characters.');
 		}
 		$slug = $in['slug'] ?? null;
 		if (!is_string($slug) || !preg_match(self::SLUG_PATTERN, $slug)) {
-			throw ApiException::invalid('Der Kurzname muss aus 2–32 Zeichen a–z, 0–9 und - bestehen.');
+			throw ApiException::invalid('The short name must consist of 2–32 characters a–z, 0–9 and -.');
 		}
 		$groups = $in['groups'] ?? null;
 		if (!is_array($groups)) {
-			throw ApiException::invalid('Die Teamgruppe fehlt.');
+			throw ApiException::invalid('The team group is missing.');
 		}
 		foreach (array_keys($groups) as $key) {
 			if ($key !== Role::TEAM_GROUP) {
-				throw ApiException::invalid("Unbekannte Gruppe „{$key}“: Ein Team hat nur die Teamgruppe „team“.");
+				throw ApiException::invalid(Message::of('Unknown group “{key}”: a team only has the team group “team”.', ['key' => $key]));
 			}
 		}
 		$gid = $groups[Role::TEAM_GROUP] ?? null;
 		if (!is_string($gid) || $gid === '' || strlen($gid) > 64) {
-			throw ApiException::invalid('Die Teamgruppe fehlt.');
+			throw ApiException::invalid('The team group is missing.');
 		}
 		return ['name' => $name, 'slug' => $slug, 'groups' => [Role::TEAM_GROUP => $gid]];
 	}
 
 	/**
-	 * Das Sicherungs-Konto aus dem Rumpf: fehlt der Schlüssel, bleibt die
-	 * Wahl ([false, null]); null oder leer heisst automatisch ([true, null]).
+	 * The backup owner from the body: if the key is missing, the choice
+	 * stays ([false, null]); null or empty means automatic ([true, null]).
 	 *
 	 * @param array<string,mixed> $in
 	 * @return array{0:bool,1:?string}
@@ -58,17 +58,17 @@ final class TeamRules {
 			return [true, null];
 		}
 		if (!is_string($uid) || strlen($uid) > 64) {
-			throw ApiException::invalid('Das Sicherungs-Konto ist ungültig.');
+			throw ApiException::invalid('The backup owner is invalid.');
 		}
 		return [true, $uid];
 	}
 
-	/** Team-Einstellungen (Fassung 1.2) mit ihren Standardwerten. */
+	/** Team settings (API version 1.2) with their default values. */
 	public const SETTINGS = ['leads_see_calendars' => true, 'backup_required' => false];
 
 	/**
-	 * Team-Einstellungen aus dem Rumpf. Fehlt `settings` oder ein Schlüssel,
-	 * bleibt der Wert. Unbekannte Schlüssel oder kein Wahrheitswert: 422.
+	 * Team settings from the body. If `settings` or a key is missing, the
+	 * value stays. Unknown keys or a non-boolean value: 422.
 	 *
 	 * @param array<string,mixed> $in
 	 * @return array<string,bool>
@@ -79,15 +79,15 @@ final class TeamRules {
 			return [];
 		}
 		if (!is_array($s)) {
-			throw ApiException::invalid('„settings“ muss ein Objekt sein.');
+			throw ApiException::invalid('“settings” must be an object.');
 		}
 		$out = [];
 		foreach ($s as $key => $value) {
 			if (!is_string($key) || !array_key_exists($key, self::SETTINGS)) {
-				throw ApiException::invalid("Unbekannte Team-Einstellung „{$key}“.");
+				throw ApiException::invalid(Message::of('Unknown team setting “{key}”.', ['key' => $key]));
 			}
 			if (!is_bool($value)) {
-				throw ApiException::invalid("„{$key}“ muss true oder false sein.");
+				throw ApiException::notBool($key);
 			}
 			$out[$key] = $value;
 		}

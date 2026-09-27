@@ -11,18 +11,18 @@ use OCP\Calendar\ICalendarExport;
 use OCP\Calendar\IManager;
 
 /**
- * Exportiert den Zeitkalender eines Kontos mit Nextclouds öffentlicher
- * Schnittstelle (`ICalendarExport`, seit Nextcloud 32), ohne Benutzerkontext.
+ * Exports an account's time calendar with Nextcloud's public API
+ * (`ICalendarExport`, since Nextcloud 32), without a user context.
  */
 final class CalendarExporter {
-	public const PRODID = '-//B/IAS//TimeSister Server-Sicherung//DE';
+	public const PRODID = '-//B/IAS//TimeSister Server Backup//EN';
 
 	public function __construct(
 		private IManager $calendars,
 	) {
 	}
 
-	/** Die ganze .ics oder null, wenn das Konto keinen Zeitkalender hat. */
+	/** The whole .ics, or null if the account has no time calendar. */
 	public function export(string $uid, ?string $calendarUrl): ?string {
 		$cal = $this->find($uid, $calendarUrl);
 		if ($cal === null) {
@@ -30,7 +30,7 @@ final class CalendarExporter {
 		}
 		$parts = (static function () use ($cal): \Generator {
 			foreach ($cal->export(new CalendarExportOptions()) as $vcal) {
-				// OCP liefert je Termin ein Sabre-VCalendar; wir brauchen nur den Text.
+				// OCP gives one Sabre VCalendar per event; we only need the text.
 				yield (string)$vcal->serialize();
 			}
 		})();
@@ -38,8 +38,8 @@ final class CalendarExporter {
 	}
 
 	/**
-	 * `calendar_url` aus dem Lebenszeichen, sonst `zeit-<uid>`; immer im
-	 * Heim des Kontos selbst, also nur Kalender, die es sieht.
+	 * `calendar_url` from the status report, otherwise `zeit-<uid>`;
+	 * always in the account's own home, so only calendars it can see.
 	 */
 	private function find(string $uid, ?string $calendarUrl): ?ICalendarExport {
 		$uris = array_unique(array_filter([BackupRules::calendarUriFromUrl($calendarUrl, $uid), 'zeit-' . $uid]));

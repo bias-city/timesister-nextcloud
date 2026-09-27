@@ -6,17 +6,17 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
-/** Prüfung von PUT /team/members/{uid} (Fassung 2). Rein. */
+/** Checking PUT /team/members/{uid} (API version 2). Pure. */
 final class MemberRules {
-	/** Rollen und Austritte setzen nur Verwaltung und Admin (vor jeder weiteren Prüfung). */
+	/** Only manager and admin set roles and leaving (before any further check). */
 	public static function requireManager(string $actorRole): void {
 		if (!Role::manages($actorRole)) {
-			throw ApiException::forbidden('Rollen und Austritte setzen nur Verwaltung und Admin des Teams.');
+			throw ApiException::forbidden('Only the team’s managers and admins set roles and leaving.');
 		}
 	}
 
 	/**
-	 * Der Rumpf: `role` (user, lead, subadmin) und/oder `left` (bool).
+	 * The body: `role` (user, lead, subadmin) and/or `left` (bool).
 	 *
 	 * @param array<string,mixed> $in
 	 * @return array{role?:string,left?:bool}
@@ -26,44 +26,44 @@ final class MemberRules {
 		if (array_key_exists('role', $in)) {
 			$role = $in['role'];
 			if ($role === Role::ADMIN) {
-				throw ApiException::invalid('„admin“ ist keine App-Rolle: Admin ist, wer die Teamgruppe in Nextcloud verwaltet.');
+				throw ApiException::invalid('“admin” is not an app role: admins are the group admins of the team group in Nextcloud.');
 			}
 			if (!is_string($role) || !in_array($role, Role::APP_ROLES, true)) {
-				throw ApiException::invalid('„role“ muss user, lead oder subadmin sein.');
+				throw ApiException::invalid('“role” must be user, lead or subadmin.');
 			}
 			$out['role'] = $role;
 		}
 		if (array_key_exists('left', $in)) {
 			if (!is_bool($in['left'])) {
-				throw ApiException::invalid('„left“ muss true oder false sein.');
+				throw ApiException::notBool('left');
 			}
 			$out['left'] = $in['left'];
 		}
 		if ($out === []) {
-			throw ApiException::badRequest('„role“ oder „left“ fehlt.');
+			throw ApiException::badRequest('“role” or “left” is missing.');
 		}
 		return $out;
 	}
 
 	/**
-	 * Wer was ändern darf: Verwaltung und Admin; `subadmin` vergeben und
-	 * Einträge von Verwaltung und Admins ändern nur Admins; den eigenen
-	 * Austritt vermerkt niemand selbst (er sperrte sich aus).
+	 * Who may change what: manager and admin; only admins assign
+	 * `subadmin` and change entries of managers and admins; nobody
+	 * records their own leaving (they would lock themselves out).
 	 *
-	 * @param string $targetRole die jetzige Rolle des Kontos im Team
+	 * @param string $targetRole the account's current role in the team
 	 * @param array{role?:string,left?:bool} $change
 	 */
 	public static function authorize(string $actorUid, string $actorRole, string $uid, string $targetRole, array $change): void {
 		self::requireManager($actorRole);
 		$admin = $actorRole === Role::ADMIN;
 		if (($change['role'] ?? null) === Role::SUBADMIN && !$admin) {
-			throw ApiException::forbidden('Die Rolle Verwaltung vergeben nur Admins des Teams.');
+			throw ApiException::forbidden('Only the team’s admins assign the role Manager.');
 		}
 		if (Role::manages($targetRole) && !$admin) {
-			throw ApiException::forbidden('Verwaltung und Admins des Teams ändern nur Admins.');
+			throw ApiException::forbidden('Only admins change the team’s managers and admins.');
 		}
 		if ($uid === $actorUid && ($change['left'] ?? false)) {
-			throw ApiException::forbidden('Den eigenen Austritt vermerkt ein anderer Admin des Teams.');
+			throw ApiException::forbidden('Another admin of the team records your own leaving.');
 		}
 	}
 }

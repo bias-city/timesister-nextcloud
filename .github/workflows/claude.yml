@@ -1,7 +1,7 @@
-# Claude im Update-Weg (anthropics/claude-code-action, Hauptversion v1).
-# Läuft bei Issues mit Label nc-update, bei „@claude“ in Kommentaren und
-# wenn die Frühwarnung es aufruft. Aus, solange das Secret ANTHROPIC_API_KEY
-# fehlt. Legt nichts an ausser einem Zweig und einem Pull-Request.
+# Claude in the update path (anthropics/claude-code-action, major version v1).
+# Runs on issues with label nc-update, on "@claude" in comments, and when
+# the early warning calls it. Off as long as the secret ANTHROPIC_API_KEY
+# is missing. Creates nothing but a branch and a pull request.
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 name: Claude
@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   gate:
-    # Nur im Repo der App; nur wenn es wirklich um Claude geht (spart Minuten).
+    # Only in the app's repo; only when it's really about Claude (saves minutes).
     if: >-
       github.repository == 'bias-city/timesister-nextcloud' && (
         inputs.issue_number ||
@@ -51,7 +51,7 @@ jobs:
           KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           if [ -n "$KEY" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else echo "enabled=false" >> "$GITHUB_OUTPUT"; echo "::notice::Claude ist aus: Secret ANTHROPIC_API_KEY fehlt."; fi
+          else echo "enabled=false" >> "$GITHUB_OUTPUT"; echo "::notice::Claude is off: secret ANTHROPIC_API_KEY is missing."; fi
 
   claude:
     needs: gate
@@ -68,7 +68,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Damit Claude psalm, PHPUnit und tools/*.sh selbst laufen lassen kann.
+      # So Claude can run psalm, PHPUnit and tools/*.sh itself.
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: '8.2'
@@ -82,9 +82,9 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           label_trigger: nc-update
           trigger_phrase: '@claude'
-          # Aufruf aus der Frühwarnung: fester Auftrag. Sonst leer, dann gilt das Issue.
+          # Call from the early warning: a fixed task. Otherwise empty, then the issue applies.
           prompt: >-
-            ${{ inputs.issue_number && format('Lies UPDATE.md und bring die App auf Nextcloud {0}. Grundlage ist Issue #{1}. Arbeite die Checkliste ab, lass composer run psalm:all und composer run test:unit laufen und öffne einen Pull-Request, der Issue #{1} schliesst.', inputs.version, inputs.issue_number) || '' }}
+            ${{ inputs.issue_number && format('Read UPDATE.md and bring the app to Nextcloud {0}. Based on issue #{1}. Work through the checklist, run composer run psalm:all and composer run test:unit, and open a pull request that closes issue #{1}.', inputs.version, inputs.issue_number) || '' }}
           claude_args: >-
             --max-turns 60
             --allowedTools "Read,Edit,Write,Glob,Grep,Bash(composer:*),Bash(php:*),Bash(bash tools/*),Bash(tools/*),Bash(vendor/bin/*),Bash(git:*),Bash(gh pr:*),Bash(gh issue:*)"

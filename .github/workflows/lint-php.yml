@@ -1,5 +1,5 @@
-# Nach Nextclouds Vorlage lint-php (github.com/nextcloud/.github, workflow-templates),
-# angepasst: eigene Runner-Labels, Push und PR, kurze Zeitgrenzen.
+# After Nextcloud's template lint-php (github.com/nextcloud/.github, workflow-templates),
+# adapted: our own runner labels, push and PR, short time limits.
 # SPDX-FileCopyrightText: 2021-2024 Nextcloud GmbH and Nextcloud contributors
 # SPDX-License-Identifier: MIT
 

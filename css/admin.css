@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
-/* Nur Nextclouds CSS-Variablen: hell und dunkel ohne eigene Farben. */
+/* Only Nextcloud's CSS variables: light and dark without our own colours. */
 
 #timesister-admin { max-width: 960px; }
 #timesister-admin h3 { margin: 24px 0 8px; font-weight: bold; }
@@ -8,7 +8,7 @@
 #timesister-admin .ts-muted { color: var(--color-text-maxcontrast); }
 
 #timesister-admin table { width: 100%; border-collapse: collapse; }
-/* Breite Tabellen scrollen waagrecht, statt über den Rand zu laufen. */
+/* Wide tables scroll horizontally instead of running off the edge. */
 #timesister-admin #ts-teams,
 #timesister-admin #ts-state { overflow-x: auto; }
 #timesister-admin th,
@@ -48,7 +48,7 @@
 }
 #timesister-admin ul.ts-list { margin: 0; padding: 0; list-style: none; }
 #timesister-admin ul.ts-list li { padding: 1px 0; }
-/* Mitglieder: Ausgetretene bleiben sichtbar, blass und durchgestrichen. */
+/* Members: those who left stay visible, faded and struck through. */
 #timesister-admin ul.ts-members { margin-top: 6px; }
 #timesister-admin .ts-left > :first-child { text-decoration: line-through; color: var(--color-text-maxcontrast); }
 #timesister-admin .ts-form h4 { margin: 16px 0 4px; font-weight: bold; }

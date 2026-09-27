@@ -10,7 +10,7 @@ use OCP\AppFramework\Db\Entity;
 use OCP\DB\Types;
 
 /**
- * Freigabe eines Kontos für die Sicherung beim Admin. Ohne Zeile: keine.
+ * An account's consent for backup with the admin. No row: no consent.
  *
  * @method int getTenantId()
  * @method void setTenantId(int $tenantId)

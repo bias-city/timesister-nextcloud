@@ -17,20 +17,22 @@ use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\AppFramework\Utility\ITimeFactory;
+use OCP\IL10N;
 use OCP\IRequest;
 
 final class MeController extends BaseController {
 	public function __construct(
 		IRequest $request,
 		TenantService $tenants,
+		IL10N $l,
 		private RecordService $records,
 		private CalendarShareService $calendarShare,
 		private ITimeFactory $time,
 	) {
-		parent::__construct($request, $tenants);
+		parent::__construct($request, $tenants, $l);
 	}
 
-	/** GET /me – Team, Rolle, Teamgruppe, Admins und Leitungen, eigene Person, Revision. */
+	/** GET /me – team, role, team group, admins and leads, own person, revision. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/me')]
 	#[NoAdminRequired]
 	public function show(): DataResponse {
@@ -45,7 +47,7 @@ final class MeController extends BaseController {
 				'role' => $m->role,
 				'groups' => $this->tenants->groupsOf($m->tenantId),
 				'settings' => TenantService::settingsOf($t),
-				// Für die Freigaben der Mac-App: an wen der eigene Zeitkalender geht.
+				// For the Mac app's shares: who the own time calendar goes to.
 				'admins' => $this->tenants->withRole($m->tenantId, Role::ADMIN),
 				'leads' => $this->tenants->withRole($m->tenantId, Role::LEAD),
 				'calendar_share' => $this->calendarShare->enabled($m->uid),
@@ -56,14 +58,14 @@ final class MeController extends BaseController {
 		});
 	}
 
-	/** GET /me/calendar-share – Schalter „Zeitkalender für das Team freigeben“. */
+	/** GET /me/calendar-share – the "share time calendar with the team" switch. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/me/calendar-share')]
 	#[NoAdminRequired]
 	public function calendarShare(): DataResponse {
 		return $this->run(fn () => $this->calendarShare->get($this->tenants->current()->uid));
 	}
 
-	/** PUT /me/calendar-share – nur das eigene Konto. */
+	/** PUT /me/calendar-share – own account only. */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/me/calendar-share')]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]

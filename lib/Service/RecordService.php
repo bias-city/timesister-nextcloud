@@ -16,10 +16,10 @@ use OCP\DB\Exception as DbException;
 use OCP\IDBConnection;
 
 /**
- * Datensätze mit Fassung und Revision, Verlauf, Wiederherstellen.
+ * Records with version and revision, history, restoring.
  *
- * Jede Methode bekommt die Mitgliedschaft des Aufrufers und filtert nach
- * seinem Team; die Rechte prüft die AccessPolicy.
+ * Every method gets the caller's membership and filters by their team;
+ * AccessPolicy checks the rights.
  */
 final class RecordService {
 	public const HISTORY_LIMIT = 100;
@@ -52,10 +52,10 @@ final class RecordService {
 	}
 
 	/**
-	 * Wie present(); ein Projekt voll nur für Verwaltung, Admin und seine
-	 * Leitungen, sonst nur der Buchungskatalog.
+	 * Like present(); a project full only for manager, admin and its
+	 * leads, otherwise only the booking catalog.
 	 *
-	 * @param list<string> $ownKeys Personenschlüssel des Aufrufers
+	 * @param list<string> $ownKeys the caller's person keys
 	 * @return array<string,mixed>
 	 */
 	private function presentFor(Membership $m, Record $r, array $ownKeys): array {
@@ -68,8 +68,8 @@ final class RecordService {
 	}
 
 	/**
-	 * Die Personenschlüssel des Aufrufers wie bei „eigene Person“: die
-	 * Kennung selbst und jede Person mit ihr in `accounts`.
+	 * The caller's person keys, as for "own person": the identifier itself
+	 * and every person with it in `accounts`.
 	 *
 	 * @return list<string>
 	 */
@@ -83,8 +83,8 @@ final class RecordService {
 
 	/** @return array{revision:int,records:list<array<string,mixed>>} */
 	public function list(Membership $m, int $since): array {
-		// Erst die Revision, dann die Datensätze bis zu ihr: Was danach
-		// geschrieben wird, kommt mit dem nächsten Delta.
+		// First the revision, then the records up to it: what is written
+		// after that arrives with the next delta.
 		$rev = $this->tenants->revision($m->tenantId);
 		$own = $this->ownKeys($m);
 		$out = [];
@@ -101,15 +101,15 @@ final class RecordService {
 		RecordValidator::checkAddress($kind, $key);
 		$r = $this->records->findOne($m->tenantId, $kind, $key);
 		if (!$this->policy->canRead($m, $kind, $key, $r?->accountList() ?? [])) {
-			throw ApiException::forbidden('Diesen Datensatz darf dieses Konto nicht lesen.');
+			throw ApiException::forbidden('This account may not read this record.');
 		}
 		if ($r === null || $r->isTombstone()) {
-			throw ApiException::notFound('Diesen Datensatz gibt es nicht.');
+			throw ApiException::notFound('This record does not exist.');
 		}
 		return $this->presentFor($m, $r, $this->ownKeys($m));
 	}
 
-	/** Schlüssel des eigenen Personendatensatzes, sonst null. */
+	/** Key of the own person record, otherwise null. */
 	public function personKey(Membership $m): ?string {
 		$found = $this->records->findPersonsOf($m->uid, $m->tenantId, true);
 		foreach ($found as $r) {
@@ -120,7 +120,7 @@ final class RecordService {
 		return $found === [] ? null : $found[0]->getRkey();
 	}
 
-	/** @return array<string,mixed> der neue Datensatz */
+	/** @return array<string,mixed> the new record */
 	public function put(Membership $m, string $kind, string $key, \stdClass $body): array {
 		if ($kind !== 'project') {
 			$this->policy->requireWrite($m);
@@ -128,7 +128,7 @@ final class RecordService {
 		RecordValidator::checkAddress($kind, $key);
 		$version = RecordValidator::checkVersion($body->version ?? null);
 		if (!property_exists($body, 'data')) {
-			throw ApiException::invalid('„data“ fehlt.');
+			throw ApiException::missing('data');
 		}
 		if (!$this->policy->canWrite($m)) {
 			$this->requireProjectLead($m, $key);
@@ -141,25 +141,25 @@ final class RecordService {
 	}
 
 	/**
-	 * Die Leitung der aktuellen Fassung darf ihr Projekt ganz ändern, auch
-	 * sich selbst aus `leads` nehmen. Neue Projekte (auch auf einem
-	 * Grabstein) legen nur Verwaltung und Admin an. Sonst 403.
+	 * The lead of the current version may change their project entirely,
+	 * even remove themselves from `leads`. Only manager and admin create
+	 * new projects (including on a tombstone). Otherwise 403.
 	 */
 	private function requireProjectLead(Membership $m, string $key): void {
 		$cur = $this->records->findOne($m->tenantId, 'project', $key);
 		$raw = $cur?->getData();
 		$old = ($cur === null || $cur->isTombstone() || $raw === null) ? null : Json::decode($raw);
 		if (!ProjectAccess::isLead($old, $this->ownKeys($m))) {
-			throw ApiException::forbidden(ProjectAccess::FORBIDDEN);
+			throw ProjectAccess::forbidden();
 		}
 	}
 
-	/** @return array<string,mixed> der Grabstein */
+	/** @return array<string,mixed> the tombstone */
 	public function delete(Membership $m, string $kind, string $key, mixed $version): array {
 		$this->policy->requireWrite($m);
 		RecordValidator::checkAddress($kind, $key);
 		if ($version === null || $version === '') {
-			throw ApiException::badRequest('„version“ fehlt.');
+			throw ApiException::missing('version', true);
 		}
 		$version = RecordValidator::checkVersion($version);
 		return $this->write($m, [[
@@ -172,10 +172,10 @@ final class RecordService {
 		$this->policy->requireWrite($m);
 		$writes = $body->writes ?? null;
 		if (!is_array($writes) || !array_is_list($writes)) {
-			throw ApiException::badRequest('„writes“ muss eine Liste sein.');
+			throw ApiException::badRequest('“writes” must be a list.');
 		}
 		if (count($writes) > self::BATCH_LIMIT) {
-			throw ApiException::tooLarge('Höchstens ' . self::BATCH_LIMIT . ' Schreibungen je Aufruf.');
+			throw ApiException::tooLarge(Message::of('At most {limit} writes per call.', ['limit' => self::BATCH_LIMIT]));
 		}
 		$ops = [];
 		$seen = [];
@@ -183,21 +183,21 @@ final class RecordService {
 			$n = $i + 1;
 			try {
 				if (!($w instanceof \stdClass)) {
-					throw ApiException::badRequest('Jede Schreibung muss ein JSON-Objekt sein.');
+					throw ApiException::badRequest('Each write must be a JSON object.');
 				}
 				$kind = $w->kind ?? null;
 				$key = $w->key ?? null;
 				if (!is_string($kind) || !is_string($key)) {
-					throw ApiException::badRequest('Jede Schreibung braucht „kind“ und „key“ als Text.');
+					throw ApiException::badRequest('Each write needs “kind” and “key” as text.');
 				}
 				RecordValidator::checkAddress($kind, $key);
 				$version = RecordValidator::checkVersion($w->version ?? null);
 				if (!property_exists($w, 'data')) {
-					throw ApiException::invalid('„data“ fehlt (null heisst löschen).');
+					throw ApiException::invalid('“data” is missing (null means delete).');
 				}
 				$id = $kind . '/' . $key;
 				if (isset($seen[$id])) {
-					throw ApiException::invalid('Derselbe Datensatz steht zweimal in der Liste.');
+					throw ApiException::invalid('The same record is in the list twice.');
 				}
 				$seen[$id] = true;
 				if ($w->data === null) {
@@ -207,25 +207,25 @@ final class RecordService {
 					$ops[] = ['kind' => $kind, 'key' => $key, 'version' => $version, 'json' => $v['json'], 'accounts' => $v['accounts']];
 				}
 			} catch (ApiException $e) {
-				throw new ApiException($e->getStatus(), $e->getErrorCode(), "Schreibung {$n}: " . $e->getMessage(), ['index' => $i]);
+				throw new ApiException($e->getStatus(), $e->getErrorCode(), Message::of('Write {n}: {message}', ['n' => $n, 'message' => $e->getText()]), ['index' => $i]);
 			}
 		}
 		return $this->write($m, $ops, true);
 	}
 
-	/** @return list<array<string,mixed>> neueste zuerst, höchstens 100 */
+	/** @return list<array<string,mixed>> newest first, at most 100 */
 	public function history(Membership $m, string $kind, string $key): array {
 		RecordValidator::checkAddress($kind, $key);
 		$r = $this->records->findOne($m->tenantId, $kind, $key);
-		// Projekt: auch seine Leitungen (nach der aktuellen Fassung).
+		// Project: also its leads (by the current version).
 		$raw = $r?->getData();
 		$lead = $kind === 'project' && $r !== null && !$r->isTombstone() && $raw !== null
 			&& $this->policy->canSeeFullProject($m, Json::decode($raw), $this->ownKeys($m));
 		if (!$lead && !$this->policy->canReadHistory($m, $kind, $key, $r?->accountList() ?? [])) {
-			throw ApiException::forbidden('Den Verlauf dieses Datensatzes darf dieses Konto nicht lesen.');
+			throw ApiException::forbidden('This account may not read the history of this record.');
 		}
 		if ($r === null) {
-			throw ApiException::notFound('Diesen Datensatz gibt es nicht.');
+			throw ApiException::notFound('This record does not exist.');
 		}
 		return array_map(static function (History $h): array {
 			$raw = $h->getData();
@@ -239,7 +239,7 @@ final class RecordService {
 		}, $this->history->findFor($m->tenantId, $kind, $key, self::HISTORY_LIMIT));
 	}
 
-	/** @return array<string,mixed> der neue Datensatz */
+	/** @return array<string,mixed> the new record */
 	public function restore(Membership $m, string $kind, string $key, \stdClass $body): array {
 		$this->policy->requireWrite($m);
 		RecordValidator::checkAddress($kind, $key);
@@ -247,11 +247,11 @@ final class RecordService {
 		$current = RecordValidator::checkVersion($body->current ?? null, 'current');
 		$h = $this->history->findVersion($m->tenantId, $kind, $key, $version);
 		if ($h === null) {
-			throw ApiException::notFound('Diese Fassung gibt es nicht (mehr).');
+			throw ApiException::notFound('This version does not exist (any more).');
 		}
 		$raw = $h->getData();
 		if ($h->getDeleted() === 1 || $raw === null) {
-			throw ApiException::invalid('Diese Fassung ist eine Löschung und lässt sich nicht wiederherstellen.');
+			throw ApiException::invalid('This version is a deletion and cannot be restored.');
 		}
 		$v = RecordValidator::validate($kind, $key, Json::decode($raw));
 		return $this->write($m, [[
@@ -260,7 +260,7 @@ final class RecordService {
 		]], false)['records'][0];
 	}
 
-	/** Vermerk „Konto gelöscht“ an den Personen eines Kontos, über alle Teams. */
+	/** "Account deleted" note on an account's persons, across all teams. */
 	public function markAccountDeleted(string $uid): int {
 		$now = $this->time->getTime();
 		$n = 0;
@@ -272,12 +272,12 @@ final class RecordService {
 	}
 
 	/**
-	 * Schreibungen in **einer** Transaktion: alles oder nichts.
+	 * Writes in **one** transaction: all or nothing.
 	 *
-	 * Zuerst wird die Revision des Teams erhöht. Das sperrt die Team-Zeile
-	 * bis zum Commit, darum sehen alle Prüfungen danach einen festen Stand
-	 * und zwei Schreibungen bekommen nie dieselbe Revision. Bei einem
-	 * Konflikt rollt alles zurück – auch die Revision.
+	 * The team's revision is increased first. That locks the team row
+	 * until commit, so all checks afterwards see a fixed state and two
+	 * writes never get the same revision. On a conflict everything rolls
+	 * back – including the revision.
 	 *
 	 * @param list<array{kind:string,key:string,version:int,json:?string,accounts:?list<string>}> $ops
 	 * @return array{revision:int,records:list<array<string,mixed>>}
@@ -342,7 +342,7 @@ final class RecordService {
 				}
 				$r->setData($op['json']);
 				if (!$isDelete) {
-					// Ein Grabstein behält die Konten: So erfährt die Person, dass ihr Datensatz weg ist.
+					// A tombstone keeps the accounts: this is how the person learns their record is gone.
 					$r->setAccounts($op['accounts'] === [] ? null : Json::encode($op['accounts']));
 				}
 				$r->setVersion($newVersion);
@@ -379,9 +379,7 @@ final class RecordService {
 	private function problemError(array $problems, bool $batch): ApiException {
 		if ($batch) {
 			return ApiException::conflict(
-				count($problems) === 1
-					? 'Ein Datensatz wurde inzwischen geändert; nichts wurde geschrieben.'
-					: count($problems) . ' Datensätze wurden inzwischen geändert; nichts wurde geschrieben.',
+				Message::plural('A record was changed in the meantime; nothing was written.', '%n records were changed in the meantime; nothing was written.', count($problems)),
 				['conflicts' => array_map(static fn (array $p) => [
 					'kind' => $p['op']['kind'],
 					'key' => $p['op']['key'],
@@ -391,13 +389,13 @@ final class RecordService {
 		}
 		$p = $problems[0];
 		if ($p['outcome'] === VersionCheck::NOT_FOUND) {
-			return ApiException::notFound('Diesen Datensatz gibt es nicht.');
+			return ApiException::notFound('This record does not exist.');
 		}
-		$who = $p['current'] === null ? '' : ' von ' . $p['current']['modified_by'];
+		if ($p['current'] === null) {
+			return ApiException::conflict('This record does not exist yet; send “version”: 0 to create it.', ['current' => null]);
+		}
 		return ApiException::conflict(
-			$p['current'] === null
-				? 'Diesen Datensatz gibt es noch nicht; zum Anlegen „version“: 0 senden.'
-				: "Der Datensatz wurde inzwischen{$who} geändert.",
+			Message::of('The record was changed in the meantime by {user}.', ['user' => (string)$p['current']['modified_by']]),
 			['current' => $p['current']],
 		);
 	}

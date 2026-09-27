@@ -10,7 +10,7 @@ use OCP\AppFramework\Db\Entity;
 use OCP\DB\Types;
 
 /**
- * Eine Fassung eines Datensatzes. Jede Schreibung legt ihre neue Fassung hier ab.
+ * A version of a record. Every write stores its new version here.
  *
  * @method int getTenantId()
  * @method void setTenantId(int $tenantId)

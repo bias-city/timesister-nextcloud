@@ -1,4 +1,4 @@
-# Nicht mit der App ausliefern
+# Not shipped with the app
 /.git
 /.github
 /.gitignore
@@ -13,5 +13,5 @@
 /tools
 /UPDATE.md
 /vendor
-# Bild für den App Store, dort über GitHub verlinkt
+# Image for the App Store, linked there via GitHub
 /img/screenshot-admin.png

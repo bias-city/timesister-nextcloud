@@ -12,7 +12,7 @@ use OCP\DB\Types;
 use OCP\Migration\IOutput;
 use OCP\Migration\SimpleMigrationStep;
 
-/** Team-Einstellungen, Fassung 1.2. Nur hinzufügen. */
+/** Team settings, version 1.2. Additive only. */
 final class Version1003Date20260926120000 extends SimpleMigrationStep {
 	public function changeSchema(IOutput $output, Closure $schemaClosure, array $options): ?ISchemaWrapper {
 		/** @var ISchemaWrapper $schema */

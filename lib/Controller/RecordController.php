@@ -13,20 +13,22 @@ use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\DataResponse;
+use OCP\IL10N;
 use OCP\IRequest;
 
 /**
- * Datensätze. Jede Methode holt zuerst die Mitgliedschaft (Team und Rolle
- * aus den Gruppen des Aufrufers); die Rechte prüft RecordService über die
+ * Records. Every method first fetches the membership (team and role from
+ * the caller's groups); RecordService checks the rights through
  * AccessPolicy.
  */
 final class RecordController extends BaseController {
 	public function __construct(
 		IRequest $request,
 		TenantService $tenants,
+		IL10N $l,
 		private RecordService $records,
 	) {
-		parent::__construct($request, $tenants);
+		parent::__construct($request, $tenants, $l);
 	}
 
 	/** GET /records?since=<revision> */
@@ -40,7 +42,7 @@ final class RecordController extends BaseController {
 				$since = (string)$since;
 			}
 			if (!is_string($since) || !preg_match('/^\d{1,18}$/', $since === '' ? '0' : $since)) {
-				throw ApiException::badRequest('„since“ muss eine Revision (ganze Zahl ≥ 0) sein.');
+				throw ApiException::badRequest('“since” must be a revision (an integer ≥ 0).');
 			}
 			return $this->records->list($m, (int)$since);
 		});

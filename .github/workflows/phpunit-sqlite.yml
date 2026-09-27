@@ -1,7 +1,7 @@
-# Nach Nextclouds Vorlage phpunit-sqlite (github.com/nextcloud/.github, workflow-templates).
-# Sparsam für ein privates Repo: nur kleinste und grösste Version aus info.xml,
-# nur bei Pull-Requests und Pushes auf main. Danach die Integrationsprüfung
-# (tests/integration) gegen denselben Server mit SQLite und `php -S`.
+# After Nextcloud's template phpunit-sqlite (github.com/nextcloud/.github, workflow-templates).
+# Kept lean for a private repo: only the smallest and largest version from
+# info.xml, only on pull requests and pushes to main. Then the integration
+# check (tests/integration) against the same server with SQLite and `php -S`.
 # SPDX-FileCopyrightText: 2022-2024 Nextcloud GmbH and Nextcloud contributors
 # SPDX-License-Identifier: MIT
 
@@ -38,7 +38,7 @@ jobs:
         id: versions
         uses: nextcloud-libraries/nextcloud-version-matrix@cd0211ffcef1065e2020cd579e4843b8746e7a58 # v1.3.3
 
-      - name: Nur min und max
+      - name: Only min and max
         id: pick
         env:
           MIN: ${{ steps.versions.outputs.branches-min }}
@@ -81,7 +81,7 @@ jobs:
           extensions: bz2, ctype, curl, dom, fileinfo, gd, iconv, intl, json, libxml, mbstring, openssl, pcntl, posix, session, simplexml, xmlreader, xmlwriter, zip, zlib, sqlite, pdo_sqlite
           coverage: none
           ini-file: development
-          # Sicherungen bis 20 MB kommen als Base64 in JSON (≈ 27 MB).
+          # Backups up to 20 MB arrive as base64 in JSON (≈ 27 MB).
           ini-values: disable_functions=, post_max_size=64M, upload_max_filesize=64M, memory_limit=1G
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -18,7 +18,7 @@ use OCP\User\Events\UserDeletedEvent;
 
 final class Application extends App implements IBootstrap {
 	public const APP_ID = 'timesister';
-	/** Fassung der Schnittstelle (API.md). */
+	/** API version (see API.md). */
 	public const API_VERSION = 2;
 
 	public function __construct(array $urlParams = []) {

@@ -10,15 +10,15 @@
 	<summary lang="de">Stammdaten, Teams und Rechte für die Zeiterfassung TimeSister auf dem Mac</summary>
 	<description lang="en"><![CDATA[The server side of TimeSister, a time tracker for macOS: it stores master data such as people, locations, projects and clients as versioned records, checks permissions on the server and keeps calendar backups and the clients' status reports.
 
-Each team builds on one existing Nextcloud group, the team group. Its group admins are the team's admins; the roles project lead and office and leaving the team are kept by the app. The app creates no accounts and no calendars of its own; time entries stay in the users' CalDAV calendars.
+Each team builds on one existing Nextcloud group, the team group. Its group admins are the team's admins; the roles Lead and Manager and leaving the team are kept by the app. Roles are called User, Lead, Manager and Admin. The app creates no accounts and no calendars of its own; time entries stay in the users' CalDAV calendars.
 
 It requires the TimeSister Mac app, where master data, roles and backups are managed. On its own, the app only adds an admin section for teams and status.]]></description>
 	<description lang="de"><![CDATA[Die Server-Seite von TimeSister, einer Zeiterfassung für macOS: Sie speichert Stammdaten wie Personen, Standorte, Projekte und Kunden als Datensätze mit Version, prüft die Rechte auf dem Server und bewahrt Kalendersicherungen und die Lebenszeichen der Clients auf.
 
-Jedes Team baut auf einer bestehenden Nextcloud-Gruppe auf, der Teamgruppe. Ihre Gruppenadmins sind die Admins des Teams; die Rollen Projektleitung und Verwaltung und den Austritt führt die App. Die App legt keine eigenen Konten und keine eigenen Kalender an; die Buchungen bleiben in den CalDAV-Kalendern der Konten.
+Jedes Team baut auf einer bestehenden Nextcloud-Gruppe auf, der Teamgruppe. Ihre Gruppenadmins sind die Admins des Teams; die Rollen Lead und Manager und den Austritt führt die App. Die Rollen heissen User, Lead, Manager und Admin. Die App legt keine eigenen Konten und keine eigenen Kalender an; die Buchungen bleiben in den CalDAV-Kalendern der Konten.
 
 Sie setzt die Mac-App TimeSister voraus, in der Stammdaten, Rollen und Sicherungen gepflegt werden. Für sich allein bringt die App nur einen Admin-Abschnitt für Teams und Zustand mit.]]></description>
-	<version>0.3.0</version>
+	<version>0.4.0</version>
 	<licence>AGPL-3.0-or-later</licence>
 	<author homepage="https://bias.city">B/IAS – Basel Institut für angewandte Stadtforschung</author>
 	<namespace>TimeSister</namespace>

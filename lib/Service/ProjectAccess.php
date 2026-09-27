@@ -7,20 +7,24 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Service;
 
 /**
- * Projekte (Fassung 2): voll nur für Verwaltung, Admin und die Leitungen
- * des Projekts; alle anderen bekommen den Buchungskatalog. Die Leitung ist
- * Admin im Projekt: Sie ändert es ganz, legt aber keine neuen an. Rein:
- * kennt nur `data` und die Personenschlüssel.
+ * Projects (API version 2): full only for manager, admin and the
+ * project's leads; everyone else gets the booking catalog. The lead is
+ * admin within the project: they change all of it, but do not create new
+ * ones. Pure: knows only `data` and the person keys.
  */
 final class ProjectAccess {
-	/** Positivliste: Was hier fehlt, sieht nur die volle Sicht. */
+	/** Allowlist: what is missing here is visible only in the full view. */
 	public const CATALOG = ['schema', 'id', 'name', 'codes', 'subprojects', 'start', 'end', 'status', 'mapping'];
 	public const LEADS = 'leads';
-	public const FORBIDDEN = 'Ein Projekt ändern nur Verwaltung, Admin und seine Leitung; neue Projekte legen Verwaltung und Admin an.';
+
+	/** 403 when someone else changes or creates a project. */
+	public static function forbidden(): ApiException {
+		return ApiException::forbidden('Only managers, admins and the project’s leads change a project; managers and admins create new ones.');
+	}
 
 	/**
-	 * Leitet der Aufrufer dieses Projekt? `data.leads` enthält einen seiner
-	 * Personenschlüssel (Kennung oder Person mit ihm in `accounts`).
+	 * Does the caller lead this project? `data.leads` contains one of
+	 * their person keys (identifier, or a person with it in `accounts`).
 	 *
 	 * @param list<string> $ownKeys
 	 */
@@ -37,7 +41,7 @@ final class ProjectAccess {
 		return false;
 	}
 
-	/** Der Buchungskatalog: nur die Felder aus CATALOG, die es gibt. */
+	/** The booking catalog: only the fields from CATALOG that exist. */
 	public static function catalog(\stdClass $data): \stdClass {
 		$out = new \stdClass();
 		foreach (self::CATALOG as $field) {

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Nur die reinen Teile (ohne Nextcloud). Die Integration prüft
-     nc-app/tests/integration.mjs gegen die Docker-Nextcloud auf 8081. -->
+<!-- Only the pure parts (without Nextcloud). The integration check runs
+     nc-app/tests/integration.mjs against the Docker Nextcloud on 8081. -->
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
          bootstrap="tests/bootstrap.php"

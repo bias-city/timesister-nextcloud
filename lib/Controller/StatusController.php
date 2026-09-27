@@ -12,18 +12,20 @@ use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\DataResponse;
+use OCP\IL10N;
 use OCP\IRequest;
 
-/** Lebenszeichen: melden jedes Mitglied für sich, lesen Verwaltung und Admin. */
+/** Status reports: every member reports for themselves, manager and admin read them. */
 final class StatusController extends BaseController {
 	private const FIELDS = ['app_version', 'last_sync', 'last_backup', 'calendar_url', 'calendar_shared'];
 
 	public function __construct(
 		IRequest $request,
 		TenantService $tenants,
+		IL10N $l,
 		private StatusService $status,
 	) {
-		parent::__construct($request, $tenants);
+		parent::__construct($request, $tenants, $l);
 	}
 
 	/** POST /status */

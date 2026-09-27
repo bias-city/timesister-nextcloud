@@ -12,9 +12,10 @@ use OCP\Files\IFilenameValidator;
 use OCP\Files\IRootFolder;
 
 /**
- * Sichtbare Kopien einer Sicherung: beim Sicherungs-Konto unter
- * `TimeSister-Sicherungen/<Anzeigename> (<uid>)/<Tag>.ics`, und wahlweise
- * im eigenen Heim der Person unter `TimeSister-Sicherungen/<Tag>.ics`.
+ * Visible copies of a backup: with the backup owner under
+ * `TimeSister Backups/<display name> (<uid>)/<day>.ics`, and
+ * optionally in the person's own home under `TimeSister Backups/<day>.ics`
+ * (folder name: BackupRules::VISIBLE_ROOT).
  */
 final class VisibleCopy {
 	public function __construct(
@@ -24,22 +25,22 @@ final class VisibleCopy {
 	}
 
 	/**
-	 * Schreibt oder ersetzt die Kopie beim Sicherungs-Konto.
+	 * Writes or replaces the copy with the backup owner.
 	 *
-	 * @return array{path:string,file_id:int} Pfad relativ zum Heim von `$owner`
+	 * @return array{path:string,file_id:int} path relative to `$owner`'s home
 	 */
 	public function write(string $owner, string $personFolder, string $day, string $content): array {
 		$root = $this->folder($this->root->getUserFolder($owner), BackupRules::VISIBLE_ROOT);
-		// Dazu Nextclouds eigene Namensregeln dieser Instanz.
+		// Plus this instance's own Nextcloud naming rules.
 		$dir = $this->folder($root, $this->names->sanitizeFilename($personFolder));
 		$name = BackupRules::fileFor($day);
 		return ['path' => BackupRules::VISIBLE_ROOT . '/' . $dir->getName() . '/' . $name, 'file_id' => $this->put($dir, $name, $content)];
 	}
 
 	/**
-	 * Die Kopie im eigenen Heim der Person.
+	 * The copy in the person's own home.
 	 *
-	 * @return array{path:string,file_id:int} Pfad relativ zum Heim von `$uid`
+	 * @return array{path:string,file_id:int} path relative to `$uid`'s home
 	 */
 	public function writeOwn(string $uid, string $day, string $content): array {
 		$dir = $this->folder($this->root->getUserFolder($uid), BackupRules::VISIBLE_ROOT);
@@ -48,11 +49,11 @@ final class VisibleCopy {
 	}
 
 	/**
-	 * Löscht eine gemerkte Datei, aber nur, wenn ihre Datei-ID noch auf
-	 * genau diesen Pfad zeigt; verschobene oder umbenannte bleiben. Nie
-	 * Ordner. Über die Node-API, also in den Papierkorb der Person.
+	 * Deletes a tracked file, but only if its file ID still points to
+	 * exactly this path; moved or renamed ones stay. Never folders.
+	 * Through the node API, so into the person's trash bin.
 	 *
-	 * @return bool gelöscht
+	 * @return bool deleted
 	 */
 	public function deleteTracked(string $owner, int $fileId, string $path): bool {
 		$node = $this->tracked($owner, $fileId, $path);
@@ -63,7 +64,7 @@ final class VisibleCopy {
 		return true;
 	}
 
-	/** Liegt die gemerkte Datei noch unverändert an ihrem Pfad? */
+	/** Is the tracked file still unchanged at its path? */
 	public function isTracked(string $owner, int $fileId, string $path): bool {
 		return $this->tracked($owner, $fileId, $path) !== null;
 	}
@@ -77,12 +78,12 @@ final class VisibleCopy {
 		return $node;
 	}
 
-	/** @return int Datei-ID */
+	/** @return int file ID */
 	private function put(Folder $dir, string $name, string $content): int {
 		if ($dir->nodeExists($name)) {
 			$node = $dir->get($name);
 			if (!$node instanceof File) {
-				throw new \RuntimeException('An der Stelle der Sicherung liegt ein Ordner.');
+				throw new \RuntimeException('A folder is in the place of the backup file.');
 			}
 			$node->putContent($content);
 			return $node->getId();
@@ -96,7 +97,7 @@ final class VisibleCopy {
 			if ($node instanceof Folder) {
 				return $node;
 			}
-			throw new \RuntimeException('An der Stelle des Sicherungsordners liegt eine Datei.');
+			throw new \RuntimeException('A file is in the place of the backup folder.');
 		}
 		return $parent->newFolder($name);
 	}

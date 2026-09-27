@@ -10,7 +10,7 @@ use OCP\AppFramework\Db\Entity;
 use OCP\DB\Types;
 
 /**
- * Eine Rolle eines Teams und die Nextcloud-Gruppe dazu.
+ * A team's role and the Nextcloud group for it.
  *
  * @method int getTenantId()
  * @method void setTenantId(int $tenantId)

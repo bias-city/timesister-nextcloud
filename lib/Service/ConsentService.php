@@ -12,16 +12,20 @@ use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\DB\Exception as DbException;
 
 /**
- * Freigabe der Sicherung beim Admin, je Konto und Team. Standard: keine.
- * Zurückziehen hält nur künftige Sicherungen an; es löscht nichts.
+ * Consent for backup with the admin, per account and team. Default: none.
+ * Withdrawing only stops future backups; it deletes nothing.
  */
 final class ConsentService {
-	public const REFUSED = 'Die Person hat die Sicherung beim Admin nicht freigegeben.';
 
 	public function __construct(
 		private BackupConsentMapper $consents,
 		private ITimeFactory $time,
 	) {
+	}
+
+	/** 403 without consent; the sentence is part of the API contract. */
+	public static function refused(): ApiException {
+		return ApiException::forbidden('The person has not agreed to backups with the admin.');
 	}
 
 	/** @return array{consent:bool,since:?string,revoked_at:?string,notice:?string} */
@@ -44,7 +48,7 @@ final class ConsentService {
 	}
 
 	/**
-	 * Nur für das eigene Konto: Die Kennung kommt aus der Anmeldung.
+	 * Only for the own account: the identifier comes from the login.
 	 *
 	 * @param array<string,mixed> $in
 	 * @return array{consent:bool,since:?string,revoked_at:?string,notice:?string}
@@ -55,7 +59,7 @@ final class ConsentService {
 		for ($attempt = 1; ; $attempt++) {
 			$found = $this->consents->findOne($m->tenantId, $m->uid);
 			if ($found === null && !$v['consent']) {
-				return self::present(null); // nie freigegeben: nichts zu speichern
+				return self::present(null); // never consented: nothing to save
 			}
 			$c = $found ?? new BackupConsent();
 			if ($found === null) {
@@ -79,7 +83,7 @@ final class ConsentService {
 				$c = $found === null ? $this->consents->insert($c) : $this->consents->update($c);
 				return self::present($c);
 			} catch (DbException $e) {
-				// Zwei Anfragen gleichzeitig: die zweite aktualisiert.
+				// Two requests at the same time: the second updates.
 				if ($e->getReason() !== DbException::REASON_UNIQUE_CONSTRAINT_VIOLATION || $attempt >= 2) {
 					throw $e;
 				}
@@ -91,14 +95,14 @@ final class ConsentService {
 		return self::granted($this->consents->findOne($tenantId, $uid));
 	}
 
-	/** @throws ApiException 403 ohne Freigabe */
+	/** @throws ApiException 403 without consent */
 	public function require(int $tenantId, string $uid): void {
 		if (!$this->has($tenantId, $uid)) {
-			throw ApiException::forbidden(self::REFUSED);
+			throw self::refused();
 		}
 	}
 
-	/** @return array<string,BackupConsent> uid → Freigabe */
+	/** @return array<string,BackupConsent> uid → consent */
 	public function byTenant(int $tenantId): array {
 		return $this->consents->findByTenant($tenantId);
 	}

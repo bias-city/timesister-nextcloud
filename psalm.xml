@@ -2,12 +2,12 @@
 <!--
   SPDX-License-Identifier: AGPL-3.0-or-later
 
-  Statische Prüfung gegen die öffentlichen Schnittstellen (nextcloud/ocp).
-  tools/psalm-all.sh prüft gegen jede Version aus appinfo/info.xml und master.
-  phpVersion = kleinste PHP-Fassung der unterstützten Nextcloud-Versionen
-  (die CI vergleicht das mit nextcloud-version-matrix).
-  findUnusedIssueHandlerSuppression ist aus, weil dieselbe Datei gegen
-  mehrere Versionen läuft: Was in einer Version nötig ist, fehlt in der nächsten.
+  Static analysis against the public interfaces (nextcloud/ocp).
+  tools/psalm-all.sh checks against every version from appinfo/info.xml and master.
+  phpVersion = the smallest PHP version of the supported Nextcloud versions
+  (the CI compares this with nextcloud-version-matrix).
+  findUnusedIssueHandlerSuppression is off because the same file runs
+  against several versions: what's needed in one version is missing in the next.
 -->
 <psalm
 	errorLevel="2"
@@ -31,8 +31,8 @@
 		<directory name="vendor/nextcloud/ocp" />
 	</extraFiles>
 	<issueHandlers>
-		<!-- Veraltetes gilt als Fehler: Was Nextcloud als deprecated markiert,
-		     fällt mit einer der nächsten Hauptversionen weg. -->
+		<!-- Deprecated counts as an error: whatever Nextcloud marks as
+		     deprecated is removed with one of the next major versions. -->
 		<DeprecatedClass errorLevel="error" />
 		<DeprecatedConstant errorLevel="error" />
 		<DeprecatedFunction errorLevel="error" />
@@ -40,29 +40,29 @@
 		<DeprecatedMethod errorLevel="error" />
 		<DeprecatedProperty errorLevel="error" />
 		<DeprecatedTrait errorLevel="error" />
-		<!-- @internal in OCP ist so verboten wie \OC\. -->
+		<!-- @internal in OCP is as forbidden as \OC\. -->
 		<InternalClass errorLevel="error" />
 		<InternalMethod errorLevel="error" />
 		<InternalProperty errorLevel="error" />
-		<!-- Entity::$id setzt Nextcloud beim Laden, nicht der Konstruktor. -->
+		<!-- Nextcloud sets Entity::$id when loading, not the constructor. -->
 		<PropertyNotSetInConstructor>
 			<errorLevel type="suppress">
 				<directory name="lib/Db" />
 			</errorLevel>
 		</PropertyNotSetInConstructor>
-		<!-- Doctrine liefert nextcloud/ocp nicht mit; ISchemaWrapper gibt bis
-		     Nextcloud 34 Doctrines Tabellen-Objekte zurück. Nur die Migration. -->
+		<!-- nextcloud/ocp doesn't ship Doctrine; up to Nextcloud 34,
+		     ISchemaWrapper returns Doctrine's table objects. Migration only. -->
 		<UndefinedDocblockClass>
 			<errorLevel type="suppress">
 				<referencedClass name="Doctrine\DBAL\Schema\Table" />
 				<referencedClass name="Doctrine\DBAL\Schema\Schema" />
-				<!-- ICalendarExport::export() liefert laut OCP Sabre-VCalendar;
-				     Sabre liegt nicht in nextcloud/ocp. Genutzt wird nur serialize(). -->
+				<!-- Per OCP, ICalendarExport::export() returns Sabre VCalendar;
+				     Sabre isn't part of nextcloud/ocp. Only serialize() is used. -->
 				<referencedClass name="Sabre\VObject\Component\VCalendar" />
 			</errorLevel>
 		</UndefinedDocblockClass>
-		<!-- IRootFolder erbt OC\Hooks\Emitter, das nextcloud/ocp nicht mitliefert.
-		     Die App ruft davon nichts auf. Nur die Datei, die IRootFolder nutzt. -->
+		<!-- IRootFolder inherits OC\Hooks\Emitter, which nextcloud/ocp doesn't ship.
+		     The app calls nothing from it. Only the file that uses IRootFolder. -->
 		<MissingDependency>
 			<errorLevel type="suppress">
 				<file name="lib/Service/VisibleCopy.php" />

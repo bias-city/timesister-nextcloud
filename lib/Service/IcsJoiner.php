@@ -7,10 +7,10 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Service;
 
 /**
- * Setzt einzelne VCALENDAR-Objekte (je Termin eines, wie der Export sie
- * liefert) zu einer .ics zusammen: eigener Kopf, jede VTIMEZONE einmal (nach
- * TZID), dann alle übrigen Komponenten in ihrer Reihenfolge. Arbeitet auf
- * Zeilen, ohne Bibliothek. Rein.
+ * Assembles individual VCALENDAR objects (one per event, as the export
+ * delivers them) into one .ics: its own header, every VTIMEZONE once (by
+ * TZID), then all remaining components in their order. Works on lines,
+ * without a library. Pure.
  */
 final class IcsJoiner {
 	/** @param iterable<string> $calendars */
@@ -34,11 +34,11 @@ final class IcsJoiner {
 	}
 
 	/**
-	 * Die Komponenten direkt unter VCALENDAR samt ihren Unterkomponenten.
-	 * Eigenschaften des VCALENDAR selbst (VERSION, PRODID, METHOD, X-WR-…)
-	 * fallen weg; eine nicht geschlossene Komponente am Ende auch.
+	 * The components directly under VCALENDAR, with their sub-components.
+	 * Properties of VCALENDAR itself (VERSION, PRODID, METHOD, X-WR-…) are
+	 * dropped; an unclosed component at the end too.
 	 *
-	 * @return list<array{0:string,1:list<string>}> Name, Zeilen
+	 * @return list<array{0:string,1:list<string>}> name, lines
 	 */
 	public static function components(string $ics): array {
 		if (str_starts_with($ics, "\xEF\xBB\xBF")) {
@@ -52,7 +52,7 @@ final class IcsJoiner {
 			if ($line === '') {
 				continue;
 			}
-			// Fortsetzungszeilen beginnen mit Leerraum und sind nie BEGIN/END.
+			// Continuation lines start with whitespace and are never BEGIN/END.
 			$upper = strtoupper($line);
 			if (str_starts_with($upper, 'BEGIN:')) {
 				$depth++;
@@ -83,8 +83,8 @@ final class IcsJoiner {
 	}
 
 	/**
-	 * Wert einer Eigenschaft der Komponente selbst (nicht ihrer
-	 * Unterkomponenten), entfaltet; null, wenn sie fehlt.
+	 * Value of a property of the component itself (not its sub-components),
+	 * unfolded; null if it is missing.
 	 *
 	 * @param list<string> $lines
 	 */

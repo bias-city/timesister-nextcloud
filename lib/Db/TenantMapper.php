@@ -47,10 +47,10 @@ final class TenantMapper extends QBMapper {
 	}
 
 	/**
-	 * Erhöht die Revision um `$n` und liest sie in derselben Transaktion zurück.
-	 * Das UPDATE sperrt die Team-Zeile bis zum Commit (SQLite: die ganze DB),
-	 * also nie zwei Schreibungen mit derselben Revision. Ohne FOR UPDATE, das
-	 * SQLite nicht kann. Nur innerhalb einer Transaktion aufrufen.
+	 * Increases the revision by `$n` and reads it back in the same
+	 * transaction. The UPDATE locks the team row until commit (SQLite: the
+	 * whole database), so two writes never get the same revision. Without
+	 * FOR UPDATE, which SQLite cannot do. Call only inside a transaction.
 	 */
 	public function bumpRevision(int $id, int $n): int {
 		$qb = $this->db->getQueryBuilder();
@@ -58,12 +58,12 @@ final class TenantMapper extends QBMapper {
 			->set('revision', $qb->func()->add('revision', $qb->createNamedParameter($n, IQueryBuilder::PARAM_INT)))
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 		if ($qb->executeStatement() !== 1) {
-			throw new DoesNotExistException('Team nicht gefunden');
+			throw new DoesNotExistException('Team not found');
 		}
 		return $this->revision($id);
 	}
 
-	/** Die aktuelle Revision des Teams. */
+	/** The team's current revision. */
 	public function revision(int $id): int {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('revision')->from($this->getTableName())
@@ -72,7 +72,7 @@ final class TenantMapper extends QBMapper {
 		$v = $res->fetchOne();
 		$res->closeCursor();
 		if ($v === false) {
-			throw new DoesNotExistException('Team nicht gefunden');
+			throw new DoesNotExistException('Team not found');
 		}
 		return (int)$v;
 	}

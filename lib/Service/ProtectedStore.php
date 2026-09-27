@@ -11,9 +11,9 @@ use OCP\Files\NotFoundException;
 use OCP\Files\SimpleFS\ISimpleFolder;
 
 /**
- * Die geschützte Ablage in IAppData der App: `t<Team>/<Konto>/<Tag>.ics`.
- * Die Namen bildet die App selbst; aus der Anfrage kommt nur der Tag, und
- * der ist geprüft.
+ * The protected store in the app's IAppData: `t<team>/<account>/<day>.ics`.
+ * The app forms the names itself; only the day comes from the request,
+ * and it is checked.
  */
 final class ProtectedStore {
 	public function __construct(
@@ -36,7 +36,7 @@ final class ProtectedStore {
 		return $this->folder($tenantId, $uid, false)->getFile(BackupRules::fileFor($day))->getContent();
 	}
 
-	/** Löscht die Datei; fehlt sie, ist das kein Fehler. */
+	/** Deletes the file; if it is missing, that is not an error. */
 	public function delete(int $tenantId, string $uid, string $day): void {
 		try {
 			$this->folder($tenantId, $uid, false)->getFile(BackupRules::fileFor($day))->delete();

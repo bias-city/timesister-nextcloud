@@ -1,116 +1,127 @@
-# Nextcloud X ist erschienen – Ablaufblatt
+# A new Nextcloud X is out – runbook
 
-Für Menschen und für Claude. Ziel: die App in einem Pull-Request auf eine neue
-Nextcloud-Hauptversion bringen, ohne mehr zu ändern als nötig.
+Kept short, for people and for Claude. Goal: bring the app up to a new
+Nextcloud major version in one pull request, changing no more than
+necessary.
 
-**Auftrag an Claude** (als Issue-Kommentar mit `@claude` oder lokal):
+**Task for Claude** (as an issue comment with `@claude`, or locally):
 
-> Lies UPDATE.md und bring die App auf Nextcloud X.
+> Read UPDATE.md and bring the app to Nextcloud X.
 
-## Regeln
+## Rules
 
-- Nur öffentliche Schnittstellen `OCP\…` per Konstruktor-Injektion. Kein
-  `\OC\`, kein `\OC_`, kein `\OC::$server`, kein `OCA\DAV`, keine andere App.
-- Datenbank nur über `IDBConnection`, `IQueryBuilder`, `QBMapper`,
-  `OCP\DB\Types`. Kein rohes SQL. Migrationen nur additiv (neue Klasse
-  `lib/Migration/Version<NNNN>Date<YYYYMMDDHHMMSS>`), nie eine alte ändern.
-- Was Psalm als *deprecated* meldet, ist ein Fehler: ersetzen, nicht unterdrücken.
-- Die Schnittstelle (`docs/API.md`, Fassung 2) bleibt, wie sie ist. Muss sie
-  sich ändern, ist das eine eigene Entscheidung, kein Update.
-- Admin-Seite: Vanilla-JS ohne `OC.*`, Token aus `document.head.dataset.requesttoken`,
-  Stile nur über Nextclouds CSS-Variablen.
+- Only public interfaces `OCP\…` via constructor injection. No `\OC\`, no
+  `\OC_`, no `\OC::$server`, no `OCA\DAV`, no other app.
+- Database only via `IDBConnection`, `IQueryBuilder`, `QBMapper`,
+  `OCP\DB\Types`. No raw SQL. Migrations only additive (new class
+  `lib/Migration/Version<NNNN>Date<YYYYMMDDHHMMSS>`), never change an old
+  one.
+- Whatever Psalm reports as *deprecated* is a bug: replace it, don't
+  suppress it.
+- The API (`docs/API.md`, version 2) stays as it is. Should it need to
+  change, that's a separate decision, not part of an update.
+- Admin page: vanilla JS without `OC.*`, token from
+  `document.head.dataset.requesttoken`, styles only via Nextcloud's CSS
+  variables.
 
-## Schritte
+## Steps
 
 <!-- checkliste -->
-- [ ] **Frühwarnung lesen:** Issue mit Label `nc-update` – welche Version, welcher Schritt, welcher Log-Auszug.
-- [ ] **Werkzeug:** `tools/nc-version.sh X [pfad/zu/docker-compose.yml]` – hebt `max-version`, die Psalm-Stubs und das Docker-Tag.
-- [ ] **Psalm:** `composer run psalm:all` – gegen jede Version aus `info.xml` und master; alle Befunde beheben.
-- [ ] **PHP-Fassung:** `phpVersion` in `psalm.xml` = kleinste PHP-Fassung der unterstützten Versionen (das Werkzeug sagt es).
-- [ ] **Unit-Tests:** `composer run test:unit`.
-- [ ] **Entwicklungs-Nextcloud mit neuem Tag:** zurücksetzen und aufsetzen (sichert vorher die Datenbank).
-- [ ] **Integration:** `NC_URL=http://localhost:8081 composer run test:integration` – alle grün.
-- [ ] **Fassung:** `<version>` in `appinfo/info.xml` heben (Patch für reine Anpassung), `CHANGELOG.md` ergänzen.
-- [ ] **Pull-Request** mit Verweis auf das Issue; CI grün (Lint, Psalm, PHPUnit min/max).
-- [ ] **Tag** `nc-app-v<version>` nach dem Merge.
-- [ ] **App Store:** GitHub-Release mit Tag `v<version>` im Repo der App; bauen, signieren und hochladen macht `appstore-build-publish.yml`.
+- [ ] **Read the early warning:** issue with label `nc-update` – which version, which step, which log excerpt.
+- [ ] **Tool:** `tools/nc-version.sh X [path/to/docker-compose.yml]` – raises `max-version`, the Psalm stubs and the Docker tag.
+- [ ] **Psalm:** `composer run psalm:all` – against every version from `info.xml` and master; fix all findings.
+- [ ] **PHP version:** `phpVersion` in `psalm.xml` = the smallest PHP version among the supported Nextcloud versions (the tool says which).
+- [ ] **Unit tests:** `composer run test:unit`.
+- [ ] **Development Nextcloud with the new tag:** reset and set up (backs up the database first).
+- [ ] **Integration:** `NC_URL=http://localhost:8081 composer run test:integration` – all green.
+- [ ] **Version:** raise `<version>` in `appinfo/info.xml` (patch for a plain adjustment), add to `CHANGELOG.md`.
+- [ ] **Pull request** referencing the issue; CI green (lint, Psalm, PHPUnit min/max).
+- [ ] **Tag** `nc-app-v<version>` after the merge.
+- [ ] **App Store:** GitHub release with tag `v<version>` in the app's repo; building, signing and uploading is done by `appstore-build-publish.yml`.
 <!-- /checkliste -->
 
-## Einzelheiten
+## Details
 
-### Werkzeug
+### Tool
 
 ```sh
-tools/nc-version.sh 35                                   # nur App
-tools/nc-version.sh 35 ../../docker-next/docker-compose.yml   # im Monorepo
-NC_COMPOSE_FILE=/pfad/docker-compose.yml tools/nc-version.sh 35
+tools/nc-version.sh 35                                   # app only
+tools/nc-version.sh 35 ../../docker-next/docker-compose.yml   # in the monorepo
+NC_COMPOSE_FILE=/path/docker-compose.yml tools/nc-version.sh 35
 ```
 
-Composer: `composer` im PATH oder `COMPOSER_BIN="php /pfad/composer.phar"`.
-`min-version` bleibt; sollen nur zwei Hauptversionen gelten, von Hand heben.
+Composer: `composer` in the PATH, or
+`COMPOSER_BIN="php /path/composer.phar"`. `min-version` stays; if only two
+major versions should be supported, raise it by hand.
 
-### Psalm-Befunde
+### Psalm findings
 
-- *Deprecated*: den im Docblock genannten Ersatz nehmen (`vendor/nextcloud/ocp`).
-- Neue Signaturen (Rückgabetypen, Parameter): an die öffentliche Schnittstelle
-  anpassen, nicht `@psalm-suppress` setzen.
-- Unterstützt `min-version` die neue Form nicht, hilft ein kleiner Adapter in
-  `lib/Service` – oder `min-version` heben.
+- *Deprecated*: use the replacement named in the docblock
+  (`vendor/nextcloud/ocp`).
+- New signatures (return types, parameters): adapt to the public interface,
+  don't set `@psalm-suppress`.
+- If `min-version` doesn't support the new form, a small adapter in
+  `lib/Service` helps – or raise `min-version`.
 
-### Entwicklungs-Nextcloud (Monorepo)
+### Development Nextcloud (monorepo)
 
-`docker-next/zuruecksetzen.sh` sichert die Datenbank nach
-`~/ClaudeBackup/databases/`, baut neu auf und legt die Testkonten an.
+`docker-next/zuruecksetzen.sh` backs up the database to
+`~/ClaudeBackup/databases/`, rebuilds it and creates the test accounts.
 
-### Signatur und App Store
+### Signing and App Store
 
-Macht `.github/workflows/appstore-build-publish.yml` bei jedem veröffentlichten
-Release (einmal vorher: [Erste Veröffentlichung](#erste-veröffentlichung-im-app-store)).
-Von Hand, falls der Workflow ausfällt:
+Done by `.github/workflows/appstore-build-publish.yml` on every published
+release (once beforehand: [First App Store
+release](#first-app-store-release)). By hand, should the workflow fail:
 
-1. Paket ohne die Dateien aus `.nextcloudignore`:
+1. Package without the files from `.nextcloudignore`:
    `rsync -a --exclude-from=.nextcloudignore ./ ../build/timesister/ && tar -C ../build -czf ../build/timesister.tar.gz timesister`
-2. Signatur des Archivs: `openssl dgst -sha512 -sign <schlüssel> ../build/timesister.tar.gz | openssl base64`
-3. Upload im App Store (apps.nextcloud.com) mit Link zum Release-Archiv und Signatur.
+2. Sign the archive: `openssl dgst -sha512 -sign <key> ../build/timesister.tar.gz | openssl base64`
+3. Upload in the App Store (apps.nextcloud.com) with a link to the release
+   archive and the signature.
 
-### CI und Frühwarnung
+### CI and early warning
 
-- Bei jedem Push: Lint (PHP min/max, info.xml) und Psalm (min…max).
-- Bei Pull-Requests und auf `main`: PHPUnit und Integration gegen min und max
-  (Nextcloud-Checkout mit SQLite).
-- Wöchentlich (`fruehwarnung.yml`): neueste Veröffentlichung und master;
-  Fehler → Issue `nc-update`, bei einer neuen Hauptversion ruft sie Claude.
-- Bei einem veröffentlichten Release (`appstore-build-publish.yml`): Paket,
-  Signatur, App Store; aus, solange die drei Secrets fehlen.
-- Claude (`claude.yml`) läuft nur, wenn das Secret `ANTHROPIC_API_KEY` gesetzt
-  ist und die Claude-GitHub-App installiert ist.
+- On every push: lint (PHP min/max, info.xml) and Psalm (min…max).
+- On pull requests and on `main`: PHPUnit and integration against min and
+  max (Nextcloud checkout with SQLite).
+- Weekly (`fruehwarnung.yml`): latest release and master; a failure opens
+  issue `nc-update`, and calls Claude on a new major version.
+- On a published release (`appstore-build-publish.yml`): package, signature,
+  App Store; off as long as the three secrets are missing.
+- Claude (`claude.yml`) only runs when the secret `ANTHROPIC_API_KEY` is set
+  and the Claude GitHub app is installed.
 
-## Erste Veröffentlichung im App Store
+## First App Store release
 
-Einmalig; danach genügt für jede Fassung ein Release. Der private Schlüssel
-liegt beim Maintainer und kommt in kein Repo, nur als Secret zu GitHub.
+One-off; after that, one release per version suffices. The private key
+stays with the maintainer and goes into no repo, only into GitHub as a
+secret.
 
-1. **Zertifikat holen**, sobald der Pull-Request
+1. **Get the certificate** once the pull request
    [nextcloud/app-certificate-requests#1270](https://github.com/nextcloud/app-certificate-requests/pull/1270)
-   gemergt ist: die Datei `timesister/timesister.crt` im Repo
-   `nextcloud/app-certificate-requests`. Passt es zum Schlüssel, geben
-   `openssl x509 -in timesister.crt -noout -pubkey` und
-   `openssl pkey -in <schlüssel> -pubout` dasselbe aus.
-2. **App registrieren** auf [apps.nextcloud.com](https://apps.nextcloud.com)
-   (angemeldet: „Register app“): das Zertifikat einfügen, dazu die Signatur
-   der App-ID:
-   `echo -n "timesister" | openssl dgst -sha512 -sign <schlüssel> | openssl base64`
-3. **Secrets** im Repo `bias-city/timesister-nextcloud` setzen
-   (Settings → Secrets and variables → Actions):
-   - `APP_PRIVATE_KEY` – der private Schlüssel (ganze PEM-Datei)
-   - `APP_PUBLIC_CRT` – der Inhalt von `timesister.crt`
-   - `APPSTORE_TOKEN` – das API-Token des Kontos auf apps.nextcloud.com
+   is merged: the file `timesister/timesister.crt` in the repo
+   `nextcloud/app-certificate-requests`. If it matches the key,
+   `openssl x509 -in timesister.crt -noout -pubkey` and
+   `openssl pkey -in <key> -pubout` give the same output.
+2. **Register the app** on [apps.nextcloud.com](https://apps.nextcloud.com)
+   (signed in: "Register app"): paste in the certificate, plus the
+   signature of the app ID:
+   `echo -n "timesister" | openssl dgst -sha512 -sign <key> | openssl base64`
+3. **Secrets** in the repo `bias-city/timesister-nextcloud` (Settings →
+   Secrets and variables → Actions):
+   - `APP_PRIVATE_KEY` – the private key (the whole PEM file)
+   - `APP_PUBLIC_CRT` – the contents of `timesister.crt`
+   - `APPSTORE_TOKEN` – the API token of the account on apps.nextcloud.com
 
-   Solange eines fehlt, bleibt der Workflow aus und meldet das als Hinweis.
-4. **Fassung heben:** `<version>` in `appinfo/info.xml` und einen Eintrag in
-   `CHANGELOG.md`; auf `main` bringen. Das Bild für den Store
-   (`img/screenshot-admin.png`) muss dort liegen, `info.xml` verlinkt es.
-5. **Release** auf GitHub mit Tag `v<version>` veröffentlichen, z. B.
-   `gh release create v0.1.0 --title 0.1.0 --notes "…"`. Der Workflow
-   prüft Tag gegen `info.xml`, baut, signiert, hängt
-   `timesister-v<version>.tar.gz` ans Release und lädt es in den Store.
+   As long as one is missing, the workflow stays off and reports that as a
+   notice.
+4. **Raise the version:** `<version>` in `appinfo/info.xml` and an entry in
+   `CHANGELOG.md`; get it onto `main`. The image for the store
+   (`img/screenshot-admin.png`) must be there; `info.xml` links to it.
+5. **Publish a release** on GitHub with tag `v<version>`, e.g.
+   `gh release create v0.1.0 --title 0.1.0 --notes "…"`. The workflow
+   checks the tag against `info.xml`, builds, signs, attaches
+   `timesister-v<version>.tar.gz` to the release and uploads it to the
+   store.
+</content>

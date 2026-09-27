@@ -18,13 +18,13 @@ use OCP\IUserManager;
 use OCP\IUserSession;
 
 /**
- * Mitgliedschaft → Team und Rolle (Fassung 2). Das Team ergibt sich immer
- * aus der Teamgruppe des Aufrufers, nie aus der Anfrage.
+ * Membership → team and role (API version 2). The team always follows
+ * from the caller's team group, never from the request.
  */
 final class TenantService {
 	/** @var list<array{tenant_id:int,role:string,gid:string}>|null */
 	private ?array $roleRows = null;
-	/** @var array<int,array<string,array{role:string,left_at:?int}>> Team → uid → Eintrag */
+	/** @var array<int,array<string,array{role:string,left_at:?int}>> team → uid → entry */
 	private array $members = [];
 
 	public function __construct(
@@ -38,11 +38,11 @@ final class TenantService {
 	) {
 	}
 
-	/** Der angemeldete Aufrufer als Teammitglied, sonst no_team / ambiguous_team. */
+	/** The logged-in caller as a team member, otherwise no_team / ambiguous_team. */
 	public function current(): Membership {
 		$user = $this->userSession->getUser();
 		if ($user === null) {
-			throw ApiException::forbidden('Nicht angemeldet.');
+			throw ApiException::forbidden('Not logged in.');
 		}
 		return $this->membershipOf($user);
 	}
@@ -66,7 +66,7 @@ final class TenantService {
 		return $this->roleRows ??= $this->roleGroups->allRows();
 	}
 
-	/** Nach Änderungen an Teams oder Rollen. */
+	/** After changes to teams or roles. */
 	public function reset(): void {
 		$this->roleRows = null;
 		$this->members = [];
@@ -80,19 +80,19 @@ final class TenantService {
 		return $t;
 	}
 
-	/** Die Teamgruppe oder null. Alte Zeilen aus Fassung 1 zählen nicht. */
+	/** The team group, or null. Old rows from API version 1 do not count. */
 	public function teamGroupOf(int $tenantId): ?string {
 		return MembershipResolver::teamGroups($this->roleRows())[$tenantId] ?? null;
 	}
 
-	/** @return array{team:?string} für /me, /team und /admin/teams */
+	/** @return array{team:?string} for /me, /team and /admin/teams */
 	public function groupsOf(int $tenantId): array {
 		return [Role::TEAM_GROUP => $this->teamGroupOf($tenantId)];
 	}
 
 	/**
-	 * Alle Mitglieder, auch Ausgetretene: Konten der Teamgruppe und ihre
-	 * Gruppenadmins, mit Rolle und `left_at`.
+	 * All members, including those who left: accounts of the team group
+	 * and its group admins, with role and `left_at`.
 	 *
 	 * @return array<string,array{role:string,left_at:?int}>
 	 */
@@ -115,24 +115,24 @@ final class TenantService {
 		);
 	}
 
-	/** @return array<string,string> uid → Rolle, ohne Ausgetretene */
+	/** @return array<string,string> uid → role, without those who left */
 	public function memberRoles(int $tenantId): array {
 		return MembershipResolver::activeRoles($this->members($tenantId));
 	}
 
-	/** @return list<string> Kennungen mit dieser Rolle, ohne Ausgetretene, sortiert */
+	/** @return list<string> identifiers with this role, without those who left, sorted */
 	public function withRole(int $tenantId, string $role): array {
 		$uids = array_map('strval', array_keys(array_filter($this->memberRoles($tenantId), static fn (string $r) => $r === $role)));
 		sort($uids, SORT_STRING);
 		return $uids;
 	}
 
-	/** @return list<string> Konten mit Rolle admin, nach Kennung */
+	/** @return list<string> accounts with role admin, by identifier */
 	public function adminsOf(int $tenantId): array {
 		return $this->withRole($tenantId, Role::ADMIN);
 	}
 
-	/** Das Sicherungs-Konto: die Wahl, solange sie admin ist, sonst der erste admin. */
+	/** The backup owner: the choice, as long as it is still admin, otherwise the first admin. */
 	public function backupOwner(Tenant $t): ?string {
 		return BackupRules::pickOwner($t->getBackupOwner(), $this->adminsOf($t->getId()));
 	}
@@ -142,7 +142,7 @@ final class TenantService {
 	}
 
 	/**
-	 * Ein Mitglied wie in GET /team.
+	 * A member as in GET /team.
 	 *
 	 * @param array{role:string,left_at:?int} $m
 	 * @return array{uid:string,display_name:string,role:string,left_at:?string}
@@ -156,11 +156,11 @@ final class TenantService {
 		];
 	}
 
-	/** @return list<array{uid:string,display_name:string,role:string,left_at:?string}> alle Mitglieder, auch Ausgetretene */
+	/** @return list<array{uid:string,display_name:string,role:string,left_at:?string}> all members, including those who left */
 	public function presentMembers(int $tenantId): array {
 		$members = $this->members($tenantId);
 		$out = [];
-		// Rein numerische Kennungen kommen als int-Schlüssel.
+		// Purely numeric identifiers come as int keys.
 		foreach (array_map('strval', array_keys($members)) as $uid) {
 			$out[] = $this->presentMember($uid, $members[$uid]);
 		}

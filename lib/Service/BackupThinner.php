@@ -14,9 +14,9 @@ use OCA\TimeSister\Db\TenantMapper;
 use Psr\Log\LoggerInterface;
 
 /**
- * Dünnt alle drei Ablagen nach der Staffel aus (`Thinning`). Gelöscht wird
- * nur, was die App selbst angelegt und sich gemerkt hat; Dateien in Heimen
- * von Personen nur, solange ihre Datei-ID noch auf denselben Pfad zeigt.
+ * Thins all three stores by the schedule (`Thinning`). Only what the app
+ * created and tracked itself is deleted; files in people's homes only as
+ * long as their file ID still points to the same path.
  */
 final class BackupThinner {
 	public function __construct(
@@ -29,10 +29,10 @@ final class BackupThinner {
 	) {
 	}
 
-	/** @return int entfernte Sicherungen und eigene Kopien */
+	/** @return int removed backups and own copies */
 	public function thin(string $today): int {
 		$n = 0;
-		// Geschützte Ablage je Konto, mit ihren Kopien beim Admin.
+		// Protected store per account, with its copies with the admin.
 		foreach ($this->tenants->findAll() as $t) {
 			foreach (self::byUid($this->backups->listByTenant($t->getId())) as $rows) {
 				$keep = array_flip(Thinning::keep(array_map(static fn (Backup $b) => $b->getTakenOn(), $rows), $today));
@@ -44,7 +44,7 @@ final class BackupThinner {
 				}
 			}
 		}
-		// Eigene Ordner, je Konto.
+		// Own folders, per account.
 		foreach (self::byUid($this->files->allOwn()) as $rows) {
 			$keep = array_flip(Thinning::keep(array_map(static fn (BackupFile $f) => $f->getTakenOn(), $rows), $today));
 			foreach ($rows as $f) {
@@ -65,13 +65,13 @@ final class BackupThinner {
 		$this->backups->delete($b);
 	}
 
-	/** Die Datei nur, wenn sie noch dort liegt; die Zeile der Merkliste immer. */
+	/** The file only if it still lives there; the tracking list row always. */
 	private function dropFile(BackupFile $f): void {
 		try {
 			$this->visible->deleteTracked($f->getOwner(), $f->getFileId(), $f->getPath());
 		} catch (\Exception $e) {
-			// Konto weg oder Ablage gesperrt: die Datei bleibt, die Zeile geht.
-			$this->logger->warning('TimeSister: Sicherungsdatei nicht gelöscht', ['app' => 'timesister', 'exception' => $e]);
+			// Account gone or store locked: the file stays, the row goes.
+			$this->logger->warning('TimeSister: backup file not deleted', ['app' => 'timesister', 'exception' => $e]);
 		}
 		$this->files->delete($f);
 	}

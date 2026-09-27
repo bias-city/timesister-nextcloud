@@ -15,12 +15,11 @@ use OCP\User\Events\UserDeletedEvent;
 use Psr\Log\LoggerInterface;
 
 /**
- * Konto gelöscht: Die Personendatensätze bleiben – an ihnen hängen gebuchte
- * Stunden. Sie bekommen nur den Vermerk `account_deleted_at`; `data`,
- * Fassung und Revision bleiben unverändert. Die Freigabe der Sicherung
- * fällt weg; vorhandene Sicherungen bleiben bis zur Aufbewahrungsfrist.
- * App-Rolle und Austritt fallen weg: Ein neues Konto mit derselben Kennung
- * erbt nichts.
+ * Account deleted: the person records stay – booked hours are attached to
+ * them. They only get the `account_deleted_at` note; `data`, version and
+ * revision stay unchanged. Backup consent is dropped; existing backups stay
+ * until the retention period ends. App role and leaving date are dropped: a
+ * new account with the same identifier inherits nothing.
  *
  * @template-implements IEventListener<UserDeletedEvent>
  */
@@ -42,8 +41,8 @@ final class UserDeletedListener implements IEventListener {
 		$this->members->deleteByUid($uid);
 		$n = $this->records->markAccountDeleted($uid);
 		if ($n > 0) {
-			// Ohne Kennung im Protokoll: keine Personaldaten.
-			$this->logger->info('TimeSister: Konto gelöscht, {n} Personendatensätze vermerkt', ['app' => 'timesister', 'n' => $n]);
+			// No identifier in the log: no personal data.
+			$this->logger->info('TimeSister: account deleted, {n} person record(s) marked', ['app' => 'timesister', 'n' => $n]);
 		}
 	}
 }

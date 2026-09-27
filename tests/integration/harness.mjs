@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Prüfrahmen und gemeinsame Werte der Integrationsprüfung.
+// Test harness and shared values for the integration check.
 import { createHash } from 'node:crypto'
 import { as, ocs } from './lib.mjs'
 
@@ -17,10 +17,10 @@ export function check(name, ok, detail) {
 		console.log(`    \x1b[32mok\x1b[0m  ${name}`)
 	} else {
 		stats.failed.push(`${stats.section}: ${name}`)
-		console.log(`    \x1b[31mFEHLER\x1b[0m  ${name}${detail === undefined ? '' : ' – ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 400)}`)
+		console.log(`    \x1b[31mFAIL\x1b[0m  ${name}${detail === undefined ? '' : ' – ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 400)}`)
 	}
 }
-/** Status und Fehlercode einer Antwort prüfen. */
+/** Check a response's status and error code. */
 export function expect(name, r, status, error) {
 	const ok = r.status === status && (error === undefined || r.data?.error === error)
 	check(`${name} → ${status}${error ? ' ' + error : ''}`, ok, `HTTP ${r.status} ${r.text.slice(0, 300)}`)
@@ -47,8 +47,8 @@ export const R = `CH-${RUN}`
 export const NOAH = `noah.${RUN}@example.test`
 
 /**
- * Sorgt dafür, dass es den Datensatz gibt – überschreibt aber nie, was schon
- * da ist (die Testumgebung teilen sich mehrere Prüfer).
+ * Makes sure the record exists – but never overwrites what is already
+ * there (several checks share the test environment).
  */
 export async function ensure(who, kind, key, data) {
 	const cur = await ocs(who, 'GET', `/records/${kind}/${encodeURIComponent(key)}`)
@@ -60,9 +60,9 @@ export async function ensure(who, kind, key, data) {
 export const me = async (who) => (await ocs(who, 'GET', '/me')).data
 
 
-/** Ergebnis ausgeben; Rückgabe: Exit-Code. */
+/** Print the result; returns the exit code. */
 export function summary() {
-	console.log(`\n${stats.passed} bestanden, ${stats.failed.length} fehlgeschlagen`)
+	console.log(`\n${stats.passed} passed, ${stats.failed.length} failed`)
 	for (const f of stats.failed) {
 		console.log(`  - ${f}`)
 	}

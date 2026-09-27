@@ -13,8 +13,8 @@ use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 
 /**
- * Jede Abfrage filtert nach dem Team (`tenant_id`). Ausnahme ist nur
- * `findPersonsOf()` ohne Team für den Listener „Konto gelöscht“.
+ * Every query filters by the team (`tenant_id`). The only exception is
+ * `findPersonsOf()` without a team, for the "account deleted" listener.
  *
  * @template-extends QBMapper<Record>
  */
@@ -37,8 +37,8 @@ final class RecordMapper extends QBMapper {
 	}
 
 	/**
-	 * Datensätze mit `since < revision <= upTo`. Bei `since = 0` nur
-	 * lebende, sonst samt Grabsteinen. Aufsteigend nach Revision.
+	 * Records with `since < revision <= upTo`. With `since = 0` only live
+	 * ones, otherwise including tombstones. Ascending by revision.
 	 *
 	 * @return list<Record>
 	 */
@@ -57,8 +57,8 @@ final class RecordMapper extends QBMapper {
 	}
 
 	/**
-	 * Personendatensätze eines Kontos: Schlüssel = Kennung oder
-	 * `accounts` enthält sie. Ohne `$tenantId` über alle Teams.
+	 * Person records of an account: key = identifier, or `accounts`
+	 * contains it. Across all teams when `$tenantId` is omitted.
 	 *
 	 * @return list<Record>
 	 */
@@ -78,7 +78,7 @@ final class RecordMapper extends QBMapper {
 			$qb->andWhere($qb->expr()->eq('deleted', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)));
 		}
 		$qb->orderBy('rkey');
-		// LIKE ist nur ein Vorfilter; genau prüft die Liste.
+		// LIKE is only a pre-filter; the list checks exactly.
 		return array_values(array_filter(
 			$this->findEntities($qb),
 			static fn (Record $r) => $r->getRkey() === $uid || in_array($uid, $r->accountList(), true),

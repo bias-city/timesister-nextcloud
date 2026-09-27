@@ -10,7 +10,7 @@ use OCP\AppFramework\Db\Entity;
 use OCP\DB\Types;
 
 /**
- * Ein Team (Mandant).
+ * A team (tenant).
  *
  * @method string getName()
  * @method void setName(string $name)
@@ -35,9 +35,9 @@ final class Tenant extends Entity {
 	protected int $revision = 0;
 	protected int $createdAt = 0;
 	protected ?int $brokenAt = null;
-	/** Gewähltes Sicherungs-Konto; null: der erste admin nach Kennung. */
+	/** Chosen backup owner; null: the first admin by identifier. */
 	protected ?string $backupOwner = null;
-	/** Team-Einstellungen (Fassung 1.2), 0 oder 1. */
+	/** Team settings (API version 1.2), 0 or 1. */
 	protected int $leadsSeeCalendars = 1;
 	protected int $backupRequired = 0;
 

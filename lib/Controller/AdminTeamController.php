@@ -15,12 +15,13 @@ use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\IGroupManager;
+use OCP\IL10N;
 use OCP\IRequest;
 use OCP\IUserSession;
 
 /**
- * Verwaltung der Teams. **Ohne** `#[NoAdminRequired]`: Nextcloud selbst
- * lässt nur Admins herein. Die eigene Prüfung hier ist die zweite Tür.
+ * Managing teams. **Without** `#[NoAdminRequired]`: Nextcloud itself only
+ * lets admins in. The check here is the second door.
  */
 final class AdminTeamController extends BaseController {
 	private const FIELDS = ['name', 'slug', 'groups', 'backup_owner', 'settings'];
@@ -28,12 +29,13 @@ final class AdminTeamController extends BaseController {
 	public function __construct(
 		IRequest $request,
 		TenantService $tenants,
+		IL10N $l,
 		private TeamAdminService $admin,
 		private MemberService $members,
 		private IGroupManager $groupManager,
 		private IUserSession $userSession,
 	) {
-		parent::__construct($request, $tenants);
+		parent::__construct($request, $tenants, $l);
 	}
 
 	/** GET /admin/teams */
@@ -77,9 +79,9 @@ final class AdminTeamController extends BaseController {
 	}
 
 	/**
-	 * PUT /admin/teams/{id}/members/{uid} – Rolle und Austritt von der
-	 * Admin-Seite; derselbe Dienst wie PUT /team/members, mit den Rechten
-	 * eines Team-Admins.
+	 * PUT /admin/teams/{id}/members/{uid} – role and leaving date from the
+	 * admin page; the same service as PUT /team/members, with the rights of
+	 * a team admin.
 	 */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/admin/teams/{id}/members/{uid}', requirements: ['id' => '\d+'])]
 	#[UserRateLimit(limit: 300, period: 60)]
@@ -92,11 +94,11 @@ final class AdminTeamController extends BaseController {
 		});
 	}
 
-	/** @return string die Kennung des Nextcloud-Admins */
+	/** @return string the Nextcloud admin's identifier */
 	private function requireAdmin(): string {
 		$user = $this->userSession->getUser();
 		if ($user === null || !$this->groupManager->isAdmin($user->getUID())) {
-			throw ApiException::forbidden('Teams verwalten nur Nextcloud-Admins.');
+			throw ApiException::forbidden('Only Nextcloud admins manage teams.');
 		}
 		return $user->getUID();
 	}

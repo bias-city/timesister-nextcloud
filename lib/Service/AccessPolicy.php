@@ -7,31 +7,31 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Service;
 
 /**
- * Die Rechte-Matrix aus API.md. Rein: kennt nur Rolle, Kennung, Art,
- * Schlüssel und die Konten eines Personendatensatzes.
+ * The rights matrix from API.md. Pure: knows only role, identifier, kind,
+ * key and the accounts of a person record.
  *
  * |                              | user   | lead   | subadmin, admin  |
  * |------------------------------|--------|--------|------------------|
- * | setting, region, project     | lesen  | lesen  | lesen, schreiben |
- * | person, eigene               | lesen  | lesen  | lesen, schreiben |
- * | person, fremde               | –      | lesen  | lesen, schreiben |
- * | customer                     | –      | lesen  | lesen, schreiben |
- * | Verlauf                      | eigene Person    | alle   |
- * | Kalendersicherungen          | eigene           | alle   |
- * | Lebenszeichen melden         | eigenes | eigenes | eigenes |
- * | Lebenszeichen lesen, Team    | –      | –      | ja               |
+ * | setting, region, project     | read   | read   | read, write      |
+ * | person, own                  | read   | read   | read, write      |
+ * | person, others'              | –      | read   | read, write      |
+ * | customer                     | –      | read   | read, write      |
+ * | history                      | own person       | all    |
+ * | calendar backups             | own              | all    |
+ * | report status                | own     | own     | own     |
+ * | read status, team            | –      | –      | yes              |
  *
- * Projekte voll sehen nur subadmin, admin und die Leitungen dieses Projekts
- * (`data.leads`), auch im Verlauf; alle anderen den Buchungskatalog. Siehe
- * ProjectAccess.
+ * Only subadmin, admin and this project's leads (`data.leads`) see full
+ * projects, including in the history; everyone else sees the booking
+ * catalog. See ProjectAccess.
  */
 final class AccessPolicy {
-	/** Arten, die jedes Teammitglied lesen darf. */
+	/** Kinds every team member may read. */
 	public const READABLE_BY_ALL = ['setting', 'region', 'project'];
 
 	/**
-	 * Eigene Person: Schlüssel gleich der Kennung oder `data.accounts`
-	 * enthält sie.
+	 * Own person: key equals the identifier, or `data.accounts` contains
+	 * it.
 	 *
 	 * @param list<string> $accounts
 	 */
@@ -39,7 +39,7 @@ final class AccessPolicy {
 		return $key === $uid || in_array($uid, $accounts, true);
 	}
 
-	/** @param list<string> $accounts Konten des Datensatzes (nur bei `person`) */
+	/** @param list<string> $accounts the record's accounts (only for `person`) */
 	public function canRead(Membership $m, string $kind, string $key, array $accounts = []): bool {
 		if (Role::readsAll($m->role)) {
 			return true;
@@ -54,9 +54,9 @@ final class AccessPolicy {
 	}
 
 	/**
-	 * Der volle Projektdatensatz und sein Verlauf.
+	 * The full project record and its history.
 	 *
-	 * @param list<string> $ownKeys Personenschlüssel des Aufrufers
+	 * @param list<string> $ownKeys the caller's person keys
 	 */
 	public function canSeeFullProject(Membership $m, mixed $projectData, array $ownKeys): bool {
 		return $m->manages() || ProjectAccess::isLead($projectData, $ownKeys);
@@ -78,20 +78,20 @@ final class AccessPolicy {
 		return $uid === $m->uid || $m->manages();
 	}
 
-	/** Lebenszeichen aller lesen, Team lesen. */
+	/** Read everyone's status reports, read the team. */
 	public function canReadTeam(Membership $m): bool {
 		return $m->manages();
 	}
 
 	public function requireWrite(Membership $m): void {
 		if (!$this->canWrite($m)) {
-			throw ApiException::forbidden('Schreiben dürfen nur Verwaltung und Admin des Teams.');
+			throw ApiException::forbidden('Only the team’s managers and admins may write.');
 		}
 	}
 
 	public function requireTeamRead(Membership $m): void {
 		if (!$this->canReadTeam($m)) {
-			throw ApiException::forbidden('Das dürfen nur Verwaltung und Admin des Teams.');
+			throw ApiException::forbidden('Only the team’s managers and admins may do that.');
 		}
 	}
 }

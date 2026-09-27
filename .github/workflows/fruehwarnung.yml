@@ -1,10 +1,10 @@
-# Frühwarnung: prüft die App wöchentlich gegen die neueste Nextcloud-
-# Veröffentlichung und gegen master. Schlägt etwas fehl, eröffnet sie ein
-# Issue mit dem Label nc-update (ohne Doppel) und übergibt eine neue
-# Hauptversion an Claude (claude.yml), falls ANTHROPIC_API_KEY gesetzt ist.
+# Early warning: checks the app weekly against the latest Nextcloud release
+# and against master. On a failure, opens an issue with the label nc-update
+# (no duplicates) and hands a new major version to Claude (claude.yml), if
+# ANTHROPIC_API_KEY is set.
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-name: Frühwarnung Nextcloud
+name: Nextcloud early warning
 
 on:
   schedule:
@@ -23,7 +23,7 @@ env:
 
 jobs:
   ziel:
-    # Nur im Repo der App, nicht in Forks.
+    # Only in the app's repo, not in forks.
     if: github.repository == 'bias-city/timesister-nextcloud'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: appinfo/
 
-      - name: Neueste Nextcloud und PHP-Fassungen
+      - name: Latest Nextcloud and PHP versions
         id: z
         env:
           GH_TOKEN: ${{ github.token }}
@@ -55,7 +55,7 @@ jobs:
               {name: ("Nextcloud " + $ver), kind: "release", server: $tag, ocp: ("dev-stable" + $major), php: $pr, major: $major},
               {name: "Nextcloud master", kind: "master", server: "master", ocp: "dev-master", php: $pm, major: ""}]}')
           { echo "tag=$tag"; echo "major=$major"; echo "matrix=$matrix"; } >> "$GITHUB_OUTPUT"
-          echo "Ziel: $tag (Hauptversion $major) und master"
+          echo "Target: $tag (major version $major) and master"
 
   pruefen:
     needs: ziel
@@ -91,9 +91,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Jede Prüfung läuft weiter, auch wenn eine vorher scheitert; das
-      # Ergebnis sammelt der Schritt „Bericht“, der letzte Schritt entscheidet.
-      - name: Versionsgrenze in info.xml
+      # Every check keeps running, even if an earlier one fails; the
+      # "Report" step collects the outcome, and the last step decides.
+      - name: Version limit in info.xml
         id: grenze
         if: matrix.kind == 'release'
         continue-on-error: true
@@ -102,11 +102,11 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/logs"
           max=$(grep -o '<nextcloud [^>]*>' appinfo/info.xml | sed -n 's/.*max-version="\([0-9]*\)".*/\1/p')
           if [ "${{ matrix.major }}" -gt "$max" ]; then
-            echo "info.xml: max-version $max, aber Nextcloud ${{ matrix.major }} ist erschienen." | tee "$GITHUB_WORKSPACE/logs/grenze.log"
+            echo "info.xml: max-version $max, but Nextcloud ${{ matrix.major }} has been released." | tee "$GITHUB_WORKSPACE/logs/grenze.log"
             exit 1
           fi
 
-      - name: Composer und nextcloud/ocp:${{ matrix.ocp }}
+      - name: Composer and nextcloud/ocp:${{ matrix.ocp }}
         id: composer
         continue-on-error: true
         working-directory: apps/${{ env.APP_NAME }}
@@ -125,7 +125,7 @@ jobs:
           set -o pipefail
           composer run psalm -- --monochrome --no-progress --output-format=compact 2>&1 | tee "$GITHUB_WORKSPACE/logs/psalm.log"
 
-      - name: Nextcloud installieren und App einschalten
+      - name: Install Nextcloud and enable app
         id: install
         continue-on-error: true
         run: |
@@ -156,7 +156,7 @@ jobs:
           cd apps/${{ env.APP_NAME }}
           composer run test:integration 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee "$GITHUB_WORKSPACE/logs/integration.log"
 
-      - name: Bericht
+      - name: Report
         if: always()
         env:
           NAME: ${{ matrix.name }}
@@ -174,15 +174,15 @@ jobs:
             o=$(printenv "O_$s" || true)
             [ "$o" = failure ] || continue
             failed=1
-            echo "" >> "$out"; echo "**Fehlgeschlagen: $s**" >> "$out"; echo '```' >> "$out"
+            echo "" >> "$out"; echo "**Failed: $s**" >> "$out"; echo '```' >> "$out"
             [ -f "logs/$s.log" ] && grep -v '^\s*$' "logs/$s.log" | sed 's/\x1b\[[0-9;]*m//g' | tail -n 40 >> "$out"
             echo '```' >> "$out"
           done
           [ "$failed" = 1 ] && touch "bericht-$KIND/fehlgeschlagen"
-          [ "$failed" = 0 ] && echo "" >> "$out" && echo "Alle Prüfungen bestanden." >> "$out"
+          [ "$failed" = 0 ] && echo "" >> "$out" && echo "All checks passed." >> "$out"
           cat "$out" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Bericht sichern
+      - name: Save report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -190,7 +190,7 @@ jobs:
           path: bericht-${{ matrix.kind }}/
           retention-days: 14
 
-      - name: Ergebnis
+      - name: Result
         if: always()
         run: test ! -f "bericht-${{ matrix.kind }}/fehlgeschlagen"
 
@@ -217,7 +217,7 @@ jobs:
         with:
           pattern: bericht-*
 
-      - name: Issue eröffnen oder ergänzen
+      - name: Open or update issue
         id: m
         env:
           GH_TOKEN: ${{ github.token }}
@@ -228,29 +228,29 @@ jobs:
           set -euo pipefail
           ver=${TAG#v}; major=${ver%%.*}
           if [ -f bericht-release/fehlgeschlagen ]; then
-            release=true; title="Nextcloud $major: App anpassen (Prüfung gegen $ver fehlgeschlagen)"
+            release=true; title="Nextcloud $major: adjust app (check against $ver failed)"
           else
-            release=false; title="Nextcloud master: App-Prüfung fehlgeschlagen"
+            release=false; title="Nextcloud master: app check failed"
           fi
           {
-            echo "Die Frühwarnung ist fehlgeschlagen: $RUN_URL"
+            echo "The early warning failed: $RUN_URL"
             echo ""
-            echo "Neueste Veröffentlichung: **$ver**. Geprüft wurde dagegen und gegen master."
+            echo "Latest release: **$ver**. Checked against that and against master."
             echo ""
             for k in release master; do [ -f "bericht-$k/bericht.md" ] && cat "bericht-$k/bericht.md" && echo ""; done
-            echo "## Checkliste (UPDATE.md)"
+            echo "## Checklist (UPDATE.md)"
             echo ""
             sed -n '/<!-- checkliste -->/,/<!-- \/checkliste -->/p' UPDATE.md | grep -v '<!--'
             echo ""
-            echo "## Auftrag für Claude"
+            echo "## Task for Claude"
             echo ""
-            echo "> Lies UPDATE.md und bring die App auf Nextcloud $major."
+            echo "> Read UPDATE.md and bring the app to Nextcloud $major."
           } > body.md
-          gh label create nc-update --color D93F0B --description "Neue Nextcloud-Version: App anpassen" 2>/dev/null || true
+          gh label create nc-update --color D93F0B --description "New Nextcloud version: adjust app" 2>/dev/null || true
           existing=$(gh issue list --label nc-update --state open --limit 50 --json number,title \
             --jq ".[] | select(.title == \"$title\") | .number" | head -n1)
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "Wieder fehlgeschlagen: $RUN_URL"
+            gh issue comment "$existing" --body "Failed again: $RUN_URL"
             issue=$existing; neu=false
           else
             url=$(gh issue create --title "$title" --label nc-update --body-file body.md)
@@ -259,9 +259,9 @@ jobs:
           { echo "issue=$issue"; echo "neu=$neu"; echo "release=$release"; } >> "$GITHUB_OUTPUT"
 
   claude:
-    # Issues, die ein Workflow mit GITHUB_TOKEN anlegt, lösen keine weiteren
-    # Workflows aus – darum ruft die Frühwarnung Claude selbst auf. Nur bei
-    # einer neuen Veröffentlichung, nicht bei master; claude.yml prüft das Secret.
+    # Issues that a workflow opens with GITHUB_TOKEN don't trigger further
+    # workflows – so the early warning calls Claude itself. Only on a new
+    # release, not on master; claude.yml checks the secret.
     needs: [ziel, melden]
     if: always() && needs.melden.outputs.neu == 'true' && needs.melden.outputs.release == 'true'
     permissions:

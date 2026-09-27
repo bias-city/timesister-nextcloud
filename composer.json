@@ -1,6 +1,6 @@
 {
 	"name": "timesister/nc-app",
-	"description": "TimeSister – Nextcloud-App für Stammdaten, Teams und Rechte",
+	"description": "TimeSister – Nextcloud app for master data, teams and permissions",
 	"type": "project",
 	"license": "AGPL-3.0-or-later",
 	"autoload": {

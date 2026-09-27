@@ -10,11 +10,11 @@ use OCP\AppFramework\Db\Entity;
 use OCP\DB\Types;
 
 /**
- * Ein Datensatz (Person, Standort, Projekt, Kunde, Einstellung).
+ * A record (person, location, project, client, setting).
  *
- * `data` ist das JSON-Objekt als Text, bei Grabsteinen null. `accounts`
- * hält die Konten einer Person als JSON-Liste und bleibt auch im Grabstein,
- * damit die Person erfährt, dass ihr Datensatz gelöscht ist.
+ * `data` is the JSON object as text, null for tombstones. `accounts` holds
+ * a person's accounts as a JSON list and stays even in the tombstone, so
+ * the person learns that their record was deleted.
  *
  * @method int getTenantId()
  * @method void setTenantId(int $tenantId)

@@ -16,10 +16,10 @@ use OCP\Group\Events\GroupDeletedEvent;
 use Psr\Log\LoggerInterface;
 
 /**
- * Gruppe gelöscht: Ist sie die Teamgruppe eines Teams, ist dessen Zuordnung
- * gebrochen. Die Admin-Seite zeigt es rot, bis ein Admin eine neue Gruppe
- * zuordnet. Alte Zuordnungen aus Fassung 1 (Rollen- und Konten-Gruppen)
- * fallen still weg.
+ * Group deleted: if it is a team's team group, that team's mapping is now
+ * broken. The admin page shows it in red until an admin assigns a new
+ * group. Old mappings from API version 1 (role and account groups) are
+ * silently dropped.
  *
  * @template-implements IEventListener<GroupDeletedEvent>
  */
@@ -47,7 +47,7 @@ final class GroupDeletedListener implements IEventListener {
 		$ids = array_values(array_unique($ids));
 		if ($ids !== []) {
 			$this->tenants->markBroken($ids, $this->time->getTime());
-			$this->logger->warning('TimeSister: Teamgruppe gelöscht, Zuordnung von {n} Team(s) gebrochen', ['app' => 'timesister', 'n' => count($ids)]);
+			$this->logger->warning('TimeSister: team group deleted, mapping of {n} team(s) broken', ['app' => 'timesister', 'n' => count($ids)]);
 		}
 	}
 }

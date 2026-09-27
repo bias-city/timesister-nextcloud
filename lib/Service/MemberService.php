@@ -12,8 +12,8 @@ use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\DB\Exception as DbException;
 
 /**
- * App-Rolle und Austritt setzen (Fassung 2). Ein Dienst für
- * PUT /team/members/{uid} und die Admin-Seite.
+ * Setting app role and leaving date (API version 2). One service for
+ * PUT /team/members/{uid} and the admin page.
  */
 final class MemberService {
 	public function __construct(
@@ -24,16 +24,16 @@ final class MemberService {
 	}
 
 	/**
-	 * @param string $actorRole Rolle des Aufrufers im Team; `admin` für Nextcloud-Admins auf der Admin-Seite
-	 * @param array<string,mixed> $in `role` und/oder `left`
-	 * @return array{uid:string,display_name:string,role:string,left_at:?string} der Eintrag wie in GET /team
+	 * @param string $actorRole the caller's role in the team; `admin` for Nextcloud admins on the admin page
+	 * @param array<string,mixed> $in `role` and/or `left`
+	 * @return array{uid:string,display_name:string,role:string,left_at:?string} the entry as in GET /team
 	 */
 	public function update(int $tenantId, string $actorUid, string $actorRole, string $uid, array $in): array {
 		MemberRules::requireManager($actorRole);
 		$change = MemberRules::validate($in);
 		$current = $this->tenants->members($tenantId)[$uid] ?? null;
 		if ($current === null) {
-			throw ApiException::notFound('Dieses Konto steht nicht in der Teamgruppe.');
+			throw ApiException::notFound('This account is not in the team group.');
 		}
 		MemberRules::authorize($actorUid, $actorRole, $uid, $current['role'], $change);
 		$now = $this->time->getTime();
@@ -45,11 +45,11 @@ final class MemberService {
 				$m->setUid($uid);
 			}
 			if (array_key_exists('role', $change)) {
-				// user wird nicht gespeichert: null heisst keine App-Rolle.
+				// user is not stored: null means no app role.
 				$m->setRole($change['role'] === Role::USER ? null : $change['role']);
 			}
 			if (array_key_exists('left', $change)) {
-				// Schon ausgetreten: das erste Datum bleibt.
+				// Already left: the first date stays.
 				$m->setLeftAt($change['left'] ? ($m->getLeftAt() ?? $now) : null);
 			}
 			$m->setUpdatedBy($actorUid);
@@ -58,7 +58,7 @@ final class MemberService {
 				$found === null ? $this->members->insert($m) : $this->members->update($m);
 				break;
 			} catch (DbException $e) {
-				// Zwei Änderungen gleichzeitig: die zweite aktualisiert.
+				// Two changes at the same time: the second updates.
 				if ($e->getReason() !== DbException::REASON_UNIQUE_CONSTRAINT_VIOLATION || $attempt >= 2) {
 					throw $e;
 				}

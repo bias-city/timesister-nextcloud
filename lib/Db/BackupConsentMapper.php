@@ -29,7 +29,7 @@ final class BackupConsentMapper extends QBMapper {
 		}
 	}
 
-	/** @return array<string,BackupConsent> uid → Freigabe */
+	/** @return array<string,BackupConsent> uid → consent */
 	public function findByTenant(int $tenantId): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
@@ -41,7 +41,7 @@ final class BackupConsentMapper extends QBMapper {
 		return $out;
 	}
 
-	/** Konto gelöscht: Ein neues Konto mit derselben Kennung muss neu freigeben. */
+	/** Account deleted: a new account with the same identifier must give consent again. */
 	public function deleteByUid(string $uid): void {
 		$qb = $this->db->getQueryBuilder();
 		$qb->delete($this->getTableName())

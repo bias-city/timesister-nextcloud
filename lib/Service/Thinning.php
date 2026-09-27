@@ -7,23 +7,24 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Service;
 
 /**
- * Staffel der Sicherungen, für alle drei Ablagen gleich: alle der letzten
- * 4 Wochen, dann die jüngste je Kalendermonat bis 12 Monate, dann die
- * jüngste je Kalenderjahr bis 10 Jahre; Älteres fällt weg. Rein, ohne Uhr.
+ * Backup retention schedule, the same for all three stores: all of the
+ * last 4 weeks, then the newest per calendar month up to 12 months, then
+ * the newest per calendar year up to 10 years; older ones drop off. Pure,
+ * without a clock.
  */
 final class Thinning {
 	public const WEEKS = 4;
 	public const MONTHS = 12;
 	/**
-	 * Jahresstufe. Nie unter die gesetzliche Mindestfrist für
-	 * Arbeitszeitnachweise, derzeit CH ArGV 1 Art. 73 mit 5 Jahren.
+	 * Year tier. Never below the statutory minimum retention period for
+	 * working time records, currently CH ArGV 1 Art. 73 with 5 years.
 	 */
 	public const JAHRE = 10;
 
 	/**
-	 * Die Tage, die bleiben (neueste zuerst). Grenzen: `heute − 28 Tage`,
-	 * `heute − 12 Monate`, `heute − 10 Jahre`, jeweils einschliesslich.
-	 * Tage in der Zukunft bleiben.
+	 * The days that stay (newest first). Cutoffs: `today − 28 days`,
+	 * `today − 12 months`, `today − 10 years`, each inclusive. Days in
+	 * the future stay.
 	 *
 	 * @param list<string> $days YYYY-MM-DD
 	 * @return list<string>
@@ -31,7 +32,7 @@ final class Thinning {
 	public static function keep(array $days, string $today): array {
 		$t = \DateTimeImmutable::createFromFormat('!Y-m-d', BackupRules::checkDay($today), new \DateTimeZone('UTC'));
 		if ($t === false) {
-			throw new \InvalidArgumentException('Ungültiger Tag');
+			throw new \InvalidArgumentException('Invalid day');
 		}
 		$weeks = $t->modify('-' . (self::WEEKS * 7) . ' days')->format('Y-m-d');
 		$months = $t->modify('-' . self::MONTHS . ' months')->format('Y-m-d');
@@ -49,7 +50,7 @@ final class Thinning {
 			if ($d < $years) {
 				continue;
 			}
-			// Jüngste je Kalendermonat bzw. -jahr: die erste in absteigender Folge.
+			// Newest per calendar month or year: the first in descending order.
 			$group = $d >= $months ? 'm' . substr($d, 0, 7) : 'y' . substr($d, 0, 4);
 			if (!isset($seen[$group])) {
 				$seen[$group] = true;

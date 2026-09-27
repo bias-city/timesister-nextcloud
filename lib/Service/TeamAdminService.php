@@ -23,7 +23,7 @@ use OCP\IGroup;
 use OCP\IGroupManager;
 use OCP\IUserManager;
 
-/** Teams anlegen, ändern, löschen und ihren Zustand zeigen. Nur für Nextcloud-Admins. */
+/** Create, change, delete teams and show their status. Only for Nextcloud admins. */
 final class TeamAdminService {
 	public const SILENT_DAYS = 14;
 
@@ -51,10 +51,10 @@ final class TeamAdminService {
 	}
 
 	public function find(int $id): Tenant {
-		return $this->tenants->find($id) ?? throw ApiException::notFound('Dieses Team gibt es nicht.');
+		return $this->tenants->find($id) ?? throw ApiException::notFound('This team does not exist.');
 	}
 
-	/** @return array<string,mixed> wie GET /team, ohne members, mit counts je Rolle und `left` */
+	/** @return array<string,mixed> as GET /team, without members, with counts per role and `left` */
 	public function present(Tenant $t): array {
 		$team = $this->tenantService->presentTeam($t);
 		$counts = ['user' => 0, 'lead' => 0, 'subadmin' => 0, 'admin' => 0, 'left' => 0];
@@ -76,7 +76,7 @@ final class TeamAdminService {
 		$this->checkOwner($owner, $v['groups']['team']);
 		$settings = TeamRules::settings($in) + TeamRules::SETTINGS;
 		if ($this->tenants->findBySlug($v['slug']) !== null) {
-			throw ApiException::conflict('Diesen Kurznamen hat schon ein anderes Team.');
+			throw ApiException::conflict('Another team already has this short name.');
 		}
 		$this->db->beginTransaction();
 		try {
@@ -113,23 +113,23 @@ final class TeamAdminService {
 		$settings = TeamRules::settings($in);
 		$other = $this->tenants->findBySlug($v['slug']);
 		if ($other !== null && $other->getId() !== $id) {
-			throw ApiException::conflict('Diesen Kurznamen hat schon ein anderes Team.');
+			throw ApiException::conflict('Another team already has this short name.');
 		}
 		$this->db->beginTransaction();
 		try {
 			$t->setName($v['name']);
 			$t->setSlug($v['slug']);
-			// Die Teamgruppe gibt es (geprüft): die Zuordnung ist wieder ganz.
+			// The team group exists (checked): the mapping is whole again.
 			$t->setBrokenAt(null);
-			// Ohne backup_owner im Rumpf bleibt die Wahl.
+			// Without backup_owner in the body, the choice stays.
 			if ($ownerGiven) {
 				$t->setBackupOwner($owner);
 			}
-			// Nur die geschickten Einstellungen ändern sich.
+			// Only the settings that were sent change.
 			self::applySettings($t, $settings);
 			$this->tenants->update($t);
-			// Nimmt auch alte Zuordnungen aus Fassung 1 (Rollen- und
-			// Konten-Gruppen) weg; die Nextcloud-Gruppen selbst bleiben.
+			// Also removes old mappings from API version 1 (role and
+			// account groups); the Nextcloud groups themselves stay.
 			$this->roleGroups->deleteByTenant($id);
 			$this->insertGroups($id, $v['groups']);
 			$this->db->commit();
@@ -141,11 +141,11 @@ final class TeamAdminService {
 		return $this->present($t);
 	}
 
-	/** Nur ohne Datensätze (auch Grabsteine) und ohne Sicherungen. */
+	/** Only without records (including tombstones) and without backups. */
 	public function delete(int $id): void {
 		$t = $this->find($id);
 		if ($this->records->stats($id)['all'] > 0 || $this->backups->countByTenant($id) > 0) {
-			throw ApiException::conflict('Das Team hat noch Datensätze oder Sicherungen und lässt sich nicht löschen.');
+			throw ApiException::conflict('The team still has records or backups and cannot be deleted.');
 		}
 		$this->db->beginTransaction();
 		try {
@@ -163,7 +163,7 @@ final class TeamAdminService {
 	}
 
 	/**
-	 * Zustand je Team für die Admin-Seite.
+	 * Status per team for the admin page.
 	 *
 	 * @return list<array<string,mixed>>
 	 */
@@ -184,12 +184,13 @@ final class TeamAdminService {
 			$members = $this->tenantService->memberRoles($t->getId());
 			foreach (array_map('strval', array_keys($members)) as $uid) {
 				$role = $members[$uid];
-				// Kalender nicht freigegeben: so gemeldet (POST /status); nie gemeldet zählt nicht.
+				// Calendar not shared: reported this way (POST /status); never reported does not count.
 				if (($seen[$uid] ?? null)?->getCalendarShared() === 0) {
 					$notShared++;
 				}
-				// Ohne Sicherung diese Woche zählt nur, wer freigegeben hat. Geprüft
-				// und unverändert gilt als gesichert (es bleibt bei der vorhandenen).
+				// Without a backup this week only counts for those who gave
+				// consent. Checked and unchanged counts as backed up (the
+				// existing one stays).
 				if (ConsentService::granted($consents[$uid] ?? null)) {
 					$consenting++;
 					if (!$this->marks->checked($uid, WeekMarks::ADMIN, $today)) {
@@ -226,7 +227,7 @@ final class TeamAdminService {
 				'admins' => array_map(fn (string $uid) => [
 					'uid' => $uid, 'display_name' => $this->tenantService->displayName($uid),
 				], $this->tenantService->adminsOf($t->getId())),
-				// Für die Liste und „Team bearbeiten“: alle, auch Ausgetretene.
+				// For the list and "edit team": all, including those who left.
 				'members' => $this->tenantService->presentMembers($t->getId()),
 			];
 		}
@@ -243,7 +244,7 @@ final class TeamAdminService {
 		}
 	}
 
-	/** Das Sicherungs-Konto muss Admin sein, also Gruppenadmin der Teamgruppe (422). */
+	/** The backup owner must be an admin, i.e. a group admin of the team group (422). */
 	private function checkOwner(?string $uid, string $teamGid): void {
 		if ($uid === null) {
 			return;
@@ -251,11 +252,11 @@ final class TeamAdminService {
 		$user = $this->userManager->get($uid);
 		$group = $this->groupManager->get($teamGid);
 		if ($user === null || $group === null || !$this->subAdmin->isSubAdminOfGroup($user, $group)) {
-			throw ApiException::invalid('Das Sicherungs-Konto muss Admin des Teams sein.');
+			throw ApiException::invalid('The backup owner must be an admin of the team.');
 		}
 	}
 
-	/** @return list<array{id:string,name:string,team:?int}> alle Gruppen */
+	/** @return list<array{id:string,name:string,team:?int}> all groups */
 	public function allGroups(): array {
 		$used = [];
 		foreach ($this->roleGroups->allRows() as $rg) {
@@ -271,19 +272,19 @@ final class TeamAdminService {
 	}
 
 	/**
-	 * Jede Gruppe muss es geben (422) und darf keinem anderen Team zugeordnet
-	 * sein, auch nicht über eine alte Zeile aus Fassung 1 (409).
+	 * Every group must exist (422) and must not be mapped to another team,
+	 * not even through an old row from API version 1 (409).
 	 *
 	 * @param array<string,string> $groups
 	 */
 	private function checkGroups(array $groups, ?int $ownId): void {
 		foreach ($groups as $gid) {
 			if (!$this->groupManager->groupExists($gid)) {
-				throw ApiException::invalid("Die Gruppe „{$gid}“ gibt es nicht.");
+				throw ApiException::invalid(Message::of('The group “{group}” does not exist.', ['group' => $gid]));
 			}
 			foreach ($this->roleGroups->findByGid($gid) as $rg) {
 				if ($rg->getTenantId() !== $ownId) {
-					throw ApiException::conflict("Die Gruppe „{$gid}“ gehört schon zu einem anderen Team.");
+					throw ApiException::conflict(Message::of('The group “{group}” already belongs to another team.', ['group' => $gid]));
 				}
 			}
 		}
@@ -302,7 +303,7 @@ final class TeamAdminService {
 
 	private function uniqueToConflict(\Throwable $e): \Throwable {
 		if ($e instanceof DbException && $e->getReason() === DbException::REASON_UNIQUE_CONSTRAINT_VIOLATION) {
-			return ApiException::conflict('Kurzname oder Gruppe gehört schon zu einem anderen Team.');
+			return ApiException::conflict('The short name or group already belongs to another team.');
 		}
 		return $e;
 	}

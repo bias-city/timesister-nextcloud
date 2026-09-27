@@ -11,7 +11,7 @@ use OCP\IL10N;
 use OCP\IURLGenerator;
 use OCP\Settings\IIconSection;
 
-/** Eigener Abschnitt „TimeSister“ in den Admin-Einstellungen. */
+/** Own "TimeSister" section in the admin settings. */
 final class AdminSection implements IIconSection {
 	public function __construct(
 		private IURLGenerator $url,

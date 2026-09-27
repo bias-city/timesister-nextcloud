@@ -1,8 +1,9 @@
-# Nach Nextclouds Vorlage appstore-build-publish (github.com/nextcloud/.github, workflow-templates).
-# Bei einem veröffentlichten GitHub-Release: Paket ohne .nextcloudignore bauen,
-# mit dem App-Zertifikat signieren, ans Release hängen und in den App Store laden.
-# Aus, solange eines der Secrets APP_PRIVATE_KEY, APP_PUBLIC_CRT, APPSTORE_TOKEN fehlt.
-# Kein Composer, kein npm: Die App hat keine Laufzeit-Abhängigkeiten und keinen Build.
+# After Nextcloud's template appstore-build-publish (github.com/nextcloud/.github, workflow-templates).
+# On a published GitHub release: build the package without .nextcloudignore,
+# sign it with the app certificate, attach it to the release and upload it to
+# the App Store. Off as long as one of the secrets APP_PRIVATE_KEY,
+# APP_PUBLIC_CRT, APPSTORE_TOKEN is missing.
+# No Composer, no npm: the app has no runtime dependencies and no build step.
 # SPDX-FileCopyrightText: 2021-2024 Nextcloud GmbH and Nextcloud contributors
 # SPDX-License-Identifier: MIT
 
@@ -34,7 +35,7 @@ jobs:
           TOKEN: ${{ secrets.APPSTORE_TOKEN }}
         run: |
           if [ -n "$KEY" ] && [ -n "$CRT" ] && [ -n "$TOKEN" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else echo "enabled=false" >> "$GITHUB_OUTPUT"; echo "::notice::App Store ist aus: Secrets APP_PRIVATE_KEY, APP_PUBLIC_CRT und APPSTORE_TOKEN fehlen (UPDATE.md)."; fi
+          else echo "enabled=false" >> "$GITHUB_OUTPUT"; echo "::notice::App Store is off: secrets APP_PRIVATE_KEY, APP_PUBLIC_CRT and APPSTORE_TOKEN are missing (UPDATE.md)."; fi
 
   build_and_publish:
     needs: gate
@@ -65,7 +66,7 @@ jobs:
         run: |
           VERSION=$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' "$APP_NAME/appinfo/info.xml")
           NC_MIN=$(sed -n 's:.*<nextcloud min-version="\([0-9]*\)".*:\1:p' "$APP_NAME/appinfo/info.xml")
-          [ "$APP_VERSION" = "v$VERSION" ] || { echo "::error::Tag $APP_VERSION passt nicht zu info.xml ($VERSION)."; exit 1; }
+          [ "$APP_VERSION" = "v$VERSION" ] || { echo "::error::Tag $APP_VERSION does not match info.xml ($VERSION)."; exit 1; }
           echo "NC_MIN=$NC_MIN" >> "$GITHUB_ENV"
 
       - name: Get php version
@@ -83,7 +84,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package ${{ env.APP_NAME }} ${{ env.APP_VERSION }}
-        # .nextcloudignore wie bei rsync: führender / = Wurzel der App.
+        # .nextcloudignore as with rsync: a leading / = the app's root.
         run: |
           mkdir -p "build/artifacts/$APP_NAME"
           rsync -a --exclude-from="$APP_NAME/.nextcloudignore" "$APP_NAME/" "build/artifacts/$APP_NAME/"
