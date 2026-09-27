@@ -96,6 +96,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install notifications dependencies
+        working-directory: apps/notifications
+        run: composer install --no-dev --no-interaction --prefer-dist
+
       - name: Remove nextcloud/ocp
         working-directory: apps/${{ env.APP_NAME }}
         run: composer remove nextcloud/ocp --dev --no-scripts
