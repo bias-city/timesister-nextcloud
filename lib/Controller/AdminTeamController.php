@@ -89,7 +89,7 @@ final class AdminTeamController extends BaseController {
 		return $this->run(function () use ($id, $uid) {
 			$actor = $this->requireAdmin();
 			$this->admin->find($id);
-			$in = array_intersect_key($this->request->getParams(), array_flip(['role', 'left']));
+			$in = array_intersect_key($this->request->getParams(), array_flip(['role', 'left', 'may_override']));
 			return $this->members->update($id, $actor, Role::ADMIN, $uid, $in);
 		});
 	}

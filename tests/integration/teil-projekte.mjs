@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Version 2: full projects only for manager, admin and the project's leads,
+// Version 2: full projects only for Team Admins and the project's leads,
 // otherwise the booking catalog; a lead is admin in the project.
 // Own keys per run, deleted at the end.
 import { ADMIN, as, ocs } from './lib.mjs'
@@ -46,7 +46,7 @@ export async function projekte() {
 		check('second lead without an assignment: catalog only', isCatalog((await ocs(as(pl), 'GET', path(PL))).data?.data))
 		check('pblead in the delta: own full, other catalog', (await inDelta(L, rev0, PL))?.data?.budgets?.length === 1 && isCatalog((await inDelta(L, rev0, PF))?.data))
 
-		head('Projects: history only for admin, manager and lead')
+		head('Projects: history only for Team Admins and the lead')
 		expect('pbuser1, history of a project', await ocs(U1, 'GET', `${path(PL)}/history`), 403, 'forbidden')
 		expect('second lead, history of another project', await ocs(as(pl), 'GET', `${path(PL)}/history`), 403, 'forbidden')
 		expect('pblead, history of another project', await ocs(L, 'GET', `${path(PF)}/history`), 403, 'forbidden')

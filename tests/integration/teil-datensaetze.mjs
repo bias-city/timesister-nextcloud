@@ -46,8 +46,8 @@ export async function datensaetze() {
 		const got = await ocs(A, 'GET', `/records/project/${encodeURIComponent(odd)}`)
 		check('… and read again', got.status === 200 && got.data?.key === odd, got.text)
 
-		expect('customer as manager', await ocs(V, 'PUT', `/records/customer/${C}`, { version: 0, data: { id: C, name: 'Customer', contacts: [] } }), 200)
-		expect('region as manager', await ocs(V, 'PUT', `/records/region/${R}`, { version: 0, data: { id: R, holidays: [] } }), 200)
+		expect('customer as second Team Admin', await ocs(V, 'PUT', `/records/customer/${C}`, { version: 0, data: { id: C, name: 'Customer', contacts: [] } }), 200)
+		expect('region as second Team Admin', await ocs(V, 'PUT', `/records/region/${R}`, { version: 0, data: { id: R, holidays: [] } }), 200)
 		expect('target hours', await ensure(V, 'setting', 'targethours', { entries: [{ from: '2026-01-01', weekly_hours: 42 }] }), 200)
 		expect('settings', await ensure(V, 'setting', 'settings', { vacation_code: 'F' }), 200)
 		expect('person pbuser1 (key = uid)', await ensure(A, 'person', 'pbuser1', { login: 'pbuser1', first_name: 'Mia' }), 200)
@@ -112,7 +112,7 @@ export async function datensaetze() {
 		expect('GET /team', await ocs(L, 'GET', '/team'), 403, 'forbidden')
 		expect('report heartbeat', await ocs(L, 'POST', '/status', { app_version: '0.2.0' }), 200)
 	}
-	head('Permissions: subadmin (pbverw) and admin (pbadmin)')
+	head('Permissions: both Team Admins (pbverw, pbadmin)')
 	{
 		for (const [who, name] of [[V, 'pbverw'], [A, 'pbadmin']]) {
 			const k = keysOf(await ocs(who, 'GET', '/records'))
@@ -123,7 +123,7 @@ export async function datensaetze() {
 			const t = await ocs(who, 'GET', '/team')
 			const roles = Object.fromEntries((t.data?.members || []).map((x) => [x.uid, x.role]))
 			check(`${name}: GET /team with members and role`, t.status === 200 && t.data?.slug === 'pb'
-				&& JSON.stringify(roles) === JSON.stringify({ pbadmin: 'admin', pblead: 'lead', pbuser1: 'user', pbuser2: 'user', pbverw: 'subadmin' }), t.text)
+				&& JSON.stringify(roles) === JSON.stringify({ pbadmin: 'admin', pblead: 'lead', pbuser1: 'user', pbuser2: 'user', pbverw: 'admin' }), t.text)
 		}
 	}
 

@@ -14,7 +14,7 @@ export async function teams() {
 	head('GET /me – team from the team group, role from group admin and app role')
 	{
 		const expected = [
-			['pbadmin', 'pb', 'admin'], ['pbverw', 'pb', 'subadmin'], ['pblead', 'pb', 'lead'],
+			['pbadmin', 'pb', 'admin'], ['pbverw', 'pb', 'admin'], ['pblead', 'pb', 'lead'],
 			['pbuser1', 'pb', 'user'], ['pbuser2', 'pb', 'user'],
 			['atadmin', 'at', 'admin'], ['atlead', 'at', 'lead'], ['atuser1', 'at', 'user'],
 		]
@@ -27,8 +27,10 @@ export async function teams() {
 				&& Number.isInteger(d.revision) && typeof d.display_name === 'string', r.text)
 		}
 		const lead = (await ocs(L, 'GET', '/me')).data
-		check('pblead: admins, leads and calendar_share (default on)', JSON.stringify(lead?.admins) === '["pbadmin"]'
+		check('pblead: admins, leads and calendar_share (default on)', JSON.stringify(lead?.admins) === '["pbadmin","pbverw"]'
 			&& JSON.stringify(lead?.leads) === '["pblead"]' && lead?.calendar_share === true, lead)
+		check('pblead: share_targets from the matrix (default: the Team Admins edit), may_override off',
+			JSON.stringify(lead?.share_targets) === '[{"uid":"pbadmin","access":"write"},{"uid":"pbverw","access":"write"}]' && lead?.may_override === false, lead)
 		const at = (await ocs(AU, 'GET', '/me')).data
 		check('atuser1: admins and leads only from at', JSON.stringify(at?.admins) === '["atadmin"]' && JSON.stringify(at?.leads) === '["atlead"]', at)
 		expect('Nextcloud admin without a team group', await ocs(ADMIN, 'GET', '/me'), 403, 'no_team')
@@ -43,8 +45,8 @@ export async function teams() {
 		const at = r.data?.find?.((t) => t.slug === 'at')
 		check('GET /admin/teams: two teams', r.status === 200 && pb && at, r.text)
 		check('count per role, plus departed',
-			JSON.stringify(pb?.counts) === JSON.stringify({ user: 2, lead: 1, subadmin: 1, admin: 1, left: 0 })
-			&& JSON.stringify(at?.counts) === JSON.stringify({ user: 1, lead: 1, subadmin: 0, admin: 1, left: 0 }), { pb: pb?.counts, at: at?.counts })
+			JSON.stringify(pb?.counts) === JSON.stringify({ user: 2, lead: 1, admin: 2, left: 0 })
+			&& JSON.stringify(at?.counts) === JSON.stringify({ user: 1, lead: 1, admin: 1, left: 0 }), { pb: pb?.counts, at: at?.counts })
 		check('groups only with team', JSON.stringify(pb?.groups) === '{"team":"pb-team"}' && JSON.stringify(at?.groups) === '{"team":"at-team"}', { pb: pb?.groups, at: at?.groups })
 		check('list without members', pb && !('members' in pb))
 		expect('GET /admin/teams as pbadmin', await ocs(A, 'GET', '/admin/teams'), 403)

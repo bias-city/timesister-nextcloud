@@ -25,7 +25,7 @@ final class ConsentService {
 
 	/** 403 without consent; the sentence is part of the API contract. */
 	public static function refused(): ApiException {
-		return ApiException::forbidden('The person has not agreed to backups with the admin.');
+		return ApiException::forbidden('The person has not agreed to backups with the Team Admin.');
 	}
 
 	/** @return array{consent:bool,since:?string,revoked_at:?string,notice:?string} */

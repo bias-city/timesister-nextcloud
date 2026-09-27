@@ -15,9 +15,9 @@ use OCP\AppFramework\Http\DataResponse;
 use OCP\IL10N;
 use OCP\IRequest;
 
-/** Status reports: every member reports for themselves, manager and admin read them. */
+/** Status reports: every member reports for themselves, Team Admins read them. */
 final class StatusController extends BaseController {
-	private const FIELDS = ['app_version', 'last_sync', 'last_backup', 'calendar_url', 'calendar_shared'];
+	private const FIELDS = ['app_version', 'last_sync', 'last_backup', 'calendar_url', 'calendar_shared', 'applied_shares'];
 
 	public function __construct(
 		IRequest $request,

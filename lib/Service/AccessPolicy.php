@@ -10,7 +10,7 @@ namespace OCA\TimeSister\Service;
  * The rights matrix from API.md. Pure: knows only role, identifier, kind,
  * key and the accounts of a person record.
  *
- * |                              | user   | lead   | subadmin, admin  |
+ * |                              | user   | lead   | admin            |
  * |------------------------------|--------|--------|------------------|
  * | setting, region, project     | read   | read   | read, write      |
  * | person, own                  | read   | read   | read, write      |
@@ -21,7 +21,7 @@ namespace OCA\TimeSister\Service;
  * | report status                | own     | own     | own     |
  * | read status, team            | –      | –      | yes              |
  *
- * Only subadmin, admin and this project's leads (`data.leads`) see full
+ * Only Team Admins and this project's leads (`data.leads`) see full
  * projects, including in the history; everyone else sees the booking
  * catalog. See ProjectAccess.
  */
@@ -85,13 +85,13 @@ final class AccessPolicy {
 
 	public function requireWrite(Membership $m): void {
 		if (!$this->canWrite($m)) {
-			throw ApiException::forbidden('Only the team’s managers and admins may write.');
+			throw ApiException::forbidden('Only Team Admins may write.');
 		}
 	}
 
 	public function requireTeamRead(Membership $m): void {
 		if (!$this->canReadTeam($m)) {
-			throw ApiException::forbidden('Only the team’s managers and admins may do that.');
+			throw ApiException::forbidden('Only Team Admins may do that.');
 		}
 	}
 }

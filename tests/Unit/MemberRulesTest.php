@@ -24,51 +24,57 @@ class MemberRulesTest extends TestCase {
 
 	public function testValidate(): void {
 		$this->assertSame(['role' => 'lead'], MemberRules::validate(['role' => 'lead']));
+		$this->assertSame(['role' => 'admin'], MemberRules::validate(['role' => 'admin']));
 		$this->assertSame(['left' => true], MemberRules::validate(['left' => true]));
+		$this->assertSame(['may_override' => false], MemberRules::validate(['may_override' => false]));
 		$this->assertSame(['role' => 'user', 'left' => false], MemberRules::validate(['role' => 'user', 'left' => false]));
 		$this->assertSame('400 invalid', self::code(fn () => MemberRules::validate([])));
-		foreach (['admin', 'boss', '', 1, null] as $bad) {
+		foreach (['subadmin', 'boss', '', 1, null] as $bad) {
 			$this->assertSame('422 invalid', self::code(fn () => MemberRules::validate(['role' => $bad])), var_export($bad, true));
 		}
 		$this->assertSame('422 invalid', self::code(fn () => MemberRules::validate(['left' => 'ja'])));
-		$this->assertSame('422 invalid', self::code(fn () => MemberRules::validate(['left' => 1])));
+		$this->assertSame('422 invalid', self::code(fn () => MemberRules::validate(['may_override' => 1])));
 	}
 
 	/**
-	 * [caller's role, account's current role, change, outcome]
+	 * [caller's role, account's current role, change, Team Admins in the team, outcome]
 	 *
-	 * @return array<string,array{string,string,array{role?:string,left?:bool},string}>
+	 * @return array<string,array{string,string,array{role?:string,left?:bool,may_override?:bool},int,string}>
 	 */
 	public static function matrix(): array {
 		return [
-			'user sets lead' => ['user', 'user', ['role' => 'lead'], '403 forbidden'],
-			'user records a departure' => ['user', 'user', ['left' => true], '403 forbidden'],
-			'lead sets lead' => ['lead', 'user', ['role' => 'lead'], '403 forbidden'],
-			'subadmin sets lead' => ['subadmin', 'user', ['role' => 'lead'], 'ok'],
-			'subadmin withdraws lead' => ['subadmin', 'lead', ['role' => 'user'], 'ok'],
-			'subadmin records a user\'s departure' => ['subadmin', 'user', ['left' => true], 'ok'],
-			'subadmin sets subadmin' => ['subadmin', 'user', ['role' => 'subadmin'], '403 forbidden'],
-			'subadmin changes a subadmin' => ['subadmin', 'subadmin', ['role' => 'user'], '403 forbidden'],
-			'subadmin records an admin\'s departure' => ['subadmin', 'admin', ['left' => true], '403 forbidden'],
-			'admin sets subadmin' => ['admin', 'user', ['role' => 'subadmin'], 'ok'],
-			'admin withdraws subadmin' => ['admin', 'subadmin', ['role' => 'lead'], 'ok'],
-			'admin records an admin\'s departure' => ['admin', 'admin', ['left' => true], 'ok'],
+			'user sets lead' => ['user', 'user', ['role' => 'lead'], 1, '403 forbidden'],
+			'user records a departure' => ['user', 'user', ['left' => true], 1, '403 forbidden'],
+			'lead sets lead' => ['lead', 'user', ['role' => 'lead'], 1, '403 forbidden'],
+			'lead allows overriding' => ['lead', 'user', ['may_override' => true], 1, '403 forbidden'],
+			'former Manager sets lead' => ['subadmin', 'user', ['role' => 'lead'], 1, '403 forbidden'],
+			'Team Admin sets lead' => ['admin', 'user', ['role' => 'lead'], 1, 'ok'],
+			'Team Admin appoints a Team Admin' => ['admin', 'lead', ['role' => 'admin'], 1, 'ok'],
+			'Team Admin allows overriding' => ['admin', 'user', ['may_override' => true], 1, 'ok'],
+			'Team Admin demotes one of two Team Admins' => ['admin', 'admin', ['role' => 'lead'], 2, 'ok'],
+			'Team Admin demotes the last Team Admin' => ['admin', 'admin', ['role' => 'user'], 1, '409 conflict'],
+			'Team Admin records the departure of one of two' => ['admin', 'admin', ['left' => true], 2, 'ok'],
+			'Team Admin records the departure of the last' => ['admin', 'admin', ['left' => true], 1, '409 conflict'],
+			'last Team Admin stays Team Admin' => ['admin', 'admin', ['role' => 'admin', 'may_override' => true], 1, 'ok'],
 		];
 	}
 
-	/** @param array{role?:string,left?:bool} $change */
+	/** @param array{role?:string,left?:bool,may_override?:bool} $change */
 	#[DataProvider('matrix')]
-	public function testAuthorize(string $actor, string $target, array $change, string $want): void {
-		$this->assertSame($want, self::code(fn () => MemberRules::authorize('ich', $actor, 'du', $target, $change)));
+	public function testAuthorize(string $actor, string $target, array $change, int $admins, string $want): void {
+		$this->assertSame($want, self::code(fn () => MemberRules::authorize('ich', $actor, 'du', $target, $change, $admins)));
 	}
 
-	public function testOwnLeaveIsForbidden(): void {
-		$this->assertSame('403 forbidden', self::code(fn () => MemberRules::authorize('ich', 'admin', 'ich', 'admin', ['left' => true])));
-		$this->assertSame('ok', self::code(fn () => MemberRules::authorize('ich', 'admin', 'ich', 'admin', ['role' => 'lead'])));
+	public function testOwnRole(): void {
+		$this->assertSame('403 forbidden', self::code(fn () => MemberRules::authorize('ich', 'admin', 'ich', 'admin', ['left' => true], 3)));
+		$this->assertSame('ok', self::code(fn () => MemberRules::authorize('ich', 'admin', 'ich', 'admin', ['role' => 'lead'], 2)));
+		// The last Team Admin cannot take the role from themselves.
+		$this->assertSame('409 conflict', self::code(fn () => MemberRules::authorize('ich', 'admin', 'ich', 'admin', ['role' => 'lead'], 1)));
 	}
 
-	public function testManagerFirst(): void {
-		$this->assertSame('403 forbidden', self::code(fn () => MemberRules::requireManager('lead')));
-		$this->assertSame('ok', self::code(fn () => MemberRules::requireManager('subadmin')));
+	public function testTeamAdminFirst(): void {
+		$this->assertSame('403 forbidden', self::code(fn () => MemberRules::requireTeamAdmin('lead')));
+		$this->assertSame('403 forbidden', self::code(fn () => MemberRules::requireTeamAdmin('subadmin')));
+		$this->assertSame('ok', self::code(fn () => MemberRules::requireTeamAdmin('admin')));
 	}
 }

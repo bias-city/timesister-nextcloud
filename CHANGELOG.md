@@ -1,5 +1,14 @@
 # Changes
 
+## 0.5.0 – unreleased
+
+- API unchanged in form (`api: 2`), only additions.
+- **Three roles: Team Admin · Lead · User**, the same words in every language (`RoleName`, never through the l10n). The role Manager (`subadmin`) is gone: the migration turns stored entries into `lead`.
+- What managers and admins could do is Team Admin only; Leads keep writing their own projects.
+- `PUT /team/members/{uid}` sets `admin` (group admin of the team group via `ISubAdmin`), `lead`, `user` and `may_override`; the team always keeps at least one Team Admin.
+- Shares matrix: `GET`/`PUT /team/access`, `PUT /team/access/{viewer}/{owner}`, `POST /team/access/remind`; `/me.share_targets` and `/me.may_override`; `applied_shares` in `POST /status`. Reminders as Nextcloud notifications, withdrawn once the owner's client has set everything.
+- Admin page: roles Team Admin, Lead and User selectable per member; "Leads see all time calendars" removed (the matrix decides).
+
 ## 0.4.0 – unreleased
 
 - API unchanged (`api: 2`).

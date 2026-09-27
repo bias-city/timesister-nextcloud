@@ -29,7 +29,7 @@ final class MemberMapper extends QBMapper {
 		}
 	}
 
-	/** @return array<string,array{role:?string,left_at:?int}> uid → entry */
+	/** @return array<string,array{role:?string,left_at:?int,may_override:bool}> uid → entry */
 	public function entriesByTenant(int $tenantId): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
@@ -41,7 +41,7 @@ final class MemberMapper extends QBMapper {
 		return $out;
 	}
 
-	/** @return array<int,array{role:?string,left_at:?int}> team → the account's entry */
+	/** @return array<int,array{role:?string,left_at:?int,may_override:bool}> team → the account's entry */
 	public function entriesByUid(string $uid): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())

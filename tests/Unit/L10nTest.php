@@ -8,6 +8,8 @@ namespace OCA\TimeSister\Tests\Unit;
 
 use OCA\TimeSister\Service\ApiException;
 use OCA\TimeSister\Service\Message;
+use OCA\TimeSister\Service\Role;
+use OCA\TimeSister\Service\RoleName;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -101,16 +103,53 @@ class L10nTest extends TestCase {
 		$this->assertDoesNotMatchRegularExpression('/\b(du|dein\w*)\b/i', implode(' ', array_map(fn ($t) => implode(' ', (array)$t), $sie)));
 	}
 
-	/** Roles are User, Lead, Manager and Admin in every language. */
+	/**
+	 * Role words: Team Admin, Lead and User in every language, never
+	 * translated. Each translation carries exactly the role words of its
+	 * source; nothing translates or renames them.
+	 */
 	public function testRolesSameInEveryLanguage(): void {
+		$this->assertSame(['admin' => 'Team Admin', 'lead' => 'Lead', 'user' => 'User'], RoleName::ALL);
+		$words = static function (string $t): array {
+			preg_match_all('/\b(Team Admin|Lead|User)s?\b/', $t, $m);
+			sort($m[1]);
+			return $m[1];
+		};
 		foreach (self::LANGUAGES as $lang) {
 			$tr = self::translations($lang);
-			foreach (['User', 'Lead', 'Manager', 'Admin'] as $role) {
-				$this->assertSame($role, $tr[$role] ?? null, $lang);
+			foreach (RoleName::ALL as $word) {
+				$this->assertArrayNotHasKey($word, $tr, "$lang: role words do not go through the l10n");
+			}
+			foreach ($tr as $source => $text) {
+				foreach ((array)$text as $t) {
+					$this->assertSame($words($source), $words($t), "$lang: $source");
+				}
 			}
 			$all = implode(' ', array_map(fn ($t) => implode(' ', (array)$t), $tr));
-			$this->assertDoesNotMatchRegularExpression('/Verwaltung|Leitung|Mitarbeitende/', $all, $lang);
+			$this->assertDoesNotMatchRegularExpression('/Manager|Verwaltung|Leitung|Mitarbeitende|Teamadmin|Team-Admin|(?<!Team |Nextcloud-)\bAdmins?\b/', $all, $lang);
 		}
+		foreach (self::files() as $file) {
+			$this->assertDoesNotMatchRegularExpression('/[\'"]Manager|role_subadmin/', (string)file_get_contents($file), basename($file));
+		}
+	}
+
+	/** The Mac app uses the same three words (`marke::ROLLEN`), when it is in the same repository. */
+	public function testSameRoleWordsAsTheMacApp(): void {
+		$marke = self::ROOT . '/../../core/src/marke.rs';
+		if (!is_file($marke)) {
+			$this->markTestSkipped('Mac app not in this repository');
+		}
+		preg_match_all('/\("(\w+)", "([^"]+)"\)/', (string)file_get_contents($marke), $m, PREG_SET_ORDER);
+		$rust = [];
+		foreach ($m as $pair) {
+			if (in_array($pair[1], Role::ALL, true)) {
+				$rust[$pair[1]] = $pair[2];
+			}
+		}
+		ksort($rust);
+		$php = RoleName::ALL;
+		ksort($php);
+		$this->assertSame($php, $rust);
 	}
 
 	public function testMessagesEnglishWithoutL10n(): void {
@@ -135,9 +174,7 @@ class L10nTest extends TestCase {
 		$js = (string)file_get_contents(self::ROOT . '/js/admin.js');
 		preg_match_all("/\\btr\\('([a-z_]+)'\\s*[,)]/", $js, $used);
 		$this->assertNotEmpty($used[1]);
-		foreach (['user', 'lead', 'subadmin', 'admin'] as $role) {
-			$used[1][] = 'role_' . $role;
-		}
+		$this->assertDoesNotMatchRegularExpression("/tr\\('role_(user|lead|admin|subadmin)'/", $js, 'role words come from RoleName, not from tr()');
 		$this->assertSame([], array_values(array_diff(array_unique($used[1]), $keys)));
 	}
 }

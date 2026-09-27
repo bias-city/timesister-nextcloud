@@ -1,9 +1,9 @@
 # TimeSister for Nextcloud
 
 Server side of the TimeSister time tracker (macOS): master data as
-versioned records, separate teams via one Nextcloud group each (Admins are
-that group's group admins; Lead and Manager are managed by the app),
-permission checks on the server, history, calendar backups and status
+versioned records, separate teams via one Nextcloud group each (roles
+Team Admin, Lead and User; Team Admins are that group's group admins),
+a shares matrix for the time calendars, permission checks on the server, history, calendar backups and status
 reports from clients. No UI apart from an admin settings section.
 API: [`docs/API.md`](docs/API.md).
 

@@ -2,7 +2,7 @@
 //
 // Sets up the test environment (version 2): two teams, each with one team
 // group, the accounts from lib.mjs in them, the admins as group admins of
-// the team group, and the app roles lead and subadmin. Only via Nextcloud's
+// the team group, the app role lead, “allow overriding” off. Only via Nextcloud's
 // provisioning API and the app's admin endpoints – no occ, no SQL.
 // Idempotent; never removes anyone from a group. Old groups from
 // version 1 (pb-mitarbeitende …) stay as they are; the app does not read them.
@@ -72,9 +72,9 @@ async function ensureTeam(team) {
 	return r.data.id
 }
 
-/** Set the app role and undo any departure: the check's baseline state. */
+/** Set the role, undo any departure, overriding off: the check's baseline state. */
 async function ensureRole(teamId, uid, role) {
-	const r = await ocs(ADMIN, 'PUT', `/admin/teams/${teamId}/members/${encodeURIComponent(uid)}`, { role, left: false })
+	const r = await ocs(ADMIN, 'PUT', `/admin/teams/${teamId}/members/${encodeURIComponent(uid)}`, { role, left: false, may_override: false })
 	if (r.status !== 200) {
 		throw new Error(`Role ${uid}: HTTP ${r.status} ${JSON.stringify(r.data)}`)
 	}
@@ -102,6 +102,6 @@ for (const team of TEAMS) {
 }
 console.log('\x1b[1;34m==>\x1b[0m App roles')
 for (const [uid, , slug, role] of ACCOUNTS) {
-	// admin comes from Nextcloud; for everyone else, the role, including user.
-	await ensureRole(ids[slug], uid, role === 'admin' ? 'user' : role)
+	// Team Admin stays group admin; for everyone else the role, including user.
+	await ensureRole(ids[slug], uid, role)
 }

@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Listener;
 
+use OCA\TimeSister\Db\AccessMapper;
 use OCA\TimeSister\Db\BackupConsentMapper;
 use OCA\TimeSister\Db\MemberMapper;
 use OCA\TimeSister\Service\RecordService;
@@ -18,8 +19,8 @@ use Psr\Log\LoggerInterface;
  * Account deleted: the person records stay – booked hours are attached to
  * them. They only get the `account_deleted_at` note; `data`, version and
  * revision stay unchanged. Backup consent is dropped; existing backups stay
- * until the retention period ends. App role and leaving date are dropped: a
- * new account with the same identifier inherits nothing.
+ * until the retention period ends. App role, leaving date and shares are
+ * dropped: a new account with the same identifier inherits nothing.
  *
  * @template-implements IEventListener<UserDeletedEvent>
  */
@@ -28,6 +29,7 @@ final class UserDeletedListener implements IEventListener {
 		private RecordService $records,
 		private BackupConsentMapper $consents,
 		private MemberMapper $members,
+		private AccessMapper $access,
 		private LoggerInterface $logger,
 	) {
 	}
@@ -39,6 +41,7 @@ final class UserDeletedListener implements IEventListener {
 		$uid = $event->getUser()->getUID();
 		$this->consents->deleteByUid($uid);
 		$this->members->deleteByUid($uid);
+		$this->access->deleteByUid($uid);
 		$n = $this->records->markAccountDeleted($uid);
 		if ($n > 0) {
 			// No identifier in the log: no personal data.

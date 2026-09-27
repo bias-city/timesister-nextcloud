@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
+use OCA\TimeSister\Db\AccessMapper;
 use OCA\TimeSister\Db\BackupConsentMapper;
 use OCA\TimeSister\Db\BackupMapper;
 use OCA\TimeSister\Db\ClientStatusMapper;
@@ -39,6 +40,7 @@ final class TeamAdminService {
 		private ClientStatusMapper $status,
 		private BackupConsentMapper $consents,
 		private MemberMapper $members,
+		private AccessMapper $access,
 		private TenantService $tenantService,
 		private WeekMarks $marks,
 		private ITimeFactory $time,
@@ -57,7 +59,7 @@ final class TeamAdminService {
 	/** @return array<string,mixed> as GET /team, without members, with counts per role and `left` */
 	public function present(Tenant $t): array {
 		$team = $this->tenantService->presentTeam($t);
-		$counts = ['user' => 0, 'lead' => 0, 'subadmin' => 0, 'admin' => 0, 'left' => 0];
+		$counts = ['user' => 0, 'lead' => 0, 'admin' => 0, 'left' => 0];
 		foreach ($this->tenantService->members($t->getId()) as $m) {
 			$counts[$m['left_at'] === null ? $m['role'] : 'left']++;
 		}
@@ -153,6 +155,7 @@ final class TeamAdminService {
 			$this->status->deleteByTenant($id);
 			$this->consents->deleteByTenant($id);
 			$this->members->deleteByTenant($id);
+			$this->access->deleteByTenant($id);
 			$this->tenants->delete($t);
 			$this->db->commit();
 		} catch (\Throwable $e) {
@@ -252,7 +255,7 @@ final class TeamAdminService {
 		$user = $this->userManager->get($uid);
 		$group = $this->groupManager->get($teamGid);
 		if ($user === null || $group === null || !$this->subAdmin->isSubAdminOfGroup($user, $group)) {
-			throw ApiException::invalid('The backup owner must be an admin of the team.');
+			throw ApiException::invalid('The backup owner must be a Team Admin of the team.');
 		}
 	}
 

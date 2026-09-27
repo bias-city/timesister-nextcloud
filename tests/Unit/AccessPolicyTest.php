@@ -31,7 +31,7 @@ class AccessPolicyTest extends TestCase {
 	 */
 	public static function readMatrix(): array {
 		$rows = [];
-		foreach (['user', 'lead', 'subadmin', 'admin'] as $role) {
+		foreach (['user', 'lead', 'admin'] as $role) {
 			foreach (['setting', 'region', 'project'] as $kind) {
 				$rows["$role reads $kind"] = [$role, $kind, 'x', [], true];
 			}
@@ -62,8 +62,7 @@ class AccessPolicyTest extends TestCase {
 		return [
 			'user does not write' => ['user', false],
 			'lead does not write' => ['lead', false],
-			'subadmin writes' => ['subadmin', true],
-			'admin writes' => ['admin', true],
+			'Team Admin writes' => ['admin', true],
 		];
 	}
 
@@ -93,9 +92,9 @@ class AccessPolicyTest extends TestCase {
 			'lead: own person' => ['lead', 'person', 'mia', [], true],
 			'lead: another person' => ['lead', 'person', 'noah', [], false],
 			'lead: customer' => ['lead', 'customer', 'K1', [], false],
-			'subadmin: another person' => ['subadmin', 'person', 'noah', [], true],
-			'subadmin: project' => ['subadmin', 'project', 'P1', [], true],
-			'admin: customer' => ['admin', 'customer', 'K1', [], true],
+			'Team Admin: another person' => ['admin', 'person', 'noah', [], true],
+			'Team Admin: project' => ['admin', 'project', 'P1', [], true],
+			'Team Admin: customer' => ['admin', 'customer', 'K1', [], true],
 		];
 	}
 
@@ -110,7 +109,7 @@ class AccessPolicyTest extends TestCase {
 			$this->assertTrue($this->p->canSeeBackupsOf(self::as($role), 'mia'), "$role own");
 			$this->assertFalse($this->p->canSeeBackupsOf(self::as($role), 'noah'), "$role other's");
 		}
-		foreach (['subadmin', 'admin'] as $role) {
+		foreach (['admin'] as $role) {
 			$this->assertTrue($this->p->canSeeBackupsOf(self::as($role), 'mia'), "$role own");
 			$this->assertTrue($this->p->canSeeBackupsOf(self::as($role), 'noah'), "$role other's");
 		}
@@ -119,7 +118,6 @@ class AccessPolicyTest extends TestCase {
 	public function testTeamAndStatus(): void {
 		$this->assertFalse($this->p->canReadTeam(self::as('user')));
 		$this->assertFalse($this->p->canReadTeam(self::as('lead')));
-		$this->assertTrue($this->p->canReadTeam(self::as('subadmin')));
 		$this->assertTrue($this->p->canReadTeam(self::as('admin')));
 		$this->expectException(ApiException::class);
 		$this->p->requireTeamRead(self::as('lead'));

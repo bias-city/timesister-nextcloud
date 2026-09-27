@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Version 2: membership via the team group, admin as group admin, app roles
-// and departure (PUT /team/members, admin side), calendar sharing. This
+// Membership via the team group, Team Admin as group admin, roles, “allow
+// overriding” and departure (PUT /team/members, admin side), calendar sharing. This
 // run's test accounts are named kr<RUN>… and are deleted at the end.
 import { ADMIN, as, ocs, sql } from './lib.mjs'
-import { A, AA, ISO, L, RUN, U1, V, check, expect, head } from './harness.mjs'
+import { A, AA, ISO, L, RUN, U1, U2, V, check, expect, head } from './harness.mjs'
 
 const users = (uid) => `/ocs/v2.php/cloud/users/${encodeURIComponent(uid)}`
 const member = (uid) => `/team/members/${encodeURIComponent(uid)}`
@@ -27,33 +27,46 @@ export async function konten() {
 			const t = await ocs(A, 'GET', '/team')
 			const list = t.data?.members || []
 			const by = Object.fromEntries(list.map((x) => [x.uid, x]))
-			check('pb: roles from group admin and app role', t.status === 200 && by.pbadmin?.role === 'admin' && by.pbverw?.role === 'subadmin'
+			check('pb: roles from group admin and app role', t.status === 200 && by.pbadmin?.role === 'admin' && by.pbverw?.role === 'admin'
 				&& by.pblead?.role === 'lead' && by.pbuser1?.role === 'user' && by.pbuser2?.role === 'user', list)
-			check('entries with uid, display_name, role, left_at; no at accounts', list.every((x) => JSON.stringify(Object.keys(x)) === '["uid","display_name","role","left_at"]')
-				&& by.pblead?.display_name === 'Lea Planer' && by.pblead?.left_at === null && !list.some((x) => x.uid.startsWith('at')), list[0])
+			check('entries with uid, display_name, role, left_at, may_override; no at accounts', list.every((x) => JSON.stringify(Object.keys(x)) === '["uid","display_name","role","left_at","may_override"]')
+				&& by.pblead?.display_name === 'Lea Planer' && by.pblead?.left_at === null && by.pblead?.may_override === false && !list.some((x) => x.uid.startsWith('at')), list[0])
 		}
 
 		if (await makeUser(kr, ['pb-team'])) {
 			made.push(kr)
-			head('PUT /team/members: permissions')
+			head('PUT /team/members: only Team Admins')
 			expect('user sets lead', await ocs(U1, 'PUT', member(kr), { role: 'lead' }), 403, 'forbidden')
 			expect('lead sets lead', await ocs(L, 'PUT', member(kr), { role: 'lead' }), 403, 'forbidden')
+			expect('lead allows overriding', await ocs(L, 'PUT', member(kr), { may_override: true }), 403, 'forbidden')
 			const r = await ocs(V, 'PUT', member(kr), { role: 'lead' })
-			check('manager sets lead → entry as in /team', r.status === 200 && r.data?.uid === kr && r.data?.role === 'lead' && r.data?.left_at === null, r.text)
-			expect('manager grants subadmin', await ocs(V, 'PUT', member(kr), { role: 'subadmin' }), 403, 'forbidden')
-			expect('admin is not an app role', await ocs(A, 'PUT', member(kr), { role: 'admin' }), 422, 'invalid')
+			check('second Team Admin sets lead → entry as in /team', r.status === 200 && r.data?.uid === kr && r.data?.role === 'lead' && r.data?.left_at === null && r.data?.may_override === false, r.text)
+			expect('the old role subadmin', await ocs(A, 'PUT', member(kr), { role: 'subadmin' }), 422, 'invalid')
 			expect('empty body', await ocs(A, 'PUT', member(kr), {}), 400, 'invalid')
 			expect('left is not a boolean', await ocs(A, 'PUT', member(kr), { left: 'ja' }), 422, 'invalid')
+			expect('may_override is not a boolean', await ocs(A, 'PUT', member(kr), { may_override: 1 }), 422, 'invalid')
 			expect('account of another team', await ocs(A, 'PUT', member('atuser1'), { role: 'lead' }), 404, 'not_found')
 			expect('account that does not exist', await ocs(A, 'PUT', member(`nie${RUN}`), { role: 'lead' }), 404, 'not_found')
-			expect('at admin for a pb account', await ocs(AA, 'PUT', member(kr), { role: 'user' }), 404, 'not_found')
-			const s = await ocs(A, 'PUT', member(kr), { role: 'subadmin' })
-			check('admin grants subadmin', s.status === 200 && s.data?.role === 'subadmin', s.text)
-			check('… the account\'s /me: subadmin', (await ocs(as(kr), 'GET', '/me')).data?.role === 'subadmin')
-			expect('manager changes another manager', await ocs(V, 'PUT', member(kr), { role: 'user' }), 403, 'forbidden')
-			expect('manager records the admin\'s departure', await ocs(V, 'PUT', member('pbadmin'), { left: true }), 403, 'forbidden')
+			expect('at Team Admin for a pb account', await ocs(AA, 'PUT', member(kr), { role: 'user' }), 404, 'not_found')
+			const mo = await ocs(A, 'PUT', member(kr), { may_override: true })
+			check('Team Admin allows overriding', mo.status === 200 && mo.data?.may_override === true && mo.data?.role === 'lead', mo.text)
+			check('… the account\'s /me: may_override', (await ocs(as(kr), 'GET', '/me')).data?.may_override === true)
+			await ocs(A, 'PUT', member(kr), { may_override: false })
+
+			head('Role Team Admin = group admin of the team group (ISubAdmin)')
+			const s = await ocs(A, 'PUT', member(kr), { role: 'admin' })
+			check('Team Admin appoints a Team Admin', s.status === 200 && s.data?.role === 'admin', s.text)
+			check('… the account\'s /me: admin', (await ocs(as(kr), 'GET', '/me')).data?.role === 'admin')
+			const sa = await ocs(ADMIN, 'GET', `${users(kr)}/subadmins`)
+			check('… group admin of pb-team in Nextcloud', sa.status === 200 && (sa.data || []).includes('pb-team'), sa.text.slice(0, 200))
+			const down = await ocs(as(kr), 'PUT', member(kr), { role: 'lead' })
+			check('a Team Admin of several takes the role from themselves', down.status === 200 && down.data?.role === 'lead', down.text)
+			const sb = await ocs(ADMIN, 'GET', `${users(kr)}/subadmins`)
+			const gs = await ocs(ADMIN, 'GET', `${users(kr)}/groups`)
+			check('… no longer group admin, still in the team group', !(sb.data || []).includes('pb-team') && (gs.data?.groups || []).includes('pb-team'), [sb.data, gs.data])
+			check('… /me: lead, still in the team', (await ocs(as(kr), 'GET', '/me')).data?.role === 'lead')
+			expect('the last Team Admin of at takes the role from themselves', await ocs(AA, 'PUT', member('atadmin'), { role: 'lead' }), 409, 'conflict')
 			expect('own departure', await ocs(A, 'PUT', member('pbadmin'), { left: true }), 403, 'forbidden')
-			await ocs(A, 'PUT', member(kr), { role: 'lead' })
 
 			head('Departure and readmission')
 			const before = (await ocs(as(kr), 'GET', '/me')).data
@@ -129,11 +142,14 @@ export async function konten() {
 		head('Roles from the admin side (PUT /admin/teams/{id}/members/{uid})')
 		{
 			expect('as pbadmin (not a Nextcloud admin)', await ocs(A, 'PUT', `/admin/teams/${pbId}/members/pbuser2`, { role: 'lead' }), 403)
-			const r = await ocs(ADMIN, 'PUT', `/admin/teams/${pbId}/members/pbuser2`, { role: 'subadmin' })
-			check('Nextcloud admin grants subadmin', r.status === 200 && r.data?.role === 'subadmin', r.text)
+			const r = await ocs(ADMIN, 'PUT', `/admin/teams/${pbId}/members/pbuser2`, { role: 'admin' })
+			check('Nextcloud admin appoints a Team Admin', r.status === 200 && r.data?.role === 'admin', r.text)
 			const back = await ocs(ADMIN, 'PUT', `/admin/teams/${pbId}/members/pbuser2`, { role: 'user' })
 			check('… and withdraws it', back.status === 200 && back.data?.role === 'user', back.text)
-			expect('app role admin', await ocs(ADMIN, 'PUT', `/admin/teams/${pbId}/members/pbuser2`, { role: 'admin' }), 422, 'invalid')
+			check('… pbuser2 stays in the team', (await ocs(U2, 'GET', '/me')).data?.role === 'user')
+			expect('old role subadmin', await ocs(ADMIN, 'PUT', `/admin/teams/${pbId}/members/pbuser2`, { role: 'subadmin' }), 422, 'invalid')
+			const atId = (await ocs(ADMIN, 'GET', '/admin/teams')).data?.find?.((t) => t.slug === 'at')?.id
+			expect('the last Team Admin of at, from the admin side', await ocs(ADMIN, 'PUT', `/admin/teams/${atId}/members/atadmin`, { role: 'user' }), 409, 'conflict')
 			expect('unknown team', await ocs(ADMIN, 'PUT', '/admin/teams/999999/members/pbuser2', { role: 'lead' }), 404, 'not_found')
 			expect('account not in the team group', await ocs(ADMIN, 'PUT', `/admin/teams/${pbId}/members/atuser1`, { role: 'lead' }), 404, 'not_found')
 		}

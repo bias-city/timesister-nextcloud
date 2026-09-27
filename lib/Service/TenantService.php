@@ -24,7 +24,7 @@ use OCP\IUserSession;
 final class TenantService {
 	/** @var list<array{tenant_id:int,role:string,gid:string}>|null */
 	private ?array $roleRows = null;
-	/** @var array<int,array<string,array{role:string,left_at:?int}>> team → uid → entry */
+	/** @var array<int,array<string,array{role:string,left_at:?int,may_override:bool}>> team → uid → entry */
 	private array $members = [];
 
 	public function __construct(
@@ -94,13 +94,13 @@ final class TenantService {
 	 * All members, including those who left: accounts of the team group
 	 * and its group admins, with role and `left_at`.
 	 *
-	 * @return array<string,array{role:string,left_at:?int}>
+	 * @return array<string,array{role:string,left_at:?int,may_override:bool}>
 	 */
 	public function members(int $tenantId): array {
 		return $this->members[$tenantId] ??= $this->loadMembers($tenantId);
 	}
 
-	/** @return array<string,array{role:string,left_at:?int}> */
+	/** @return array<string,array{role:string,left_at:?int,may_override:bool}> */
 	private function loadMembers(int $tenantId): array {
 		$gid = $this->teamGroupOf($tenantId);
 		$group = $gid === null ? null : $this->groupManager->get($gid);
@@ -144,8 +144,8 @@ final class TenantService {
 	/**
 	 * A member as in GET /team.
 	 *
-	 * @param array{role:string,left_at:?int} $m
-	 * @return array{uid:string,display_name:string,role:string,left_at:?string}
+	 * @param array{role:string,left_at:?int,may_override:bool} $m
+	 * @return array{uid:string,display_name:string,role:string,left_at:?string,may_override:bool}
 	 */
 	public function presentMember(string $uid, array $m): array {
 		return [
@@ -153,10 +153,23 @@ final class TenantService {
 			'display_name' => $this->displayName($uid),
 			'role' => $m['role'],
 			'left_at' => Time::iso($m['left_at']),
+			'may_override' => $m['may_override'],
 		];
 	}
 
-	/** @return list<array{uid:string,display_name:string,role:string,left_at:?string}> all members, including those who left */
+	/** @return array<string,bool> uid → “allow overriding”, without those who left */
+	public function overrideFlags(int $tenantId): array {
+		$members = $this->members($tenantId);
+		$out = [];
+		foreach (array_map('strval', array_keys($members)) as $uid) {
+			if ($members[$uid]['left_at'] === null) {
+				$out[$uid] = $members[$uid]['may_override'];
+			}
+		}
+		return $out;
+	}
+
+	/** @return list<array{uid:string,display_name:string,role:string,left_at:?string,may_override:bool}> all members, including those who left */
 	public function presentMembers(int $tenantId): array {
 		$members = $this->members($tenantId);
 		$out = [];

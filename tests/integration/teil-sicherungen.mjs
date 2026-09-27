@@ -6,8 +6,8 @@
 import { ADMIN, NC, dav, occ, ocs, sql } from './lib.mjs'
 import { A, AA, L, RUN, U1, U2, V, ISO, check, expect, head, sha256 } from './harness.mjs'
 
-const REFUSED = 'The person has not agreed to backups with the admin.'
-const REFUSED_DE = 'Die Person hat die Sicherung beim Admin nicht freigegeben.'
+const REFUSED = 'The person has not agreed to backups with the Team Admin.'
+const REFUSED_DE = 'Die Person hat die Sicherung beim Team Admin nicht freigegeben.'
 const NOTICE = '2026-09-26.2' // version of the notice since 1.2
 const today = () => new Date().toISOString().slice(0, 10)
 const davPath = (owner, filePath) => `files/${encodeURIComponent(owner)}/${filePath.split('/').map(encodeURIComponent).join('/')}`
@@ -129,7 +129,7 @@ export async function sicherungen() {
 		expect('lead backs up another account', await ocs(L, 'POST', '/backups/now', { uid: 'pbuser1' }), 403, 'forbidden')
 		expect('at admin backs up a pb account', await ocs(AA, 'POST', '/backups/now', { uid: 'pbuser1' }), 404, 'not_found')
 		const byV = await ocs(V, 'POST', '/backups/now', { uid: 'pbuser1' })
-		check('manager backs up pbuser1 (unchanged: the same)', byV.status === 200 && byV.data?.id === now.data?.id && byV.data?.source === 'server', byV.text)
+		check('second Team Admin backs up pbuser1 (unchanged: the same)', byV.status === 200 && byV.data?.id === now.data?.id && byV.data?.source === 'server', byV.text)
 		expect('user gets another backup', await ocs(U2, 'GET', `/backups/${now.data?.id}`), 403, 'forbidden')
 		expect('at admin gets a pb backup', await ocs(AA, 'GET', `/backups/${now.data?.id}`), 404, 'not_found')
 

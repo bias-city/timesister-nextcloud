@@ -4,7 +4,7 @@
 # TimeSister Server – API Version 1 (Contract)
 
 As of 2026-09-27. This contract applies to the Nextcloud app `timesister`
-(`nc-app/timesister/`) and the Mac fork "TimeSister Next" (`core/`). Whoever
+(`nc-app/timesister/`) and the Mac app "TimeSister" (`core/`). Whoever
 deviates from it changes this file first. Plan and rationale: `PLAN-NC-APP.md`.
 
 ## General
@@ -354,7 +354,7 @@ person in a folder at the admin's, and can be restored.
     caller's own account. Response like `GET`.
   - Without consent, the background job does not back up the account, and
     `POST /backups/now` and `POST /backups` respond `403 forbidden` with
-    the sentence "The person has not agreed to backups with the admin."
+    the sentence "The person has not agreed to backups with the Team Admin." (until 0.4.0 "… with the admin.")
     (translated per account language; clients act on `error: forbidden`,
     never on the wording).
   - Withdrawing only stops future backups. Existing ones remain in both
@@ -529,7 +529,7 @@ User's decisions after the privacy report:
 
 User's decision: only **two** groups per team, roles live in the app, the
 app enforces the owner's shares. `api` rises to **2** (capabilities
-`timesister: { api: 2, … }`). TimeSister Next has only test data; there is
+`timesister: { api: 2, … }`). Version 1 only ever held test data; there is
 no migration from version 1.
 
 **Groups per team** (`groups`):
@@ -716,3 +716,86 @@ App 0.3.0. Clarifications; nothing stated above changes.
 - **Stored:** table `ts_members(tenant_id, uid, role, left_at, updated_by,
   updated_at)` and column `ts_client_status.calendar_shared`, migration
   1004, app 0.3.0, additive only.
+
+## Three roles and the shares matrix, 0.5.0 (2026-09-27) – replaces `subadmin`
+
+Still `api: 2`; only additions. Where earlier sections say `subadmin`,
+manager or "subadmin and admin", read **Team Admin** (`admin`).
+
+### Roles
+
+- Three roles: `admin` (shown as **Team Admin**), `lead` (**Lead**), `user`
+  (**User**). The words are the same in every language and are never
+  translated (the app's `RoleName`, the Mac app's `marke::ROLLEN`).
+- `subadmin` is gone. The migration to 0.5.0 turns every stored `subadmin`
+  into `lead`; an old value that is still read counts as `lead`.
+- Everything that "subadmin and admin" could do is Team Admin only: master
+  data (write, delete, batch, restore), history of others, others' backups,
+  `GET /status`, `GET /team`, roles. Leads keep writing their own projects
+  (including budgets), as before.
+- `PUT /team/members/{uid}` (Team Admins) and `PUT /admin/teams/{id}/members/{uid}`
+  (Nextcloud admins): `{ "role"?: "admin"|"lead"|"user", "left"?: bool, "may_override"?: bool }`.
+  `admin` makes the account group admin of the team group (`ISubAdmin`);
+  another role withdraws it and keeps the account in the team group.
+  `422 invalid` for `subadmin` or anything else. `409 conflict` when the
+  team would lose its last Team Admin (demoting or leaving), also for
+  oneself. `may_override`: "allow overriding", default off.
+- `GET /team` and `GET /admin/teams` members carry `may_override`;
+  `counts` = `{ user, lead, admin, left }`.
+
+### Shares matrix
+
+Rows: who sees (`viewer`); columns: whose time calendar (`owner`); only
+active members of the own team; no diagonal. Levels `none`, `view` (read),
+`edit` (write).
+
+- **Defaults:** rows of Team Admins `edit`, everything else `none`. Only
+  set fields are stored (`ts_access`), by source: `admin` (a Team Admin) or
+  `self` (the owner).
+- **Precedence:** the owner's own entry wins while `may_override` is on;
+  otherwise it rests (kept, not applied) and the Team Admin's entry or the
+  default applies. A Team Admin cannot remove an owner's entry.
+- `GET /team/access`: Team Admins get every field; everyone else their
+  column (`owner` = me) and row (`viewer` = me).
+
+```json
+{ "can_edit": true, "may_override": false,
+  "members": [{ "uid": "pbadmin", "display_name": "Petra Brunner", "role": "admin",
+                "may_override": false, "reported_at": "2026-09-27T10:00:00Z" }],
+  "fields": [{ "viewer": "pblead", "owner": "pbuser1", "level": "view",
+               "admin_level": "view", "self_level": null,
+               "overridden": null, "resting": false,
+               "applied": "none", "effective": false, "pending": true,
+               "changed_at": "2026-09-27T09:58:00Z", "changed_by": "pbadmin" }] }
+```
+
+  `members` sorted by role (Team Admin, Lead, User), then name; for
+  non-admins without the others' `may_override`/`reported_at`.
+  `overridden`: `restricted` or `granted` when the owner's choice applies
+  and differs from the Team Admin's; `applied`: what the owner's client
+  reported (`null`: never reported); `effective`: `applied` = `level`
+  (`null` while never reported); `pending`: `effective` false, or never
+  reported and `level` not `none`.
+- `PUT /team/access/{viewer}/{owner}` `{ "level": "none"|"view"|"edit"|"default" }`
+  and `PUT /team/access` `{ "changes": [{ viewer, owner, level }] }` (all or
+  none, at most 5000). Team Admins set every field (source `admin`); the
+  owner only their own column (source `self`) and only with `may_override`,
+  otherwise `403 forbidden` ("Your Team Admin has not allowed overriding.").
+  `default` removes the entry. Diagonal `422`, accounts outside the team
+  `404`. Answer: the matrix as in `GET`.
+- `POST /team/access/remind` (Team Admins): a Nextcloud notification
+  (`OCP\Notification`, app `timesister`, object `shares`/team id, subject
+  `shares_changed`) to every owner with a pending field. Answer
+  `{ "notified": [uid…] }`. Withdrawing (a field, a role, a leaving) sends it
+  to the owners concerned by itself. It goes away (`markProcessed`) once the
+  owner reports everything as set.
+
+### `/me` and status
+
+- `/me.share_targets`: `[{ "uid", "access": "read"|"write" }]`, whom the own
+  time calendar is shared with, from the matrix; `/me.may_override`. The
+  client sets exactly these shares on its own calendar. `admins`, `leads`,
+  `calendar_share` and `settings.leads_see_calendars` stay for older
+  clients; the matrix does not use them.
+- `POST /status` takes `applied_shares`: `[{ uid, access }]`, the user shares
+  of the own time calendar after the sync (at most 1000); `null` clears it.

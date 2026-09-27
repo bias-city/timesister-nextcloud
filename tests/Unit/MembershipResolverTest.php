@@ -9,6 +9,7 @@ namespace OCA\TimeSister\Tests\Unit;
 use OCA\TimeSister\Service\ApiException;
 use OCA\TimeSister\Service\MembershipResolver;
 use OCA\TimeSister\Service\Role;
+use OCA\TimeSister\Service\RoleName;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -38,7 +39,7 @@ class MembershipResolverTest extends TestCase {
 		return [
 			'in the team group' => [['pb-team'], [], [], 1, 'user'],
 			'app role lead' => [['pb-team'], [], [1 => ['role' => 'lead', 'left_at' => null]], 1, 'lead'],
-			'app role subadmin' => [['pb-team'], [], [1 => ['role' => 'subadmin', 'left_at' => null]], 1, 'subadmin'],
+			'old app role subadmin counts as lead' => [['pb-team'], [], [1 => ['role' => 'subadmin', 'left_at' => null]], 1, 'lead'],
 			'group admin is admin' => [['pb-team'], ['pb-team'], [], 1, 'admin'],
 			'group admin beats app role' => [['pb-team'], ['pb-team'], [1 => ['role' => 'lead', 'left_at' => null]], 1, 'admin'],
 			'group admin, not in the group' => [[], ['at-team'], [], 2, 'admin'],
@@ -95,25 +96,28 @@ class MembershipResolverTest extends TestCase {
 		$m = MembershipResolver::members(
 			['carol', 'alice', 'bob', 'dora'],
 			['erin', 'alice'],
-			['bob' => ['role' => 'lead', 'left_at' => null], 'dora' => ['role' => 'subadmin', 'left_at' => 50], 'entry-only' => ['role' => 'lead', 'left_at' => null]],
+			['bob' => ['role' => 'lead', 'left_at' => null, 'may_override' => true], 'dora' => ['role' => 'subadmin', 'left_at' => 50], 'entry-only' => ['role' => 'lead', 'left_at' => null]],
 		);
 		$this->assertSame([
-			'alice' => ['role' => 'admin', 'left_at' => null],
-			'bob' => ['role' => 'lead', 'left_at' => null],
-			'carol' => ['role' => 'user', 'left_at' => null],
-			'dora' => ['role' => 'subadmin', 'left_at' => 50],
-			'erin' => ['role' => 'admin', 'left_at' => null],
+			'alice' => ['role' => 'admin', 'left_at' => null, 'may_override' => false],
+			'bob' => ['role' => 'lead', 'left_at' => null, 'may_override' => true],
+			'carol' => ['role' => 'user', 'left_at' => null, 'may_override' => false],
+			'dora' => ['role' => 'lead', 'left_at' => 50, 'may_override' => false],
+			'erin' => ['role' => 'admin', 'left_at' => null, 'may_override' => false],
 		], $m, 'by uid, admins also outside the group, entries without a group are missing');
 		$this->assertSame(['alice' => 'admin', 'bob' => 'lead', 'carol' => 'user', 'erin' => 'admin'], MembershipResolver::activeRoles($m));
 	}
 
 	public function testRoleOrder(): void {
-		$this->assertSame(['user', 'lead', 'subadmin', 'admin'], Role::ALL);
-		$this->assertSame(['user', 'lead', 'subadmin'], Role::APP_ROLES);
-		$this->assertSame('admin', Role::stronger('admin', 'subadmin'));
+		$this->assertSame(['user', 'lead', 'admin'], Role::ALL);
+		$this->assertSame(['user', 'lead', 'admin'], Role::APP_ROLES);
+		$this->assertSame('admin', Role::stronger('admin', 'lead'));
 		$this->assertSame('lead', Role::stronger('user', 'lead'));
 		$this->assertFalse(Role::manages('lead'));
-		$this->assertTrue(Role::manages('subadmin'));
+		$this->assertFalse(Role::manages('subadmin'), 'the former Manager manages nothing any more');
+		$this->assertTrue(Role::manages('admin'));
+		$this->assertSame('Lead', RoleName::of('subadmin'));
+		$this->assertSame('Team Admin', RoleName::of('admin'));
 		$this->assertTrue(Role::readsAll('lead'));
 		$this->assertFalse(Role::readsAll('user'));
 	}

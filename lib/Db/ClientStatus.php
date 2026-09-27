@@ -28,6 +28,10 @@ use OCP\DB\Types;
  * @method void setCalendarShared(?int $calendarShared)
  * @method int getSeenAt()
  * @method void setSeenAt(int $seenAt)
+ * @method string|null getAppliedShares()
+ * @method void setAppliedShares(?string $appliedShares)
+ * @method int|null getAppliedAt()
+ * @method void setAppliedAt(?int $appliedAt)
  */
 final class ClientStatus extends Entity {
 	protected int $tenantId = 0;
@@ -39,6 +43,9 @@ final class ClientStatus extends Entity {
 	/** Reported state of the calendar share: 1, 0 or null (never reported). */
 	protected ?int $calendarShared = null;
 	protected int $seenAt = 0;
+	/** JSON `[{uid, access}]`: the shares the client has set; null: never reported. */
+	protected ?string $appliedShares = null;
+	protected ?int $appliedAt = null;
 
 	public function __construct() {
 		$this->addType('tenantId', Types::INTEGER);
@@ -49,5 +56,7 @@ final class ClientStatus extends Entity {
 		$this->addType('calendarUrl', Types::STRING);
 		$this->addType('calendarShared', Types::SMALLINT);
 		$this->addType('seenAt', Types::INTEGER);
+		$this->addType('appliedShares', Types::STRING);
+		$this->addType('appliedAt', Types::INTEGER);
 	}
 }

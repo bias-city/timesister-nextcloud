@@ -52,7 +52,7 @@ final class RecordService {
 	}
 
 	/**
-	 * Like present(); a project full only for manager, admin and its
+	 * Like present(); a project full only for Team Admins and its
 	 * leads, otherwise only the booking catalog.
 	 *
 	 * @param list<string> $ownKeys the caller's person keys
@@ -142,7 +142,7 @@ final class RecordService {
 
 	/**
 	 * The lead of the current version may change their project entirely,
-	 * even remove themselves from `leads`. Only manager and admin create
+	 * even remove themselves from `leads`. Only Team Admins create
 	 * new projects (including on a tombstone). Otherwise 403.
 	 */
 	private function requireProjectLead(Membership $m, string $key): void {

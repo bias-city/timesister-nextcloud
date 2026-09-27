@@ -13,7 +13,7 @@ namespace OCA\TimeSister\Service;
  *   (`left_at` in ts_members).
  * - No team: `no_team`; two teams: `ambiguous_team`.
  * - Role: `admin` for whoever manages the team group; otherwise the app
- *   role `subadmin` or `lead`; otherwise `user`.
+ *   role `lead` (an old `subadmin` counts as `lead`); otherwise `user`.
  * - Only rows with `team` from ts_role_groups count, old ones (API
  *   version 1) do not.
  */
@@ -22,7 +22,7 @@ final class MembershipResolver {
 	 * @param list<string> $userGroupIds the account's groups
 	 * @param list<string> $subAdminGroupIds groups the account manages in Nextcloud
 	 * @param list<array{tenant_id:int,role:string,gid:string}> $rows all rows from ts_role_groups
-	 * @param array<int,array{role:?string,left_at:?int}> $entries team → the account's entry from ts_members
+	 * @param array<int,array{role:?string,left_at:?int,may_override?:bool}> $entries team → the account's entry from ts_members
 	 * @return array{tenant_id:int,role:string}
 	 * @throws ApiException
 	 */
@@ -70,7 +70,7 @@ final class MembershipResolver {
 		if ($admin) {
 			return Role::ADMIN;
 		}
-		return $appRole === Role::LEAD || $appRole === Role::SUBADMIN ? $appRole : Role::USER;
+		return $appRole === Role::LEAD || $appRole === Role::LEGACY_SUBADMIN ? Role::LEAD : Role::USER;
 	}
 
 	/**
@@ -78,8 +78,8 @@ final class MembershipResolver {
 	 *
 	 * @param list<string> $groupUsers accounts of the team group
 	 * @param list<string> $subAdmins group admins of the team group
-	 * @param array<string,array{role:?string,left_at:?int}> $entries uid → entry from ts_members
-	 * @return array<string,array{role:string,left_at:?int}>
+	 * @param array<string,array{role:?string,left_at:?int,may_override?:bool}> $entries uid → entry from ts_members
+	 * @return array<string,array{role:string,left_at:?int,may_override:bool}>
 	 */
 	public static function members(array $groupUsers, array $subAdmins, array $entries): array {
 		$admins = array_flip($subAdmins);
@@ -89,6 +89,7 @@ final class MembershipResolver {
 			$out[$uid] = [
 				'role' => self::roleOf(isset($admins[$uid]), $e['role'] ?? null),
 				'left_at' => $e['left_at'] ?? null,
+				'may_override' => $e['may_override'] ?? false,
 			];
 		}
 		ksort($out, SORT_STRING);
@@ -96,7 +97,7 @@ final class MembershipResolver {
 	}
 
 	/**
-	 * @param array<string,array{role:string,left_at:?int}> $members
+	 * @param array<string,array{role:string,left_at:?int,may_override:bool}> $members
 	 * @return array<string,string> uid → role, without those who left
 	 */
 	public static function activeRoles(array $members): array {

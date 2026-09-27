@@ -10,7 +10,7 @@ namespace OCA\TimeSister\Service;
 final class StatusRules {
 	/**
 	 * @param array<string,mixed> $in
-	 * @return array{app_version:?string,last_sync:?int,last_backup:?string,calendar_url:?string,calendar_shared:?bool}
+	 * @return array{app_version:?string,last_sync:?int,last_backup:?string,calendar_url:?string,calendar_shared:?bool,applied_shares:?array<string,string>}
 	 */
 	public static function validate(array $in): array {
 		$v = $in['app_version'] ?? null;
@@ -40,6 +40,8 @@ final class StatusRules {
 		if ($shared !== null && !is_bool($shared)) {
 			throw ApiException::notBool('calendar_shared');
 		}
-		return ['app_version' => $v, 'last_sync' => $sync, 'last_backup' => $backup, 'calendar_url' => $url, 'calendar_shared' => $shared];
+		$applied = $in['applied_shares'] ?? null;
+		$applied = $applied === null ? null : AccessRules::validateApplied($applied);
+		return ['app_version' => $v, 'last_sync' => $sync, 'last_backup' => $backup, 'calendar_url' => $url, 'calendar_shared' => $shared, 'applied_shares' => $applied];
 	}
 }

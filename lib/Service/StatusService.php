@@ -18,6 +18,7 @@ final class StatusService {
 		private ConsentService $consent,
 		private TenantService $tenants,
 		private AccessPolicy $policy,
+		private AccessService $access,
 		private ITimeFactory $time,
 	) {
 	}
@@ -55,9 +56,21 @@ final class StatusService {
 			if (array_key_exists('calendar_shared', $in)) {
 				$s->setCalendarShared($v['calendar_shared'] === null ? null : (int)$v['calendar_shared']);
 			}
+			if (array_key_exists('applied_shares', $in)) {
+				$list = [];
+				$applied = $v['applied_shares'] ?? [];
+				foreach (array_map('strval', array_keys($applied)) as $uid) {
+					$list[] = ['uid' => $uid, 'access' => $applied[$uid]];
+				}
+				$s->setAppliedShares($v['applied_shares'] === null ? null : json_encode($list, JSON_THROW_ON_ERROR));
+				$s->setAppliedAt($v['applied_shares'] === null ? null : $now);
+			}
 			$s->setSeenAt($now);
 			try {
 				$new ? $this->status->insert($s) : $this->status->update($s);
+				if (array_key_exists('applied_shares', $in)) {
+					$this->access->afterReport($m);
+				}
 				return ['seen_at' => (string)Time::iso($now)];
 			} catch (DbException $e) {
 				// Two status reports at the same time: the second updates.

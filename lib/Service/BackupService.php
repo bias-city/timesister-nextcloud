@@ -71,7 +71,7 @@ final class BackupService {
 
 	/**
 	 * POST /backups/now: back up immediately. Other accounts of the team
-	 * only for manager and admin, and only with consent. The own account
+	 * only for Team Admins, and only with consent. The own account
 	 * also without consent, when the own copy is on; then only that is
 	 * made.
 	 *
@@ -83,7 +83,7 @@ final class BackupService {
 			throw ApiException::invalidField('uid', true);
 		}
 		if (!$this->policy->canSeeBackupsOf($m, $uid)) {
-			throw ApiException::forbidden('Only the team’s managers and admins back up other accounts.');
+			throw ApiException::forbidden('Only Team Admins back up other accounts.');
 		}
 		if ($uid !== $m->uid) {
 			if (!array_key_exists($uid, $this->tenants->memberRoles($m->tenantId))) {
@@ -156,7 +156,7 @@ final class BackupService {
 	public function list(Membership $m, ?string $uid): array {
 		$uid = ($uid === null || $uid === '') ? $m->uid : $uid;
 		if (!$this->policy->canSeeBackupsOf($m, $uid)) {
-			throw ApiException::forbidden('Only the team’s managers and admins see other people’s backups.');
+			throw ApiException::forbidden('Only Team Admins see other people’s backups.');
 		}
 		return array_map(fn (Backup $b) => $this->present($b), $this->backups->listFor($m->tenantId, $uid));
 	}
@@ -168,7 +168,7 @@ final class BackupService {
 			throw ApiException::notFound('This backup does not exist.');
 		}
 		if (!$this->policy->canSeeBackupsOf($m, $b->getUid())) {
-			throw ApiException::forbidden('Only the team’s managers and admins see other people’s backups.');
+			throw ApiException::forbidden('Only Team Admins see other people’s backups.');
 		}
 		try {
 			$content = $this->store->get($b->getTenantId(), $b->getUid(), $b->getTakenOn());

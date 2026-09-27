@@ -71,7 +71,12 @@ class RulesTest extends TestCase {
 		]);
 		$this->assertSame(gmmktime(8, 15, 0, 9, 26, 2026), $v['last_sync']);
 		$this->assertSame('0.2.0', $v['app_version']);
-		$this->assertSame(['app_version' => null, 'last_sync' => null, 'last_backup' => null, 'calendar_url' => null, 'calendar_shared' => null], StatusRules::validate([]));
+		$this->assertSame(['app_version' => null, 'last_sync' => null, 'last_backup' => null, 'calendar_url' => null, 'calendar_shared' => null, 'applied_shares' => null], StatusRules::validate([]));
+		$this->assertSame(['lea' => 'read', 'petra' => 'write'], StatusRules::validate(['applied_shares' => [['uid' => 'petra', 'access' => 'write'], ['uid' => 'lea', 'access' => 'read']]])['applied_shares']);
+		$this->assertSame([], StatusRules::validate(['applied_shares' => []])['applied_shares']);
+		foreach ([['uid' => 'lea'], [['uid' => 'lea', 'access' => 'admin']], [['uid' => '', 'access' => 'read']], 'lea', ['x' => ['uid' => 'lea', 'access' => 'read']]] as $bad) {
+			$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['applied_shares' => $bad])), json_encode($bad));
+		}
 		$this->assertTrue(StatusRules::validate(['calendar_shared' => true])['calendar_shared']);
 		$this->assertFalse(StatusRules::validate(['calendar_shared' => false])['calendar_shared']);
 		$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['calendar_shared' => 1])));

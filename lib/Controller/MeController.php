@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Controller;
 
 use OCA\TimeSister\AppInfo\Application;
+use OCA\TimeSister\Service\AccessService;
 use OCA\TimeSister\Service\CalendarShareService;
 use OCA\TimeSister\Service\RecordService;
 use OCA\TimeSister\Service\Role;
@@ -27,12 +28,13 @@ final class MeController extends BaseController {
 		IL10N $l,
 		private RecordService $records,
 		private CalendarShareService $calendarShare,
+		private AccessService $access,
 		private ITimeFactory $time,
 	) {
 		parent::__construct($request, $tenants, $l);
 	}
 
-	/** GET /me – team, role, team group, admins and leads, own person, revision. */
+	/** GET /me – team, role, team group, share targets, own person, revision. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/me')]
 	#[NoAdminRequired]
 	public function show(): DataResponse {
@@ -47,10 +49,13 @@ final class MeController extends BaseController {
 				'role' => $m->role,
 				'groups' => $this->tenants->groupsOf($m->tenantId),
 				'settings' => TenantService::settingsOf($t),
-				// For the Mac app's shares: who the own time calendar goes to.
+				// Clients before 0.5.0 shared with admins and leads.
 				'admins' => $this->tenants->withRole($m->tenantId, Role::ADMIN),
 				'leads' => $this->tenants->withRole($m->tenantId, Role::LEAD),
 				'calendar_share' => $this->calendarShare->enabled($m->uid),
+				// Since 0.5.0: whom the own time calendar goes to, from the shares matrix.
+				'share_targets' => $this->access->shareTargets($m),
+				'may_override' => $this->access->mayOverride($m),
 				'person_key' => $this->records->personKey($m),
 				'revision' => $t->getRevision(),
 				'server_time' => Time::iso($this->time->getTime()),

@@ -7,21 +7,27 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Service;
 
 /**
- * A team's four roles, from weak to strong. Since API version 2: `admin`
- * is whoever manages the team group in Nextcloud; the app (ts_members)
- * assigns `lead` and `subadmin`, otherwise `user`.
+ * A team's three roles, from weak to strong (since 0.5.0). `admin` (shown
+ * as “Team Admin”) is whoever manages the team group in Nextcloud; the app
+ * (ts_members) keeps `lead`, otherwise `user`. The words people see come
+ * from {@see RoleName}.
  */
 final class Role {
 	public const USER = 'user';
 	public const LEAD = 'lead';
-	public const SUBADMIN = 'subadmin';
 	public const ADMIN = 'admin';
 
-	/** All roles, weakest first. */
-	public const ALL = [self::USER, self::LEAD, self::SUBADMIN, self::ADMIN];
+	/**
+	 * Until 0.4.0 the role “Manager”. The migration to 0.5.0 turns stored
+	 * entries into `lead`; older data read as `lead`, too.
+	 */
+	public const LEGACY_SUBADMIN = 'subadmin';
 
-	/** What PUT /team/members can set; `admin` is not an app role. */
-	public const APP_ROLES = [self::USER, self::LEAD, self::SUBADMIN];
+	/** All roles, weakest first. */
+	public const ALL = [self::USER, self::LEAD, self::ADMIN];
+
+	/** What PUT /team/members can set; `admin` sets the group admin in Nextcloud. */
+	public const APP_ROLES = [self::USER, self::LEAD, self::ADMIN];
 
 	/** The team group: the only row in ts_role_groups that counts (API version 2). */
 	public const TEAM_GROUP = 'team';
@@ -49,12 +55,12 @@ final class Role {
 		return self::rank($a) >= self::rank($b) ? $a : $b;
 	}
 
-	/** subadmin and admin manage the team. */
+	/** Only Team Admins manage the team: people, roles, shares, master data. */
 	public static function manages(string $role): bool {
-		return self::rank($role) >= self::rank(self::SUBADMIN);
+		return $role === self::ADMIN;
 	}
 
-	/** lead and above read everything. */
+	/** Lead and Team Admin read all master data. */
 	public static function readsAll(string $role): bool {
 		return self::rank($role) >= self::rank(self::LEAD);
 	}

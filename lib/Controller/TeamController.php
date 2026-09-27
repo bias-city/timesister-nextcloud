@@ -40,14 +40,14 @@ final class TeamController extends BaseController {
 		});
 	}
 
-	/** PUT /team/members/{uid} – app role and leaving date; manager and admin. */
+	/** PUT /team/members/{uid} – role, leaving date and “allow overriding”; Team Admins. */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/team/members/{uid}')]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function updateMember(string $uid): DataResponse {
 		return $this->run(function () use ($uid) {
 			$m = $this->tenants->current();
-			$in = array_intersect_key($this->request->getParams(), array_flip(['role', 'left']));
+			$in = array_intersect_key($this->request->getParams(), array_flip(['role', 'left', 'may_override']));
 			return $this->memberService->update($m->tenantId, $m->uid, $m->role, $uid, $in);
 		});
 	}

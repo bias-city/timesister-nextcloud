@@ -7,7 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Service;
 
 /**
- * Projects (API version 2): full only for manager, admin and the
+ * Projects (API version 2): full only for Team Admins and the
  * project's leads; everyone else gets the booking catalog. The lead is
  * admin within the project: they change all of it, but do not create new
  * ones. Pure: knows only `data` and the person keys.
@@ -19,7 +19,7 @@ final class ProjectAccess {
 
 	/** 403 when someone else changes or creates a project. */
 	public static function forbidden(): ApiException {
-		return ApiException::forbidden('Only managers, admins and the project’s leads change a project; managers and admins create new ones.');
+		return ApiException::forbidden('Only Team Admins and the project’s Leads change a project; Team Admins create new ones.');
 	}
 
 	/**

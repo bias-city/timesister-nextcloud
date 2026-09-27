@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Settings;
 
 use OCA\TimeSister\AppInfo\Application;
+use OCA\TimeSister\Service\RoleName;
 use OCA\TimeSister\Service\TeamAdminService;
 use OCP\App\IAppManager;
 use OCP\AppFramework\Http\TemplateResponse;
@@ -43,6 +44,8 @@ final class AdminSettings implements ISettings {
 		]);
 		// Texts for js/admin.js, translated by the server, without OC.L10N.
 		$this->initialState->provideInitialState('l10n', $this->jsTexts());
+		// Role words: the same in every language, never through the l10n.
+		$this->initialState->provideInitialState('roles', RoleName::ALL);
 		Util::addScript(Application::APP_ID, 'admin');
 		Util::addStyle(Application::APP_ID, 'admin');
 		return new TemplateResponse(Application::APP_ID, 'admin', [], '');
@@ -50,22 +53,18 @@ final class AdminSettings implements ISettings {
 
 	/**
 	 * What the script writes itself. Keys as in js/admin.js; the script
-	 * replaces placeholders like {name}. Roles are User, Lead, Manager and
-	 * Admin in every language.
+	 * replaces placeholders like {name}. The role words come separately
+	 * ({@see RoleName}), untranslated.
 	 *
 	 * @return array<string, string>
 	 */
 	private function jsTexts(): array {
 		$l = $this->l;
 		return [
-			'role_user' => $l->t('User'),
-			'role_lead' => $l->t('Lead'),
-			'role_subadmin' => $l->t('Manager'),
-			'role_admin' => $l->t('Admin'),
 			'team_group' => $l->t('Team group'),
-			'admins' => $l->t('Admins'),
-			'no_admin' => $l->t('No admin yet'),
-			'admins_after_save' => $l->t('Admins appear after saving.'),
+			'admins' => $l->t('Team Admins'),
+			'no_admin' => $l->t('No Team Admin yet'),
+			'admins_after_save' => $l->t('Team Admins appear after saving.'),
 			'member' => $l->t('Member'),
 			'role' => $l->t('Role'),
 			'left' => $l->t('Left'),
@@ -100,8 +99,8 @@ final class AdminSettings implements ISettings {
 			'confirm_delete' => $l->t('Delete team “{name}”? This only works as long as it has no records and backups. The groups and accounts remain.'),
 			'load_failed' => $l->t('Teams cannot be loaded: {message}'),
 			'backups_stored_with' => $l->t('Backups stored with'),
-			'owner_auto' => $l->t('Automatic: first admin'),
-			'owner_none' => $l->t('No admin in the team'),
+			'owner_auto' => $l->t('Automatic: first Team Admin'),
+			'owner_none' => $l->t('No Team Admin in the team'),
 			'backups_col' => $l->t('Server backups'),
 			'calendars_col' => $l->t('Time calendars'),
 			'not_shared' => $l->t('Not shared: {n}'),
@@ -109,7 +108,6 @@ final class AdminSettings implements ISettings {
 			'without_week' => $l->t('Without backup this week: {n}'),
 			'last_server' => $l->t('Last: {date}'),
 			'no_server_backup' => $l->t('No server backup yet'),
-			'leads_see' => $l->t('Leads see all time calendars'),
 			'backup_required' => $l->t('Backup required'),
 			'yes' => $l->t('Yes'),
 			'no' => $l->t('No'),

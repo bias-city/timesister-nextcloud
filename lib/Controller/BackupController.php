@@ -19,8 +19,8 @@ use OCP\IL10N;
 use OCP\IRequest;
 
 /**
- * Calendar backups: own backups for everyone, others' only for manager and
- * admin. Backups are only made with the person's consent.
+ * Calendar backups: own backups for everyone, others' only for Team
+ * Admins. Backups are only made with the person's consent.
  */
 final class BackupController extends BaseController {
 	public function __construct(

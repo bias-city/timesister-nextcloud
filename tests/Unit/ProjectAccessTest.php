@@ -47,7 +47,7 @@ class ProjectAccessTest extends TestCase {
 	public function testFullProjectByRole(): void {
 		$policy = new AccessPolicy();
 		$p = self::project();
-		$this->assertTrue($policy->canSeeFullProject(new Membership('verw', 1, 'subadmin'), $p, ['verw']));
+		$this->assertFalse($policy->canSeeFullProject(new Membership('verw', 1, 'lead'), $p, ['verw']), 'a former Manager is a Lead now');
 		$this->assertTrue($policy->canSeeFullProject(new Membership('boss', 1, 'admin'), $p, ['boss']));
 		$this->assertTrue($policy->canSeeFullProject(new Membership('lea', 1, 'lead'), $p, ['lea']));
 		$this->assertFalse($policy->canSeeFullProject(new Membership('luca', 1, 'lead'), $p, ['luca']), 'lead of another project');

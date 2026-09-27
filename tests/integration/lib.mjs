@@ -34,11 +34,12 @@ export const TEAMS = [
 ]
 /**
  * Account, display name, team, role. All are in the team group; admin
- * is the team group's group admin, lead and subadmin are app roles.
+ * (Team Admin) is the team group's group admin, lead is an app role.
+ * pbverw, until 0.4.0 the Manager, is pb's second Team Admin.
  */
 export const ACCOUNTS = [
 	['pbadmin', 'Petra Brunner', 'pb', 'admin'],
-	['pbverw', 'Paul Vogel', 'pb', 'subadmin'],
+	['pbverw', 'Paul Vogel', 'pb', 'admin'],
 	['pblead', 'Lea Planer', 'pb', 'lead'],
 	['pbuser1', 'Mia Muster', 'pb', 'user'],
 	['pbuser2', 'Noah Beispiel', 'pb', 'user'],

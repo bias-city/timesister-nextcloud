@@ -6,64 +6,63 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
-/** Checking PUT /team/members/{uid} (API version 2). Pure. */
+/** Checking PUT /team/members/{uid}. Pure. */
 final class MemberRules {
-	/** Only manager and admin set roles and leaving (before any further check). */
-	public static function requireManager(string $actorRole): void {
+	/** Only Team Admins set roles, leaving and “allow overriding” (before any further check). */
+	public static function requireTeamAdmin(string $actorRole): void {
 		if (!Role::manages($actorRole)) {
-			throw ApiException::forbidden('Only the team’s managers and admins set roles and leaving.');
+			throw ApiException::forbidden('Only Team Admins set roles and leaving.');
 		}
 	}
 
 	/**
-	 * The body: `role` (user, lead, subadmin) and/or `left` (bool).
+	 * The body: `role` (admin, lead, user), `left` (bool) and/or
+	 * `may_override` (bool).
 	 *
 	 * @param array<string,mixed> $in
-	 * @return array{role?:string,left?:bool}
+	 * @return array{role?:string,left?:bool,may_override?:bool}
 	 */
 	public static function validate(array $in): array {
 		$out = [];
 		if (array_key_exists('role', $in)) {
 			$role = $in['role'];
-			if ($role === Role::ADMIN) {
-				throw ApiException::invalid('“admin” is not an app role: admins are the group admins of the team group in Nextcloud.');
-			}
 			if (!is_string($role) || !in_array($role, Role::APP_ROLES, true)) {
-				throw ApiException::invalid('“role” must be user, lead or subadmin.');
+				throw ApiException::invalid('“role” must be admin, lead or user.');
 			}
 			$out['role'] = $role;
 		}
-		if (array_key_exists('left', $in)) {
-			if (!is_bool($in['left'])) {
-				throw ApiException::notBool('left');
+		foreach (['left', 'may_override'] as $field) {
+			if (array_key_exists($field, $in)) {
+				if (!is_bool($in[$field])) {
+					throw ApiException::notBool($field);
+				}
+				$out[$field] = $in[$field];
 			}
-			$out['left'] = $in['left'];
 		}
 		if ($out === []) {
-			throw ApiException::badRequest('“role” or “left” is missing.');
+			throw ApiException::badRequest('“role”, “left” or “may_override” is missing.');
 		}
 		return $out;
 	}
 
 	/**
-	 * Who may change what: manager and admin; only admins assign
-	 * `subadmin` and change entries of managers and admins; nobody
-	 * records their own leaving (they would lock themselves out).
+	 * Who may change what: only Team Admins. Nobody records their own
+	 * leaving (they would lock themselves out), and the team always keeps
+	 * at least one Team Admin.
 	 *
 	 * @param string $targetRole the account's current role in the team
-	 * @param array{role?:string,left?:bool} $change
+	 * @param array{role?:string,left?:bool,may_override?:bool} $change
+	 * @param int $adminCount Team Admins of the team who have not left
 	 */
-	public static function authorize(string $actorUid, string $actorRole, string $uid, string $targetRole, array $change): void {
-		self::requireManager($actorRole);
-		$admin = $actorRole === Role::ADMIN;
-		if (($change['role'] ?? null) === Role::SUBADMIN && !$admin) {
-			throw ApiException::forbidden('Only the team’s admins assign the role Manager.');
-		}
-		if (Role::manages($targetRole) && !$admin) {
-			throw ApiException::forbidden('Only admins change the team’s managers and admins.');
-		}
+	public static function authorize(string $actorUid, string $actorRole, string $uid, string $targetRole, array $change, int $adminCount): void {
+		self::requireTeamAdmin($actorRole);
 		if ($uid === $actorUid && ($change['left'] ?? false)) {
-			throw ApiException::forbidden('Another admin of the team records your own leaving.');
+			throw ApiException::forbidden('Another Team Admin of the team records your own leaving.');
+		}
+		$losesAdmin = $targetRole === Role::ADMIN
+			&& ((isset($change['role']) && $change['role'] !== Role::ADMIN) || ($change['left'] ?? false));
+		if ($losesAdmin && $adminCount <= 1) {
+			throw ApiException::conflict('The team always keeps at least one Team Admin.');
 		}
 	}
 }

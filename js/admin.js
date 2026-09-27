@@ -8,9 +8,8 @@
 (function () {
 	'use strict'
 
-	// Version 2: one team group; admin is whoever manages it in Nextcloud.
-	const ROLES = ['user', 'lead', 'subadmin', 'admin']
-	const APP_ROLES = ['user', 'lead', 'subadmin']
+	// One team group; Team Admin is whoever manages it in Nextcloud. Strongest first.
+	const ROLES = ['admin', 'lead', 'user']
 
 	/** Without OC globals: the token is in the page's head. */
 	function requestToken() {
@@ -33,6 +32,9 @@
 	}
 
 	const TEXTS = loadState('l10n') || {}
+	// Role words: the same in every language, never translated.
+	const ROLE_NAMES = loadState('roles') || {}
+	const roleName = (r) => ROLE_NAMES[r] || r
 
 	/** Translated text for a key; {name} is replaced with vars.name. */
 	function tr(key, vars) {
@@ -183,12 +185,12 @@
 			// All members with role; those who left stay visible, marked.
 			const members = h('ul', { class: 'ts-list ts-members' }, ((st && st.members) || []).map((m) => h('li', { class: m.left_at ? 'ts-left' : '' },
 				h('span', { text: memberLabel(m) + ' ' }),
-				h('span', { class: 'ts-muted', text: tr('role_' + m.role) + (m.left_at ? ' · ' + tr('left_on', { date: formatDay(m.left_at.slice(0, 10)) }) : '') }))))
+				h('span', { class: 'ts-muted', text: roleName(m.role) + (m.left_at ? ' · ' + tr('left_on', { date: formatDay(m.left_at.slice(0, 10)) }) : '') }))))
 			const owner = h('div', { class: 'ts-owner' },
 				h('span', { class: 'ts-muted', text: tr('backups_stored_with') + ' ' }),
 				t.backup_owner ? h('span', { text: adminLabel(st, t.backup_owner) }) : h('span', { class: 'ts-bad', text: tr('owner_none') }))
 			const s = t.settings || {}
-			const settings = [['leads_see', s.leads_see_calendars], ['backup_required', s.backup_required]].map(([key, on]) =>
+			const settings = [['backup_required', s.backup_required]].map(([key, on]) =>
 				h('div', {}, h('span', { class: 'ts-muted', text: tr(key) + ': ' }), h('span', { text: on ? tr('yes') : tr('no') })))
 			return h('tr', { 'data-team': t.slug },
 				h('td', {},
@@ -324,10 +326,8 @@
 		}
 		const rows = st.members.map((m) => {
 			const name = memberLabel(m)
-			const role = m.role === 'admin'
-				? h('span', { text: tr('role_admin') })
-				: h('select', { 'data-uid': m.uid, 'data-was': m.role, 'aria-label': tr('role_of', { name }) },
-					APP_ROLES.map((r) => h('option', { value: r, text: tr('role_' + r), selected: r === m.role })))
+			const role = h('select', { 'data-uid': m.uid, 'data-was': m.role, 'aria-label': tr('role_of', { name }) },
+				ROLES.map((r) => h('option', { value: r, text: roleName(r), selected: r === m.role })))
 			const left = h('input', { type: 'checkbox', 'data-uid': m.uid, 'data-was': m.left_at ? '1' : '0', checked: Boolean(m.left_at), 'aria-label': tr('left_of', { name }) })
 			return h('tr', { class: m.left_at ? 'ts-left' : '' }, h('td', { text: name }), h('td', {}, role), h('td', {}, left))
 		})
@@ -336,7 +336,7 @@
 			h('tbody', {}, rows)))
 	}
 
-	/** Changed members: uid → { role?, left? }. */
+	/** Changed members: uid → { role?, left? }; new Team Admins first, so the team never loses its last one. */
 	function memberChanges() {
 		const out = new Map()
 		const put = (uid, key, value) => out.set(uid, Object.assign(out.get(uid) || {}, { [key]: value }))
@@ -350,7 +350,7 @@
 				put(box.dataset.uid, 'left', box.checked)
 			}
 		}
-		return out
+		return new Map([...out].sort(([, a], [, b]) => (b.role === 'admin') - (a.role === 'admin')))
 	}
 
 	function openForm(team) {
@@ -363,9 +363,8 @@
 		fillAdmins(team)
 		fillMembers(team)
 		fillOwner(team)
-		// New team: the contract's defaults (Lead sees everything, no backup requirement).
+		// New team: no backup requirement. Who sees which calendar is set in the Mac app.
 		const s = (team && team.settings) || {}
-		$('ts-leads-see').checked = s.leads_see_calendars !== false
 		$('ts-backup-required').checked = s.backup_required === true
 		$('ts-form').hidden = false
 		$('ts-name').focus()
@@ -384,7 +383,6 @@
 			groups: { team: $('ts-g-team').value },
 		}
 		body.settings = {
-			leads_see_calendars: $('ts-leads-see').checked,
 			backup_required: $('ts-backup-required').checked,
 		}
 		// Empty means automatic; a new team has no choice yet.
