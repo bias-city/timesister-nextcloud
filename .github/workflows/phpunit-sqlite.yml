@@ -131,7 +131,7 @@ jobs:
         env:
           NC_URL: http://127.0.0.1:8080
           NC_ADMIN_PASS: admin
-          TS_SQL: sqlite3 ${{ github.workspace }}/data/nextcloud.db
+          TS_SQL: sqlite3 -cmd ".timeout 10000" ${{ github.workspace }}/data/nextcloud.db
         run: composer run test:integration
 
       - name: Print logs

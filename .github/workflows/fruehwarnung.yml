@@ -164,7 +164,7 @@ jobs:
         env:
           NC_URL: http://127.0.0.1:8080
           NC_ADMIN_PASS: admin
-          TS_SQL: sqlite3 ${{ github.workspace }}/data/nextcloud.db
+          TS_SQL: sqlite3 -cmd ".timeout 10000" ${{ github.workspace }}/data/nextcloud.db
         run: |
           set -o pipefail
           php -S 127.0.0.1:8080 > php-server.log 2>&1 &
