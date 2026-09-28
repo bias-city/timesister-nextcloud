@@ -10,7 +10,8 @@ namespace OCA\TimeSister\Service;
  * The weekly numbers a person's client reports (0.7.2): per week the
  * capacity line and what their Jobs take, per Job booked and planned hours,
  * and the weight of each day for spreading a Job. With them the server
- * checks the capacity when a sender accepts a counter-proposal. Pure.
+ * checks the capacity when a sender accepts a counter-proposal – per week
+ * and, since 0.7.3, per day (as the client does). Pure.
  */
 final class JobWeeks {
 	public const MAX_WEEKS = 80;
@@ -164,7 +165,9 @@ final class JobWeeks {
 	 * **Capacity check** for a Job someone is to take on (`probe`: key,
 	 * hours, start, end): the weeks from the current one on in which it
 	 * lifts the person above their capacity line – only where it takes
-	 * something itself and only weeks the report covers. `valid`: the Jobs
+	 * something itself and only weeks the report covers. Where the week
+	 * holds, no day may go above a full day's capacity either (see
+	 * {@see overDay()}); such an entry names the `day`. `valid`: the Jobs
 	 * that are still the person's (others in the report no longer count);
 	 * `extra`: their running Jobs the report does not know yet, with the
 	 * hours still open.
@@ -173,7 +176,7 @@ final class JobWeeks {
 	 * @param array{key:string,hours:float,start:string,end:string} $probe
 	 * @param list<string> $valid
 	 * @param list<array{key:string,rest:float,start:string,end:string}> $extra
-	 * @return list<array{start:string,week:int,load:float,available:float,over:float}>
+	 * @return list<array{start:string,week:int,load:float,available:float,over:float,day?:string}>
 	 */
 	public static function over(array $report, array $probe, array $valid, array $extra, string $today): array {
 		$weeks = [];
@@ -181,39 +184,98 @@ final class JobWeeks {
 			$w = (array)$w;
 			$weeks[(string)$w['start']] = $w;
 		}
-		$load = [];
+		// Per week what the other Jobs take: booked and planned.
+		$booked = [];
+		$planned = [];
 		foreach ($weeks as $start => $w) {
-			$sum = 0.0;
+			$booked[$start] = 0.0;
+			$planned[$start] = 0.0;
 			foreach ((array)($w['jobs'] ?? []) as $k => $p) {
 				if ((string)$k !== $probe['key'] && in_array((string)$k, $valid, true)) {
 					$p = (array)$p;
-					$sum += (float)($p['booked'] ?? 0) + (float)($p['planned'] ?? 0);
+					$booked[$start] += (float)($p['booked'] ?? 0);
+					$planned[$start] += (float)($p['planned'] ?? 0);
 				}
 			}
-			$load[$start] = $sum;
 		}
 		foreach ($extra as $e) {
 			if ($e['key'] === $probe['key']) {
 				continue;
 			}
 			foreach (self::spread($weeks, $e['rest'], $e['start'], $e['end'], $today) as $start => $h) {
-				$load[$start] = ($load[$start] ?? 0.0) + $h;
+				$planned[$start] = ($planned[$start] ?? 0.0) + $h;
 			}
 		}
 		$now = self::monday($today);
+		$perWeek = [];
+		foreach (self::spreadDays($weeks, $probe['hours'], $probe['start'], $probe['end'], $today) as $day => $h) {
+			$perWeek[self::monday($day)][$day] = $h;
+		}
 		$out = [];
-		foreach (self::spread($weeks, $probe['hours'], $probe['start'], $probe['end'], $today) as $start => $h) {
+		foreach ($perWeek as $start => $days) {
+			$h = array_sum($days);
 			if ($start < $now || $h <= 0.01 || !isset($weeks[$start])) {
 				continue;
 			}
 			$available = (float)($weeks[$start]['available'] ?? 0);
-			$total = ($load[$start] ?? 0.0) + $h;
+			$b = $booked[$start] ?? 0.0;
+			$p = $planned[$start] ?? 0.0;
+			$total = $b + $p + $h;
 			if ($total > $available + self::ROOM) {
 				$out[] = ['start' => $start, 'week' => self::weekNumber($start), 'load' => round($total, 2),
 					'available' => round($available, 2), 'over' => round($total - $available, 2)];
+				continue;
+			}
+			// In the current week the booked hours lie before the probe's days.
+			$day = self::overDay($weeks[$start], $days, $start === $now ? $p : $b + $p, $today);
+			if ($day !== null) {
+				$out[] = $day;
 			}
 		}
 		return $out;
+	}
+
+	/**
+	 * **The day load** of a probe in one reported week: its hours of the day
+	 * plus the other Jobs' hours, spread by weight over the working days
+	 * from today, against a full day's capacity (the capacity line over the
+	 * week's working days, by weight). The worst day, or null if none is above.
+	 *
+	 * @param array<string,mixed> $week
+	 * @param array<string,float> $probe day → hours
+	 * @return ?array{start:string,week:int,load:float,available:float,over:float,day:string}
+	 */
+	public static function overDay(array $week, array $probe, float $others, string $today): ?array {
+		$start = (string)($week['start'] ?? '');
+		$weights = array_values(array_map('floatval', (array)($week['days'] ?? [])));
+		$all = 0.0;
+		$fromToday = 0.0;
+		for ($i = 0; $i < 7; $i++) {
+			$w = $weights[$i] ?? 0.0;
+			$all += $w;
+			if (self::plusDays($start, $i) >= $today) {
+				$fromToday += $w;
+			}
+		}
+		$full = $all > 0 ? (float)($week['available'] ?? 0) / $all : 0.0;
+		$each = $fromToday > 0 ? $others / $fromToday : 0.0;
+		$worst = null;
+		foreach ($probe as $day => $h) {
+			if ($day < $today || $h <= 0.005) {
+				continue;
+			}
+			$w = $weights[self::dayOfWeek($day)] ?? 0.0;
+			$load = $h + $each * $w;
+			$can = $full * $w;
+			if ($load > $can + self::ROOM && ($worst === null || $load - $can > $worst['over'])) {
+				$worst = ['start' => $start, 'week' => self::weekNumber($start), 'load' => round($load, 2),
+					'available' => round($can, 2), 'over' => $load - $can, 'day' => $day];
+			}
+		}
+		if ($worst !== null) {
+			$worst['over'] = round($worst['over'], 2);
+		}
+		return $worst;
 	}
 
 	/**
@@ -222,9 +284,9 @@ final class JobWeeks {
 	 * working day left: over the weekdays, else over all days.
 	 *
 	 * @param array<string,array<string,mixed>> $weeks start → week
-	 * @return array<string,float> Monday → hours
+	 * @return array<string,float> day → hours, only days that take something
 	 */
-	public static function spread(array $weeks, float $hours, string $from, string $to, string $today): array {
+	public static function spreadDays(array $weeks, float $hours, string $from, string $to, string $today): array {
 		$a = max($from, $today);
 		if ($hours <= 0 || $to < $a || !Time::isDay($a) || !Time::isDay($to)) {
 			return [];
@@ -238,7 +300,7 @@ final class JobWeeks {
 			$dow = (int)$d->format('N') - 1;
 			$monday = $d->modify('-' . $dow . ' days')->format('Y-m-d');
 			$w = isset($weeks[$monday]) ? (float)(((array)$weeks[$monday]['days'])[$dow] ?? 0) : ($dow < 5 ? 1.0 : 0.0);
-			$days[] = [$monday, $w, $dow < 5 ? 1.0 : 0.0];
+			$days[] = [$day, $w, $dow < 5 ? 1.0 : 0.0];
 		}
 		$col = 1;
 		$sum = array_sum(array_column($days, 1));
@@ -251,15 +313,44 @@ final class JobWeeks {
 		foreach ($days as $x) {
 			$w = $sum > 0 ? $x[$col] : 1.0;
 			if ($w > 0) {
-				$out[$x[0]] = ($out[$x[0]] ?? 0.0) + $hours * $w / $div;
+				$out[$x[0]] = $hours * $w / $div;
 			}
 		}
 		return $out;
 	}
 
-	/** The weeks as a part of a sentence: "42 (+3.5 h), 43 (+1 h)". @param list<array{week:int,over:float}> $over */
+	/**
+	 * {@see spreadDays()} summed per week.
+	 *
+	 * @param array<string,array<string,mixed>> $weeks start → week
+	 * @return array<string,float> Monday → hours
+	 */
+	public static function spread(array $weeks, float $hours, string $from, string $to, string $today): array {
+		$out = [];
+		foreach (self::spreadDays($weeks, $hours, $from, $to, $today) as $day => $h) {
+			$m = self::monday($day);
+			$out[$m] = ($out[$m] ?? 0.0) + $h;
+		}
+		return $out;
+	}
+
+	/**
+	 * The weeks as a part of a sentence: "42 (+3.5 h), 43 (+31.6 h, 2026-10-19)".
+	 *
+	 * @param list<array{week:int,over:float,day?:string,...}> $over
+	 */
 	public static function weeksText(array $over): string {
-		return implode(', ', array_map(static fn (array $w): string => $w['week'] . ' (+' . JobRules::num($w['over']) . ' h)', $over));
+		return implode(', ', array_map(static fn (array $w): string => $w['week'] . ' (+' . JobRules::num($w['over']) . ' h'
+			. (isset($w['day']) ? ', ' . $w['day'] : '') . ')', $over));
+	}
+
+	private static function plusDays(string $day, int $n): string {
+		return (new \DateTimeImmutable($day, new \DateTimeZone('UTC')))->modify('+' . $n . ' days')->format('Y-m-d');
+	}
+
+	/** 0 for Monday … 6 for Sunday. */
+	private static function dayOfWeek(string $day): int {
+		return (int)(new \DateTimeImmutable($day, new \DateTimeZone('UTC')))->format('N') - 1;
 	}
 
 	public static function monday(string $day): string {

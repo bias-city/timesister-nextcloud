@@ -1010,10 +1010,18 @@ cannot check that step.
   something and which the report covers, may not go above `available`
   (±0.05 h). The load is what the reported Jobs still count (Jobs no longer
   the person's are dropped) plus running Jobs the report does not know yet
-  (their open hours, spread the same way). Otherwise `422 invalid` with
+  (their open hours, spread the same way). **Per day (0.7.3):** where
+  the week holds, no day may go above a full day's capacity either –
+  `available` over the week's working days (the sum of `days`), times the
+  day's weight. A day's load is the counter-proposal's hours of that day
+  plus the other Jobs' hours of the week, spread by weight over its
+  working days from today (in the current week only their `planned`
+  hours). So hours squeezed onto the first day after a vacation do not
+  fit, nor do hours on days without weight. Otherwise `422 invalid` with
   `rule: "capacity"`, `user`, `weeks: [{ start, week, load, available,
-  over }]` and `reported_at`. **Without reported numbers nothing is
-  blocked.** `GET /jobs/{key}/capacity` answers the same before accepting
+  over, day? }]` and `reported_at`; with `day` the entry is that day's
+  (its load, its capacity, the excess), the worst one of the week.
+  **Without reported numbers nothing is blocked.** `GET /jobs/{key}/capacity` answers the same before accepting
   (`by`: whose counter-proposal, needed while several wait; `409` if none
   waits).
 - **Stored:** columns `job_weeks` (JSON) and `job_weeks_at` in

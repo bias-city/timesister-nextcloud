@@ -127,10 +127,10 @@ final class JobWeeksService {
 	/**
 	 * **Does the Job fit the person?** `null` if they never reported
 	 * numbers (then nothing is blocked); otherwise the weeks above their
-	 * capacity line (empty: it fits).
+	 * capacity line or with a day above a full day (empty: it fits).
 	 *
 	 * @param array<string,mixed> $job with the values that would apply
-	 * @return ?array{reported_at:?string,weeks:list<array{start:string,week:int,load:float,available:float,over:float}>}
+	 * @return ?array{reported_at:?string,weeks:list<array{start:string,week:int,load:float,available:float,over:float,day?:string}>}
 	 */
 	public function over(int $tenantId, array $job, string $uid): ?array {
 		$s = $this->status->findOne($tenantId, $uid);

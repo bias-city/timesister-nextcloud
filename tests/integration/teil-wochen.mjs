@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Weekly numbers of the Jobs (0.7.2): each client reports its own weeks,
+// Weekly numbers of the Jobs (0.7.2, per day 0.7.3): each client reports its own weeks,
 // who reads them (the person, Team Admins, Leads with at least “view” in
 // the shares matrix), and the capacity check when a Lead accepts a
 // counter-proposal – with the person's reported weeks, a running Job the
 // report does not know yet, and without numbers (not blocked). Team “at”,
 // whose User has no client running; everything reset at the end.
-import { ocs, sql } from './lib.mjs'
+import { ADMIN, ocs, sql } from './lib.mjs'
 import { A, AA, AL, AU, RUN, check, expect, head } from './harness.mjs'
 
 const PJ = `PA-${RUN}`
@@ -100,8 +100,32 @@ export async function wochen() {
 		const extra = await ocs(AL, 'GET', `${path(key(3))}/capacity`)
 		check('JA2 counts although the report does not know it yet', extra.status === 200 && extra.data?.fits === false
 			&& extra.data?.weeks?.[0]?.load === 21.5, extra.text.slice(0, 300))
-		const de = await ocs(AL, 'POST', `${path(key(3))}/accept-counter`, undefined, { lang: 'de' })
-		check('… accepting it answers in German', de.status === 422 && /Kapazität von Tim Test: KW \d+ \(\+1\.5 h\)/.test(de.data?.message || ''), de.data?.message)
+		// The account language decides (Nextcloud keeps the first Accept-Language).
+		const userPath = '/ocs/v2.php/cloud/users/atlead'
+		const langBefore = (await ocs(ADMIN, 'GET', userPath)).data?.language || 'en'
+		try {
+			await ocs(ADMIN, 'PUT', userPath, { key: 'language', value: 'de' })
+			const de = await ocs(AL, 'POST', `${path(key(3))}/accept-counter`, undefined, { lang: 'de' })
+			check('… accepting it answers in German', de.status === 422
+				&& de.data?.message === `Dieser Gegenvorschlag passt nicht in die Kapazität von Tim Test: KW ${isoWeek(W(1))} (+1.5 h) über der Pensum-Linie.`, de.data?.message)
+		} finally {
+			await ocs(ADMIN, 'PUT', userPath, { key: 'language', value: langBefore })
+		}
+
+		head('Job weeks: the capacity per day (0.7.3)')
+		expect('JA4 offered for week +2, 10 h', await ocs(AL, 'PUT', path(key(4)), offer({ start: W(2), end: addDays(W(2), 4) })), 200)
+		made.push(key(4))
+		expect('… atuser1 counter-proposes it all on the Monday', await ocs(AU, 'POST', `${path(key(4))}/counter`, { end: W(2) }), 200)
+		const oneDay = await ocs(AL, 'GET', `${path(key(4))}/capacity`)
+		check('the week holds, the day not: 10 h against 20 h / 5 days', oneDay.status === 200 && oneDay.data?.fits === false
+			&& oneDay.data?.weeks?.length === 1 && oneDay.data.weeks[0].day === W(2) && oneDay.data.weeks[0].over === 6
+			&& oneDay.data.weeks[0].available === 4, oneDay.text.slice(0, 300))
+		const noDay = await ocs(AL, 'POST', `${path(key(4))}/accept-counter`)
+		check('accepting it → 422 with the day', noDay.status === 422 && noDay.data?.rule === 'capacity' && noDay.data?.weeks?.[0]?.day === W(2)
+			&& noDay.data?.message === `This counter-proposal does not fit the capacity of Tim Test: week ${isoWeek(W(2))} (+6 h, ${W(2)}) above the capacity line.`, noDay.text.slice(0, 300))
+		expect('atuser1 counter-proposes Monday to Wednesday', await ocs(AU, 'POST', `${path(key(4))}/counter`, { end: addDays(W(2), 2) }), 200)
+		const threeDays = await ocs(AL, 'GET', `${path(key(4))}/capacity?by=atuser1`)
+		check('3.3 h a day fit', threeDays.status === 200 && threeDays.data?.fits === true, threeDays.text.slice(0, 300))
 	} finally {
 		head('Job weeks: cleaning up')
 		for (const k of made) {

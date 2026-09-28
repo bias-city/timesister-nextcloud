@@ -206,6 +206,10 @@ class L10nTest extends TestCase {
 		$this->assertSame('3 records were changed in the meantime; nothing was written.', $three->text());
 		$one = Message::plural('A record was changed in the meantime; nothing was written.', '%n records were changed in the meantime; nothing was written.', 1);
 		$this->assertSame('A record was changed in the meantime; nothing was written.', $one->text());
+		// A translated plural without %n comes back from Nextcloud as both forms joined with "|".
+		$this->assertSame('KW {weeks} über der Linie.', Message::form('KW {weeks} über der Linie.|KW {weeks} (alle) über der Linie.', 1));
+		$this->assertSame('KW {weeks} (alle) über der Linie.', Message::form('KW {weeks} über der Linie.|KW {weeks} (alle) über der Linie.', 2));
+		$this->assertSame('3 Datensätze', Message::form('3 Datensätze', 3));
 		// Values go in as they are, never read as placeholders or formats.
 		$this->assertSame('The group “50% {key}” does not exist.', Message::of('The group “{group}” does not exist.', ['group' => '50% {key}'])->text());
 	}

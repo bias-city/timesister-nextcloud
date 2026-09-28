@@ -119,6 +119,48 @@ class JobWeeksTest extends TestCase {
 		$this->assertSame([], JobWeeks::over($r, ['hours' => 2.04] + $probe, ['j-a'], [], self::MON));
 	}
 
+	/**
+	 * Tim has a vacation in week 42 and a counter-proposal of 40 h for
+	 * 12.10.–19.10.: week 43 holds (40 of 42 h), but all 40 h fall on the
+	 * Monday after the vacation – above a full day of 8.4 h (0.7.3).
+	 */
+	public function testOverADayAfterTheVacation(): void {
+		$r = self::report([
+			self::week('2026-10-12', 0, [], [0, 0, 0, 0, 0, 0, 0]),
+			self::week('2026-10-19', 42),
+		], []);
+		$probe = ['key' => 'j-tim', 'hours' => 40.0, 'start' => '2026-10-12', 'end' => '2026-10-19'];
+		$o = JobWeeks::over($r, $probe, [], [], self::MON);
+		$this->assertSame([['start' => '2026-10-19', 'week' => 43, 'load' => 40.0, 'available' => 8.4, 'over' => 31.6, 'day' => '2026-10-19']], $o);
+		$this->assertSame('43 (+31.6 h, 2026-10-19)', JobWeeks::weeksText($o));
+		// Four days: 10 h each, still too much; five days: 8 h each fit.
+		$this->assertCount(1, JobWeeks::over($r, ['end' => '2026-10-22'] + $probe, [], [], self::MON));
+		$this->assertSame([], JobWeeks::over($r, ['end' => '2026-10-23'] + $probe, [], [], self::MON));
+		// The other Jobs count per day too: 10 h in week 43 leave 6.4 h a day,
+		// 30 h over four days (7.5 h each) do not fit although the week holds.
+		$r = self::report([
+			self::week('2026-10-12', 0, [], [0, 0, 0, 0, 0, 0, 0]),
+			self::week('2026-10-19', 42, ['j-a' => ['booked' => 0, 'planned' => 10]]),
+		]);
+		$o = JobWeeks::over($r, ['hours' => 30.0, 'end' => '2026-10-22'] + $probe, ['j-a'], [], self::MON);
+		$this->assertSame('2026-10-19', $o[0]['day'] ?? null);
+		$this->assertEqualsWithDelta(1.1, $o[0]['over'], 1e-9);
+		$this->assertSame([], JobWeeks::over($r, ['hours' => 30.0, 'end' => '2026-10-23'] + $probe, ['j-a'], [], self::MON));
+		// Only a weekend: no working day, no capacity.
+		$o = JobWeeks::over($r, ['start' => '2026-10-24', 'end' => '2026-10-25', 'hours' => 2.0] + $probe, ['j-a'], [], self::MON);
+		$this->assertSame('2026-10-24', $o[0]['day'] ?? null);
+	}
+
+	/** In the current week the booked hours lie before today and do not count per day. */
+	public function testDayLoadInTheCurrentWeek(): void {
+		$thu = '2026-10-01';
+		$r = self::report([self::week(self::MON, 42, ['j-a' => ['booked' => 25.2, 'planned' => 4.8]])]);
+		$probe = ['key' => 'j-new', 'hours' => 12.0, 'start' => $thu, 'end' => '2026-10-02'];
+		$this->assertSame([], JobWeeks::over($r, $probe, ['j-a'], [], $thu), '2.4 + 6 h a day');
+		$o = JobWeeks::over($r, ['hours' => 8.0, 'end' => $thu] + $probe, ['j-a'], [], $thu);
+		$this->assertSame(['start' => self::MON, 'week' => 40, 'load' => 10.4, 'available' => 8.4, 'over' => 2.0, 'day' => $thu], $o[0]);
+	}
+
 	public function testPresentMergesWhatTheReaderDoesNotSee(): void {
 		$r = self::report([self::week(self::MON, 32, ['j-a' => ['booked' => 3, 'planned' => 5], 'j-x' => ['booked' => 1, 'planned' => 2]])], ['j-a', 'j-x']);
 		$p = JobWeeks::present($r, fn (string $k) => $k === 'j-a');

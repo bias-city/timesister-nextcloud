@@ -10,6 +10,8 @@ import { ADMIN, ocs } from './lib.mjs'
 import { A, AA, L, RUN, U1, U2, check, expect, head, me } from './harness.mjs'
 
 const PJ = `PJ-${RUN}`
+/** A project of the team that pblead does not lead (made here, not assumed). */
+const PX = `PX-${RUN}`
 const key = (n) => `j${n}-${RUN}`
 const path = (k) => `/jobs/${encodeURIComponent(k)}`
 const get = (who, k) => ocs(who, 'GET', `/records/job/${encodeURIComponent(k)}`)
@@ -43,12 +45,14 @@ export async function jobs() {
 		const caps = await ocs(U1, 'GET', '/ocs/v1.php/cloud/capabilities?format=json')
 		check('capability jobs: 3', caps.data?.capabilities?.timesister?.jobs === 3, caps.data?.capabilities?.timesister)
 		expect('project with lead pblead and a budget', await ocs(A, 'PUT', `/records/project/${PJ}`, { version: 0, data: project }), 200)
+		expect('a project without pblead', await ocs(A, 'PUT', `/records/project/${PX}`, { version: 0, data: {
+			schema: 1, id: PX, name: `Other ${RUN}`, codes: ['PX'], subprojects: [{ code: 'PX.1', name: 'One' }], leads: [] } }), 200)
 		for (const u of [L, U1, U2]) {
 			await clearNotes(u)
 		}
 		const rev0 = (await me(U1)).revision
 		expect('a User offers', await ocs(U1, 'PUT', path(key(0)), offer()), 403, 'forbidden')
-		expect('a Lead offers for a project they do not lead', await ocs(L, 'PUT', path(key(0)), offer({ project: 'intern', code: 'I100.1', budget: null, work_package: null })), 403, 'forbidden')
+		expect('a Lead offers for a project they do not lead', await ocs(L, 'PUT', path(key(0)), offer({ project: PX, code: 'PX.1', budget: null, work_package: null })), 403, 'forbidden')
 		expect('to an account of another team', await ocs(L, 'PUT', path(key(0)), offer({ recipients: ['atuser1'] })), 422, 'invalid')
 		expect('unknown project', await ocs(L, 'PUT', path(key(0)), offer({ project: `nope-${RUN}` })), 422, 'invalid')
 		const wrongCode = await ocs(L, 'PUT', path(key(0)), offer({ code: 'PJ.2' }))
@@ -267,7 +271,7 @@ export async function jobs() {
 		check('pblead changes J3; the change is noted', ch.status === 200 && ch.data?.data?.change?.fields?.hours?.from === 5 && ch.data?.data?.change?.fields?.hours?.to === 6, ch.text.slice(0, 300))
 		check('pbuser1 is notified: changed', /changed the Job/.test((await noteFor(U1, key(3)))?.subject || ''))
 		expect('a User changes', await ocs(U1, 'POST', `${path(key(3))}/change`, { hours: 60 }), 403, 'forbidden')
-		expect('project or budget do not change', await ocs(L, 'POST', `${path(key(3))}/change`, { project: 'intern' }), 422, 'invalid')
+		expect('project or budget do not change', await ocs(L, 'POST', `${path(key(3))}/change`, { project: PX }), 422, 'invalid')
 		expect('Team Admin (not the sender) deletes', await ocs(A, 'DELETE', path(key(3))), 403, 'forbidden')
 		expect('pbuser1 deletes', await ocs(U1, 'DELETE', path(key(3))), 403, 'forbidden')
 		const del = await ocs(L, 'DELETE', path(key(3)))
@@ -301,9 +305,11 @@ export async function jobs() {
 				await ocs(L, 'DELETE', path(k))
 			}
 		}
-		const p = await ocs(A, 'GET', `/records/project/${PJ}`)
-		if (p.status === 200) {
-			expect(`delete ${PJ}`, await ocs(A, 'DELETE', `/records/project/${PJ}?version=${p.data.version}`), 200)
+		for (const id of [PJ, PX]) {
+			const p = await ocs(A, 'GET', `/records/project/${id}`)
+			if (p.status === 200) {
+				expect(`delete ${id}`, await ocs(A, 'DELETE', `/records/project/${id}?version=${p.data.version}`), 200)
+			}
 		}
 		for (const u of [L, U1, U2]) {
 			await clearNotes(u)

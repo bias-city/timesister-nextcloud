@@ -1,5 +1,12 @@
 # Changes
 
+## 0.7.3 – unreleased
+
+- **Nextcloud 35:** `max-version` 35; Psalm clean against 33, 34, 35 and master. `IL10N::t` gets only non-empty text; a plural text without `%n` (Nextcloud returns both forms joined by `|`) is resolved by the app.
+- Early warning: installs the notifications app like the PHPUnit workflow, so the reminder tests run there too.
+- Integration tests: no longer rely on local test data or on the account language picked at the first login.
+- **Capacity check per day:** when a counter-proposal is accepted, no day may go above a full day's capacity either (the capacity line over the week's working days, by weight), besides the week. Hours that land on the one working day after a vacation, or on days without weight, no longer pass because the week as a whole still has room. An entry of such a day carries `day`, with that day's load and capacity. No migration, API unchanged in form.
+
 ## 0.7.2 – unreleased
 
 - API unchanged in form (`api: 2`), only additions; the capability names `jobs: 3`.

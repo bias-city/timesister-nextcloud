@@ -24,7 +24,7 @@ API: [`docs/API.md`](docs/API.md).
 | Weekly backup (checked hourly) | `lib/BackgroundJob/WeeklyBackup.php` |
 | Retention (daily): history, backup tiers (`Thinning`) | `lib/BackgroundJob/Retention.php` |
 
-Requirements: Nextcloud 33–34, PHP ≥ 8.2, no other apps.
+Requirements: Nextcloud 33–35, PHP ≥ 8.2, no other apps.
 
 ## Development
 

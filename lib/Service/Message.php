@@ -38,12 +38,14 @@ final class Message {
 
 	/** In the language of `$l`; without it English (logs, tests). */
 	public function text(?IL10N $l = null): string {
+		// A local copy lets Psalm narrow it: IL10N::t wants a non-empty string (OCP 35).
+		$source = $this->source;
 		if ($this->plural === null) {
-			$text = $l === null ? $this->source : $l->t($this->source);
+			$text = $l === null || $source === '' ? $source : $l->t($source);
 		} elseif ($l === null) {
 			$text = str_replace('%n', (string)$this->count, $this->count === 1 ? $this->source : $this->plural);
 		} else {
-			$text = $l->n($this->source, $this->plural, $this->count);
+			$text = self::form($l->n($this->source, $this->plural, $this->count), $this->count);
 		}
 		// Values go in after translating, so they never pass through vsprintf.
 		$vars = [];
@@ -51,5 +53,19 @@ final class Message {
 			$vars['{' . $name . '}'] = $value instanceof self ? $value->text($l) : (string)$value;
 		}
 		return strtr($text, $vars);
+	}
+
+	/**
+	 * Nextcloud picks the plural form only when the text holds %n; otherwise
+	 * it returns the forms joined with "|" (translations may not contain
+	 * one). Then the form is picked here – the app's languages have two:
+	 * one and other.
+	 */
+	public static function form(string $text, int $count): string {
+		if (!str_contains($text, '|')) {
+			return $text;
+		}
+		$forms = explode('|', $text);
+		return $forms[$count === 1 ? 0 : count($forms) - 1];
 	}
 }
