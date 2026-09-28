@@ -1,5 +1,36 @@
 # Changes
 
+## 0.7.2 – unreleased
+
+- API unchanged in form (`api: 2`), only additions; the capability names `jobs: 3`.
+- **Weekly numbers per person:** each client reports its own weeks (`POST /jobs/weeks`): the capacity line (target × pensum − holidays − vacation), per Job the booked and planned hours, and the weight of each day. Read (`GET /jobs/weeks`) by the person, Team Admins and Leads who may at least view the person's time calendar; Jobs the reader does not see are merged into `other`.
+- **Capacity check when a counter-proposal is accepted:** the server spreads the counter-proposal over the person's working days and answers `422` with `rule: capacity` and the weeks above the capacity line; without reported numbers nothing is blocked. `GET /jobs/{key}/capacity?by=` shows the same before accepting.
+- Migration: two columns in `ts_client_status` (`job_weeks`, `job_weeks_at`).
+
+## 0.7.1 – unreleased
+
+- **Privacy in the market:** whoever does not manage a Job (recipients, the assignee) reads only their own counter-proposal; the others' waiting ones as `{ other: true }`, answered ones not at all; the log without the others' counter-proposals and their answers. Everywhere a Job is read: delta, `GET /records/job/{key}`, the answers of `/jobs`, the `current` of a `409`.
+- The history of a Job only for those who manage it (Team Admins, the project's Leads, the sender).
+- No migration, API unchanged in form.
+
+## 0.7.0 – unreleased
+
+- API unchanged in form (`api: 2`), only additions; the capability names `jobs: 2`.
+- **Market:** a Job offered to several stays open for the others while one of them counter-proposes; counter-proposals are kept per recipient (`counters`, a 0.6.0 `counter` reads as a list of one). Whoever is accepted first gets the Job – by accepting the offer or through their accepted counter-proposal; the counter-proposals still waiting lapse (`answer: lapsed`, notification `job_counter_lapsed`).
+- `accept-counter` and `reject-counter` take `{ by }` to say whose counter-proposal while several wait.
+- Rejecting a counter-proposal in a market puts only that person out; the Job is `rejected` once nobody is left.
+- No migration.
+
+## 0.6.0 – unreleased
+
+- API unchanged in form (`api: 2`), only additions; the capability names `jobs: 1`.
+- **Jobs:** records of kind `job`, read through `/records`, written through `/jobs`: offer (`PUT /jobs/{key}`), change, accept (atomic, the first wins), counter-propose and answer, decline, return, Done, paid (Team Admin), delete (whoever created it), and the booked hours from the person's client (`POST /jobs/progress`, Done by itself once the volume is reached).
+- Rules on the server: the volume of a work package, no overlapping Jobs on the same work package or code for the same person, codes of the project.
+- Who sees a Job: Team Admins, the project's Leads, the sender, and the person while it is theirs; whoever was involved before gets a tombstone in the delta.
+- Notifications for new offers, counter-proposals and their answer, changes, returns and deletions.
+- The words Job, Workload, Inbox, In Progress, Done and Outbox are the same in every language (`JobWord`, never through the l10n).
+- No migration: Jobs live in `ts_records`.
+
 ## 0.5.0 – unreleased
 
 - API unchanged in form (`api: 2`), only additions.

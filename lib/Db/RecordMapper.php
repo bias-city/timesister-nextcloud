@@ -57,6 +57,21 @@ final class RecordMapper extends QBMapper {
 	}
 
 	/**
+	 * All live records of one kind in the team, by key.
+	 *
+	 * @return list<Record>
+	 */
+	public function findLiveByKind(int $tenantId, string $kind): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')->from($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('kind', $qb->createNamedParameter($kind)))
+			->andWhere($qb->expr()->eq('deleted', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)))
+			->orderBy('rkey');
+		return $this->findEntities($qb);
+	}
+
+	/**
 	 * Person records of an account: key = identifier, or `accounts`
 	 * contains it. Across all teams when `$tenantId` is omitted.
 	 *

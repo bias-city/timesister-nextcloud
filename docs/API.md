@@ -799,3 +799,222 @@ active members of the own team; no diagonal. Levels `none`, `view` (read),
   clients; the matrix does not use them.
 - `POST /status` takes `applied_shares`: `[{ uid, access }]`, the user shares
   of the own time calendar after the sync (at most 1000); `null` clears it.
+
+## Jobs, 0.6.0 (2026-09-28)
+
+Still `api: 2`; only additions. The capability says `jobs: 1`, from 0.7.0
+`jobs: 2` (counter-proposals per recipient in a market). Plan and
+decisions: `PLAN-JOBS.md`. A **Job** is a share of a project or a work
+package that a Lead or Team Admin offers to people of the team. The words
+**Job, Workload, Inbox, In Progress, Done, Outbox** are the same in every
+language (the app's `JobWord`, the Mac app's `marke::JOBWORTE`); sentences
+take them as placeholders.
+
+### The record
+
+Kind `job`, key `^[A-Za-z0-9@._+-]{1,64}$` (chosen by the client, so an
+offer sent again is recognised). Read through `/records` like any record;
+written **only** through `/jobs` – `PUT`, `DELETE`, batch and restore of a
+`job` answer `400 invalid`.
+
+```json
+{ "schema": 1, "id": "j-7f3a", "project": "D200", "code": "D200.1", "codes": ["D200.1"],
+  "budget": "b-2026-041", "work_package": "AP1", "title": "Basics", "description": "…",
+  "hours": 40.0, "start": "2026-10-01", "end": "2026-10-31",
+  "sender": "pblead", "recipients": ["pbuser1"], "declined_by": [], "assignee": null,
+  "state": "offered",
+  "counters": [], "change": null,
+  "progress": { "hours": 0.0, "invoiced": false, "at": null },
+  "done": null, "paid": null,
+  "created_at": "2026-09-28T08:00:00Z",
+  "log": [{ "at": "…", "by": "pblead", "action": "offer", "to": ["pbuser1"] }],
+  "names": { "pblead": "Lea Planer", "pbuser1": "Mia Muster" } }
+```
+
+- `budget` and `work_package` (the work package's `no`) go together; without
+  them the Job is on the project (code of the project or a subproject).
+  `codes`: the work package's codes, otherwise `[code]` – where the
+  person's hours count. `title` defaults to the work package's name.
+- `state`: `offered` (in the Inbox of every recipient who has neither
+  declined nor counter-proposed), `counter` (nobody has it in the Inbox any
+  more, a counter-proposal waits for the sender), `rejected` (nobody left,
+  a counter-proposal was rejected), `declined` (all recipients declined),
+  `in_progress` (with `assignee`), `returned`, `done`.
+- `counters` (0.7.0): one counter-proposal per recipient,
+  `[{ by, at, hours?, start?, end?, description?, note, answer?, answered_at? }]`;
+  `answer` is `accepted`, `rejected` or `lapsed` (someone else got the Job
+  first). A Job written by 0.6.0 has a single `counter` instead; read it as
+  a list of one – the next transition writes `counters`.
+- `change`: the last change by a Lead or Team Admin,
+  `{ by, at, fields: { <field>: { from, to } } }` – for the person's view.
+- `progress`: what the assignee's client reported (booked hours, capped at
+  `hours`; all invoiced?). `done`: `{ by, at, reason: declared|fulfilled }`.
+  `paid`: `{ by, at }`.
+- `log`: every transition, at most 200 (the first and the newest).
+  `names`: display names at the time of writing.
+
+### Who sees a Job
+
+In full: Team Admins, the Leads of the project, the sender, and a person
+while the Job is in their Inbox (open offer), waits on their
+counter-proposal, is In Progress with them or is Done with them. Whoever
+was involved before (declined, lost the race, returned, the counter was
+rejected or lapsed) gets it as a **tombstone** (`deleted: true`, `data: null`) in
+the delta, so their client drops it; `GET /records/job/{key}` answers
+`404`. Deleted Jobs come as tombstones to everyone who saw them. History:
+whoever manages the Job (Team Admins, the project's Leads, the sender); of a
+deleted one only Team Admins.
+
+**Trimmed for whoever does not manage it (0.7.1):** a recipient or the
+assignee reads `counters` with only their own counter-proposal; of the
+others only those still waiting, as `{ "other": true }` (no person, no
+values, no note). The `log` leaves out the others' `counter`,
+`accept_counter` and `reject_counter`, and `lapsed` names only the caller.
+The same in the delta, `GET /records/job/{key}`, the answers of `/jobs`
+and the `current` of a `409`.
+
+### Endpoints
+
+All answer with the Job record as the caller now sees it (a tombstone if
+it left their view). A transition that has already happened is answered
+with the unchanged record (a resent request is not an error).
+
+| Method | Path | Who | Body |
+|---|---|---|---|
+| PUT | `/jobs/{key}` | Team Admin, Lead of the project | `{ project, code, budget?, work_package?, title?, description?, hours, start, end, recipients: [uid…] }` – offer |
+| POST | `/jobs/{key}/change` | Team Admin, Lead of the project | any of `code, title, description, hours, start, end, recipients` |
+| POST | `/jobs/{key}/accept` | a recipient | – |
+| POST | `/jobs/{key}/counter` | a recipient | `{ hours?, start?, end?, description?, note? }`, at least one of the first four |
+| POST | `/jobs/{key}/accept-counter` | Team Admin, Lead of the project | `{ by? }` – whose; needed while several wait (`422` otherwise) |
+| POST | `/jobs/{key}/reject-counter` | Team Admin, Lead of the project | `{ by? }` |
+| POST | `/jobs/{key}/decline` | a recipient | – |
+| POST | `/jobs/{key}/return` | the assignee | `{ note? }` |
+| POST | `/jobs/{key}/done` | the assignee | – |
+| POST | `/jobs/{key}/paid` | Team Admin | `{ paid?: bool }` (default true), only when Done |
+| DELETE | `/jobs/{key}` | whoever created it (`sender`) | – |
+| POST | `/jobs/progress` | the assignee's client | `{ jobs: { <key>: { hours, invoiced? } } }` |
+
+- **Offer:** `recipients` 1–50 accounts of the team (`422` otherwise);
+  `hours` > 0; `start` ≤ `end`, at most ten years; `description` at most
+  4000, `title` 200 characters. The key taken by another offer: `409`.
+- **Change:** `project`, `budget` and `work_package` never change (`422`).
+  With `recipients`, a declined, rejected or returned Job is offered again
+  (state `offered`, progress reset); an open offer gets the new
+  recipients (whoever declined and stays, stays declined); an In Progress
+  Job keeps its person (`409`). While a counter-proposal waits and once
+  Done: `409`. Recipients who stay keep their answer (declined, rejected).
+- **Market:** offered to several, the Job is in each of their Inboxes;
+  **whoever is accepted first gets it** – by accepting the offer or by the
+  sender accepting their counter-proposal. Every transition runs under the
+  team's lock, so two at the same time are served one after the other; the
+  second gets `409 conflict` ("Someone else has already accepted this
+  Job.", or for a counter-proposal "This counter-proposal has lapsed: the
+  Job has gone to someone else."). Whoever declines no longer sees it;
+  once all have declined, it is `declined`.
+- **Counter-proposal (0.7.0 per recipient):** the Job leaves the caller's
+  Inbox and waits for the sender; offered to several, it stays open for
+  the others (`state` stays `offered` while someone still has it in the
+  Inbox). Accepting applies its values and puts the Job In Progress with
+  the person who made it; every other counter-proposal waiting lapses
+  (`answer: lapsed`). Rejecting puts that person out; the Job stays
+  offered to the others, or becomes `rejected` when nobody is left. If
+  someone accepts the offer first, the waiting counter-proposals lapse.
+- **Progress:** per Job the assignee's booked hours on `codes` within the
+  period (the client computes them; the server caps at `hours`) and whether
+  they are all invoiced. Reaching `hours` makes an In Progress Job Done
+  (`reason: fulfilled`). Jobs that are not the caller's (any more) are
+  listed in `skipped`, not an error. Only changes are written (±0.005 h).
+  Answer: `{ revision, records: [changed Jobs], skipped: [keys] }`, at most
+  500 per call.
+
+### Rules (checked by the server)
+
+- **Volume:** with a budget, all Jobs of a work package together never
+  exceed its hours (the sum of the work package's `hours`). Offered, waiting
+  and In Progress Jobs hold their full hours; returned, declined, rejected
+  and Done ones only what was booked (`progress.hours`) – the rest goes
+  back. Checked on offer, on a change of hours or a new offer, and when a
+  counter-proposal is accepted. `422 invalid` with `rule: "volume"`,
+  `free` and `total` (hours).
+- **No overlap:** no two Jobs on the same work package or a common code,
+  with overlapping periods, for the same person (open offer, waiting
+  counter-proposal or In Progress). Checked on offer, change, accept and
+  accepting a counter-proposal. `422 invalid` with `rule: "overlap"`,
+  `user` and `other` (the other Job's key).
+- The code must belong to the work package (if it has codes) or the
+  project: `422` with `rule: "code"`; unknown budget or work package: `rule:
+  "budget"` / `"work_package"`.
+
+### Notifications
+
+`OCP\Notification`, app `timesister`, object `job`/key; one per person and
+Job (a new one replaces the older):
+
+| Subject | To | When |
+|---|---|---|
+| `job_offered` | each open recipient | offered, offered again, added as recipient |
+| `job_counter` | the sender | counter-proposal |
+| `job_counter_accepted` / `job_counter_rejected` | who proposed | answered |
+| `job_counter_lapsed` | who proposed | someone else got the Job first (0.7.0) |
+| `job_changed` | open recipients or the assignee | changed |
+| `job_returned` | the sender | returned |
+| `job_deleted` | open recipients or the assignee | deleted |
+
+Accepting (the offer or a counter-proposal) withdraws the offer
+notifications of all recipients, and the sender's about counter-proposals
+that lapsed; declining and counter-proposing withdraw the caller's. Nobody
+is told separately that a market offer went to someone else – it leaves
+their Inbox.
+
+### Stored
+
+No migration: Jobs are rows of `ts_records` (kind `job`) with version,
+revision and `ts_history`. `accounts` holds everyone ever involved. A
+tombstone keeps the last `data` internally, so the delta knows whom to
+tell; the API never shows it.
+
+## Weekly numbers of the Jobs, 0.7.2 (2026-09-28)
+
+Still `api: 2`; only additions. The capability says `jobs: 3`. Each
+person's client reports, besides the booked hours per Job, its **weekly
+numbers**: what the person can carry and what their Jobs take, week by
+week. The server stores them per person and uses them to check the
+capacity when a sender accepts a counter-proposal – the person's client
+cannot check that step.
+
+| Method | Path | Who | Body / answer |
+|---|---|---|---|
+| POST | `/jobs/weeks` | every member, for themselves | `{ pensum?, jobs: [key…], weeks: [{ start, full, available, holidays?, vacation?, days?, jobs?: { <key>: { booked, planned } } }] }` → `{ reported_at }` |
+| GET | `/jobs/weeks?uid=` | the person; Team Admins everyone; Leads whom they may at least view | `{ people: [{ uid, display_name, role, reported_at, pensum, weeks }] }` |
+| GET | `/jobs/{key}/capacity?by=` | Team Admin, Lead of the project | `{ user, display_name, reported, reported_at, fits, weeks }` |
+
+- **A week:** `start` its Monday; `full` the target hours of a full
+  position (100 %); `available` the capacity line (target × pensum −
+  holidays − vacation); `holidays` in days, `vacation` in hours; `days`
+  seven weights Monday–Sunday (0–1: a holiday by its factor, a vacation
+  day 0; default Monday–Friday 1) for spreading a Job; per Job the
+  `booked` and `planned` hours of this week. `jobs` at the top lists the
+  Jobs the report accounts for (In Progress and Done). At most 80 weeks,
+  200 Jobs per week, 500 at the top; numbers 0–1000. A new report replaces
+  the old one.
+- **Reading:** everyone readable is listed, `weeks: null` and
+  `reported_at: null` if their client never reported. Per week `start`,
+  `week` (ISO), `full`, `available`, `holidays`, `vacation`, `load` (the
+  sum), `jobs` – only the Jobs the reader sees – and `other` with the rest
+  merged (`null` if nothing). Leads read whom the shares matrix lets them
+  at least view (the matrix level, not whether it is applied yet); anyone
+  else `403`.
+- **Capacity check** on `accept-counter`: the counter-proposal's hours are
+  spread over the person's working days from its start (at the earliest
+  today) to its end. A week from the current one on, in which it takes
+  something and which the report covers, may not go above `available`
+  (±0.05 h). The load is what the reported Jobs still count (Jobs no longer
+  the person's are dropped) plus running Jobs the report does not know yet
+  (their open hours, spread the same way). Otherwise `422 invalid` with
+  `rule: "capacity"`, `user`, `weeks: [{ start, week, load, available,
+  over }]` and `reported_at`. **Without reported numbers nothing is
+  blocked.** `GET /jobs/{key}/capacity` answers the same before accepting
+  (`by`: whose counter-proposal, needed while several wait; `409` if none
+  waits).
+- **Stored:** columns `job_weeks` (JSON) and `job_weeks_at` in
+  `ts_client_status` (migration 1006).

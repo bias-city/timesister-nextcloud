@@ -32,6 +32,10 @@ use OCP\DB\Types;
  * @method void setAppliedShares(?string $appliedShares)
  * @method int|null getAppliedAt()
  * @method void setAppliedAt(?int $appliedAt)
+ * @method string|null getJobWeeks()
+ * @method void setJobWeeks(?string $jobWeeks)
+ * @method int|null getJobWeeksAt()
+ * @method void setJobWeeksAt(?int $jobWeeksAt)
  */
 final class ClientStatus extends Entity {
 	protected int $tenantId = 0;
@@ -46,6 +50,9 @@ final class ClientStatus extends Entity {
 	/** JSON `[{uid, access}]`: the shares the client has set; null: never reported. */
 	protected ?string $appliedShares = null;
 	protected ?int $appliedAt = null;
+	/** JSON: the weekly numbers of the person's Jobs (0.7.2, {@see \OCA\TimeSister\Service\JobWeeks}); null: never reported. */
+	protected ?string $jobWeeks = null;
+	protected ?int $jobWeeksAt = null;
 
 	public function __construct() {
 		$this->addType('tenantId', Types::INTEGER);
@@ -58,5 +65,7 @@ final class ClientStatus extends Entity {
 		$this->addType('seenAt', Types::INTEGER);
 		$this->addType('appliedShares', Types::STRING);
 		$this->addType('appliedAt', Types::INTEGER);
+		$this->addType('jobWeeks', Types::STRING);
+		$this->addType('jobWeeksAt', Types::INTEGER);
 	}
 }

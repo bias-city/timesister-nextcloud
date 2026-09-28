@@ -111,6 +111,25 @@ final class AccessService {
 		);
 	}
 
+	/**
+	 * What the caller may do with each other member's time calendar, as
+	 * the matrix sets it: owner → none|view|edit.
+	 *
+	 * @return array<string,string>
+	 */
+	public function levelsOf(Membership $m): array {
+		$roles = $this->tenants->memberRoles($m->tenantId);
+		$flags = $this->tenants->overrideFlags($m->tenantId);
+		$entries = $this->entries($m->tenantId);
+		$out = [];
+		foreach (array_map('strval', array_keys($roles)) as $owner) {
+			if ($owner !== $m->uid && isset($roles[$m->uid])) {
+				$out[$owner] = AccessRules::field($m->uid, $owner, $roles, $flags, $entries)['level'];
+			}
+		}
+		return $out;
+	}
+
 	public function mayOverride(Membership $m): bool {
 		return $this->tenants->overrideFlags($m->tenantId)[$m->uid] ?? false;
 	}

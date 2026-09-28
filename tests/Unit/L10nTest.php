@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Tests\Unit;
 
 use OCA\TimeSister\Service\ApiException;
+use OCA\TimeSister\Service\JobWord;
 use OCA\TimeSister\Service\Message;
 use OCA\TimeSister\Service\Role;
 use OCA\TimeSister\Service\RoleName;
@@ -150,6 +151,48 @@ class L10nTest extends TestCase {
 		$php = RoleName::ALL;
 		ksort($php);
 		$this->assertSame($php, $rust);
+	}
+
+	/**
+	 * Job words: Job, Workload, Inbox, In Progress, Done and Outbox in every
+	 * language, never translated. Sentences carry them only as placeholders
+	 * ({job}, {done}, …), which the translations keep (see above).
+	 */
+	public function testJobWordsSameInEveryLanguage(): void {
+		$this->assertSame(['job' => 'Job', 'workload' => 'Workload', 'inbox' => 'Inbox', 'in_progress' => 'In Progress', 'done' => 'Done', 'outbox' => 'Outbox'], JobWord::ALL);
+		$bare = '/\b(Jobs?|Workload|Inbox|In Progress|Outbox)\b/';
+		foreach (self::sources() as $source) {
+			$this->assertDoesNotMatchRegularExpression($bare, $source, 'Job words go in as placeholders');
+		}
+		foreach (self::LANGUAGES as $lang) {
+			$tr = self::translations($lang);
+			foreach (JobWord::ALL as $word) {
+				$this->assertArrayNotHasKey($word, $tr, "$lang: Job words do not go through the l10n");
+			}
+			$all = implode(' ', array_map(fn ($t) => implode(' ', (array)$t), $tr));
+			$this->assertDoesNotMatchRegularExpression('/Auftrag|Auftr[äa]ge|Posteingang|Postausgang|In Bearbeitung|Arbeitslast/', $all, $lang);
+		}
+		// Every sentence with {job} is rendered with the word itself.
+		$this->assertSame('Mia offers you a Job: Survey', \OCA\TimeSister\Service\JobMessages::subject('job_offered', ['user' => 'Mia', 'title' => 'Survey'])?->text());
+		$this->assertNull(\OCA\TimeSister\Service\JobMessages::subject('unknown', []));
+	}
+
+	/** The Mac app uses the same Job words (`marke::JOBWORTE`), when it is in the same repository. */
+	public function testSameJobWordsAsTheMacApp(): void {
+		$marke = self::ROOT . '/../../core/src/marke.rs';
+		if (!is_file($marke)) {
+			$this->markTestSkipped('Mac app not in this repository');
+		}
+		$code = (string)file_get_contents($marke);
+		$start = strpos($code, 'pub const JOBWORTE');
+		$this->assertNotFalse($start, 'marke::JOBWORTE');
+		$block = substr($code, $start, (int)strpos($code, '];', $start) - $start);
+		preg_match_all('/\("(\w+)", "([^"]+)"\)/', $block, $m, PREG_SET_ORDER);
+		$rust = [];
+		foreach ($m as $pair) {
+			$rust[$pair[1]] = $pair[2];
+		}
+		$this->assertSame(JobWord::ALL, $rust);
 	}
 
 	public function testMessagesEnglishWithoutL10n(): void {

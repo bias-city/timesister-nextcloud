@@ -3,7 +3,8 @@
 Server side of the TimeSister time tracker (macOS): master data as
 versioned records, separate teams via one Nextcloud group each (roles
 Team Admin, Lead and User; Team Admins are that group's group admins),
-a shares matrix for the time calendars, permission checks on the server, history, calendar backups and status
+a shares matrix for the time calendars, Jobs (shares of a project or work
+package offered to people of the team), permission checks on the server, history, calendar backups and status
 reports from clients. No UI apart from an admin settings section.
 API: [`docs/API.md`](docs/API.md).
 
@@ -14,6 +15,7 @@ API: [`docs/API.md`](docs/API.md).
 | OCS controller (`/ocs/v2.php/apps/timesister/api/v1`) | `lib/Controller` |
 | Team, role, permissions, checks, conflicts | `lib/Service` (pure classes without Nextcloud: `AccessPolicy`, `MembershipResolver`, `ProjectAccess`, `RecordValidator`, `VersionCheck`, `*Rules`) |
 | App roles and leaving (API version 2) | `MemberService`, table `ts_members` |
+| Jobs: rules, transitions, who sees, notifications | `JobRules`, `JobFlow` (pure), `JobAccess`, `JobService`, `JobNotifications`, `JobMessages`, `JobWord`; records of kind `job` |
 | Tables `ts_*`, mappers | `lib/Db`, `lib/Migration` |
 | Admin page | `lib/Settings`, `templates/admin.php`, `js/admin.js`, `css/admin.css` |
 | Translations (admin page, API messages) | `l10n/de.json` (informal German, "du"), `l10n/de_DE.json` (formal, "Sie") |

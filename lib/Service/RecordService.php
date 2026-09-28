@@ -32,7 +32,15 @@ final class RecordService {
 		private HistoryMapper $history,
 		private AccessPolicy $policy,
 		private ITimeFactory $time,
+		private JobAccess $jobs,
 	) {
+	}
+
+	/** Jobs change only through /jobs (JobService), never as records. */
+	private static function noJob(string $kind): void {
+		if ($kind === RecordValidator::JOB) {
+			throw ApiException::badRequest(Message::of('A {job} changes only through the {job} endpoints (/jobs).', ['job' => JobWord::JOB]));
+		}
 	}
 
 	/** @return array<string,mixed> */
@@ -89,6 +97,16 @@ final class RecordService {
 		$own = $this->ownKeys($m);
 		$out = [];
 		foreach ($this->records->findChanged($m->tenantId, $since, $rev) as $r) {
+			if ($r->getKind() === RecordValidator::JOB) {
+				// Jobs: in full for whoever sees them, as gone for whoever did.
+				$view = $this->jobs->view($m, $r, $own);
+				if ($view === JobRules::VIEW_FULL) {
+					$out[] = $this->jobs->presentFor($m, $r, $own, $this->present($r));
+				} elseif ($view === JobRules::VIEW_GONE && $since > 0) {
+					$out[] = JobAccess::gone($r);
+				}
+				continue;
+			}
 			if ($this->policy->canRead($m, $r->getKind(), $r->getRkey(), $r->accountList())) {
 				$out[] = $this->presentFor($m, $r, $own);
 			}
@@ -100,6 +118,13 @@ final class RecordService {
 	public function get(Membership $m, string $kind, string $key): array {
 		RecordValidator::checkAddress($kind, $key);
 		$r = $this->records->findOne($m->tenantId, $kind, $key);
+		if ($kind === RecordValidator::JOB) {
+			$own = $this->ownKeys($m);
+			if ($r === null || $r->isTombstone() || $this->jobs->view($m, $r, $own) !== JobRules::VIEW_FULL) {
+				throw ApiException::notFound(Message::of('This {job} does not exist.', ['job' => JobWord::JOB]));
+			}
+			return $this->jobs->presentFor($m, $r, $own, $this->present($r));
+		}
 		if (!$this->policy->canRead($m, $kind, $key, $r?->accountList() ?? [])) {
 			throw ApiException::forbidden('This account may not read this record.');
 		}
@@ -122,6 +147,7 @@ final class RecordService {
 
 	/** @return array<string,mixed> the new record */
 	public function put(Membership $m, string $kind, string $key, \stdClass $body): array {
+		self::noJob($kind);
 		if ($kind !== 'project') {
 			$this->policy->requireWrite($m);
 		}
@@ -156,6 +182,7 @@ final class RecordService {
 
 	/** @return array<string,mixed> the tombstone */
 	public function delete(Membership $m, string $kind, string $key, mixed $version): array {
+		self::noJob($kind);
 		$this->policy->requireWrite($m);
 		RecordValidator::checkAddress($kind, $key);
 		if ($version === null || $version === '') {
@@ -191,6 +218,7 @@ final class RecordService {
 					throw ApiException::badRequest('Each write needs “kind” and “key” as text.');
 				}
 				RecordValidator::checkAddress($kind, $key);
+				self::noJob($kind);
 				$version = RecordValidator::checkVersion($w->version ?? null);
 				if (!property_exists($w, 'data')) {
 					throw ApiException::invalid('“data” is missing (null means delete).');
@@ -217,11 +245,21 @@ final class RecordService {
 	public function history(Membership $m, string $kind, string $key): array {
 		RecordValidator::checkAddress($kind, $key);
 		$r = $this->records->findOne($m->tenantId, $kind, $key);
+		if ($kind === RecordValidator::JOB) {
+			// A Job: whoever manages it (the versions hold everyone's
+			// counter-proposals); a deleted one only Team Admins.
+			$full = $r !== null && ($r->isTombstone() ? $m->manages()
+				: $this->jobs->view($m, $r, $this->ownKeys($m)) === JobRules::VIEW_FULL
+					&& $this->jobs->manages($m, JobAccess::decode($r), $this->ownKeys($m)));
+			if (!$full) {
+				throw ApiException::forbidden('This account may not read the history of this record.');
+			}
+		}
 		// Project: also its leads (by the current version).
 		$raw = $r?->getData();
 		$lead = $kind === 'project' && $r !== null && !$r->isTombstone() && $raw !== null
 			&& $this->policy->canSeeFullProject($m, Json::decode($raw), $this->ownKeys($m));
-		if (!$lead && !$this->policy->canReadHistory($m, $kind, $key, $r?->accountList() ?? [])) {
+		if (!$lead && $kind !== RecordValidator::JOB && !$this->policy->canReadHistory($m, $kind, $key, $r?->accountList() ?? [])) {
 			throw ApiException::forbidden('This account may not read the history of this record.');
 		}
 		if ($r === null) {
@@ -241,6 +279,7 @@ final class RecordService {
 
 	/** @return array<string,mixed> the new record */
 	public function restore(Membership $m, string $kind, string $key, \stdClass $body): array {
+		self::noJob($kind);
 		$this->policy->requireWrite($m);
 		RecordValidator::checkAddress($kind, $key);
 		$version = RecordValidator::checkVersion($body->version ?? null, 'version');
