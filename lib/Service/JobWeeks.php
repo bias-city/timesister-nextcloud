@@ -8,10 +8,11 @@ namespace OCA\TimeSister\Service;
 
 /**
  * The weekly numbers a person's client reports (0.7.2): per week the
- * capacity line and what their Jobs take, per Job booked and planned hours,
- * and the weight of each day for spreading a Job. With them the server
- * checks the capacity when a sender accepts a counter-proposal – per week
- * and, since 0.7.3, per day (as the client does). Pure.
+ * capacity line and what their Jobs take, per Job booked and planned hours
+ * (since 0.7.4 also the non-billable part of the booked ones), and the
+ * weight of each day for spreading a Job. With them the server checks the
+ * capacity when a sender accepts a counter-proposal – per week and, since
+ * 0.7.3, per day (as the client does). Pure.
  */
 final class JobWeeks {
 	public const MAX_WEEKS = 80;
@@ -27,7 +28,7 @@ final class JobWeeks {
 	/**
 	 * The report as sent by the client, checked and normalised; weeks sorted.
 	 *
-	 * @return array{pensum:?float,jobs:list<string>,weeks:list<array{start:string,full:float,available:float,holidays:float,vacation:float,days:list<float>,jobs:array<string,array{booked:float,planned:float}>}>}
+	 * @return array{pensum:?float,jobs:list<string>,weeks:list<array{start:string,full:float,available:float,holidays:float,vacation:float,days:list<float>,jobs:array<string,array{booked:float,booked_nb:float,planned:float}>}>}
 	 */
 	public static function parse(\stdClass $b): array {
 		$pensum = $b->pensum ?? null;
@@ -84,7 +85,13 @@ final class JobWeeks {
 				if (!($v instanceof \stdClass)) {
 					throw ApiException::invalidField('jobs');
 				}
-				$p[$k] = ['booked' => self::number($v->booked ?? 0, 'booked'), 'planned' => self::number($v->planned ?? 0, 'planned')];
+				$booked = self::number($v->booked ?? 0, 'booked');
+				// 0.7.4: the non-billable part of the booked hours; older clients send none.
+				$nb = self::number($v->booked_nb ?? 0, 'booked_nb');
+				if ($nb > $booked) {
+					throw ApiException::invalidField('booked_nb');
+				}
+				$p[$k] = ['booked' => $booked, 'booked_nb' => $nb, 'planned' => self::number($v->planned ?? 0, 'planned')];
 			}
 			ksort($p);
 			$out[$start] = [
@@ -117,7 +124,8 @@ final class JobWeeks {
 
 	/**
 	 * A stored report for a reader: per week the load, the Jobs the reader
-	 * sees by key and the others merged into `other` (null if none).
+	 * sees by key and the others merged into `other` (null if none). A
+	 * report from before 0.7.4 reads `booked_nb` as 0.
 	 *
 	 * @param array<string,mixed> $report from {@see parse()}
 	 * @param callable(string):bool $sees whether the reader sees this Job
@@ -128,17 +136,19 @@ final class JobWeeks {
 		foreach ((array)($report['weeks'] ?? []) as $w) {
 			$w = (array)$w;
 			$jobs = [];
-			$other = ['booked' => 0.0, 'planned' => 0.0];
+			$other = ['booked' => 0.0, 'booked_nb' => 0.0, 'planned' => 0.0];
 			$load = 0.0;
 			foreach ((array)($w['jobs'] ?? []) as $k => $p) {
 				$p = (array)$p;
 				$b = (float)($p['booked'] ?? 0);
+				$nb = (float)($p['booked_nb'] ?? 0);
 				$pl = (float)($p['planned'] ?? 0);
 				$load += $b + $pl;
 				if ($sees((string)$k)) {
-					$jobs[(string)$k] = ['booked' => $b, 'planned' => $pl];
+					$jobs[(string)$k] = ['booked' => $b, 'booked_nb' => $nb, 'planned' => $pl];
 				} else {
 					$other['booked'] += $b;
+					$other['booked_nb'] += $nb;
 					$other['planned'] += $pl;
 				}
 			}
@@ -153,7 +163,8 @@ final class JobWeeks {
 				'load' => round($load, 2),
 				'jobs' => $jobs === [] ? new \stdClass() : $jobs,
 				'other' => $other['booked'] + $other['planned'] > 0.004
-					? ['booked' => round($other['booked'], 2), 'planned' => round($other['planned'], 2)] : null,
+					? ['booked' => round($other['booked'], 2), 'booked_nb' => round($other['booked_nb'], 2),
+						'planned' => round($other['planned'], 2)] : null,
 			];
 		}
 		return $out;

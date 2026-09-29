@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Weekly numbers of the Jobs (0.7.2, per day 0.7.3): each client reports its own weeks,
+// Weekly numbers of the Jobs (0.7.2, per day 0.7.3, non-billable 0.7.4): each client reports its own weeks,
 // who reads them (the person, Team Admins, Leads with at least “view” in
 // the shares matrix), and the capacity check when a Lead accepts a
 // counter-proposal – with the person's reported weeks, a running Job the
@@ -51,8 +51,9 @@ export async function wochen() {
 		expect('not a Monday', await ocs(AU, 'POST', '/jobs/weeks', { weeks: [{ ...week(0), start: addDays(W0, 1) }] }), 422, 'invalid')
 		expect('weeks not a list', await ocs(AU, 'POST', '/jobs/weeks', { weeks: 'x' }), 422, 'invalid')
 		expect('a bad Job key', await ocs(AU, 'POST', '/jobs/weeks', { weeks: [week(0, { 'a b': { booked: 1, planned: 0 } })] }), 400, 'invalid')
+		expect('more non-billable than booked', await ocs(AU, 'POST', '/jobs/weeks', { weeks: [week(0, { [key(1)]: { booked: 1, booked_nb: 2, planned: 0 } })] }), 422, 'invalid')
 		const rep = await ocs(AU, 'POST', '/jobs/weeks', { pensum: 50, jobs: [key(1), foreign], weeks: [
-			week(0, { [key(1)]: { booked: 0, planned: 5 }, [foreign]: { booked: 2, planned: 3 } }),
+			week(0, { [key(1)]: { booked: 0, planned: 5 }, [foreign]: { booked: 2, booked_nb: 0.5, planned: 3 } }),
 			week(1, { [key(1)]: { booked: 0, planned: 5 } }),
 			week(2, { [foreign]: { booked: 0, planned: 12 } }), week(3), week(4), week(5),
 		] })
@@ -63,6 +64,8 @@ export async function wochen() {
 		check('… week 0: load 10, the Job by key, the unknown one as “other”', me?.weeks?.length === 6 && me.weeks[0].start === W0
 			&& me.weeks[0].week === isoWeek(W0) && me.weeks[0].load === 10 && me.weeks[0].jobs?.[key(1)]?.planned === 5
 			&& me.weeks[0].other?.booked === 2 && me.weeks[0].other?.planned === 3 && me.weeks[0].days === undefined, JSON.stringify(me?.weeks?.[0]))
+		check('… non-billable (0.7.4): 0 where none was sent, merged into “other”', me?.weeks?.[0]?.jobs?.[key(1)]?.booked_nb === 0
+			&& me?.weeks?.[0]?.other?.booked_nb === 0.5, JSON.stringify(me?.weeks?.[0]))
 		const lead = await ocs(AL, 'GET', '/jobs/weeks')
 		check('a Lead without “view” reads only their own', lead.status === 200 && lead.data?.people?.length === 1 && lead.data.people[0].uid === 'atlead'
 			&& lead.data.people[0].weeks === null, lead.text.slice(0, 300))
@@ -71,7 +74,7 @@ export async function wochen() {
 		const lead2 = await ocs(AL, 'GET', '/jobs/weeks?uid=atuser1')
 		const tim = lead2.data?.people?.[0]
 		check('then the Lead reads atuser1', lead2.status === 200 && tim?.uid === 'atuser1' && tim?.weeks?.[0]?.jobs?.[key(1)]?.planned === 5
-			&& tim?.weeks?.[0]?.other?.booked === 2 && typeof tim?.reported_at === 'string', lead2.text.slice(0, 300))
+			&& tim?.weeks?.[0]?.other?.booked === 2 && tim?.weeks?.[0]?.other?.booked_nb === 0.5 && typeof tim?.reported_at === 'string', lead2.text.slice(0, 300))
 		const all = await ocs(AA, 'GET', '/jobs/weeks')
 		const uids = (all.data?.people || []).map((p) => p.uid)
 		check('a Team Admin reads everyone of the team', all.status === 200 && ['atadmin', 'atlead', 'atuser1'].every((u) => uids.includes(u))

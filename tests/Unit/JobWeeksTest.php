@@ -166,10 +166,28 @@ class JobWeeksTest extends TestCase {
 		$p = JobWeeks::present($r, fn (string $k) => $k === 'j-a');
 		$this->assertSame(40, $p[0]['week']);
 		$this->assertSame(11.0, $p[0]['load']);
-		$this->assertSame(['j-a' => ['booked' => 3.0, 'planned' => 5.0]], $p[0]['jobs']);
-		$this->assertSame(['booked' => 1.0, 'planned' => 2.0], $p[0]['other']);
+		$this->assertSame(['j-a' => ['booked' => 3.0, 'booked_nb' => 0.0, 'planned' => 5.0]], $p[0]['jobs']);
+		$this->assertSame(['booked' => 1.0, 'booked_nb' => 0.0, 'planned' => 2.0], $p[0]['other']);
 		$p = JobWeeks::present($r, fn (string $k) => true);
 		$this->assertNull($p[0]['other']);
 		$this->assertArrayNotHasKey('days', $p[0]);
+	}
+
+	/** 0.7.4: the non-billable part of the booked hours – kept, merged into `other`, 0 for older reports. */
+	public function testBookedNonBillable(): void {
+		$r = self::report([self::week(self::MON, 32, [
+			'j-a' => ['booked' => 3, 'booked_nb' => 1.25, 'planned' => 5],
+			'j-x' => ['booked' => 2, 'booked_nb' => 2, 'planned' => 0],
+		])], ['j-a', 'j-x']);
+		$this->assertSame(1.25, $r['weeks'][0]['jobs']['j-a']['booked_nb']);
+		$p = JobWeeks::present($r, fn (string $k) => $k === 'j-a');
+		$this->assertSame(['booked' => 3.0, 'booked_nb' => 1.25, 'planned' => 5.0], $p[0]['jobs']['j-a']);
+		$this->assertSame(['booked' => 2.0, 'booked_nb' => 2.0, 'planned' => 0.0], $p[0]['other']);
+		$this->assertSame(10.0, $p[0]['load'], 'the load stays booked plus planned');
+		// More non-billable than booked is no report.
+		$this->assertSame('422 invalid', self::code(fn () => self::report([self::week(self::MON, 32, ['j-a' => ['booked' => 1, 'booked_nb' => 2, 'planned' => 0]])])));
+		// A report stored before 0.7.4 reads as 0.
+		$alt = ['weeks' => [['start' => self::MON, 'full' => 42, 'available' => 32, 'jobs' => ['j-a' => ['booked' => 3, 'planned' => 1]]]]];
+		$this->assertSame(0.0, JobWeeks::present($alt, fn (string $k) => true)[0]['jobs']['j-a']['booked_nb']);
 	}
 }

@@ -1,5 +1,11 @@
 # Changes
 
+## 0.7.4 – unreleased
+
+- API unchanged in form (`api: 2`), only additions; the capability names `jobs: 4`.
+- **Non-billable hours in the weekly numbers:** a client reports per Job and week also `booked_nb`, the non-billable part of `booked` (at most `booked`). `GET /jobs/weeks` returns it with the same read rights and merges it like `booked` into `other` for Jobs the reader does not see. Reports of older clients, and reports stored before, read as 0. The load and the capacity check stay booked plus planned.
+- No migration: the numbers stay JSON in `ts_client_status.job_weeks`.
+
 ## 0.7.3 – unreleased
 
 - **Nextcloud 35:** `max-version` 35; Psalm clean against 33, 34, 35 and master. `IL10N::t` gets only non-empty text; a plural text without `%n` (Nextcloud returns both forms joined by `|`) is resolved by the app.

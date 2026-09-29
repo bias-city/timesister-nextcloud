@@ -43,7 +43,7 @@ export async function jobs() {
 	try {
 		head('Jobs: capability, project, rights to offer')
 		const caps = await ocs(U1, 'GET', '/ocs/v1.php/cloud/capabilities?format=json')
-		check('capability jobs: 3', caps.data?.capabilities?.timesister?.jobs === 3, caps.data?.capabilities?.timesister)
+		check('capability jobs: 4', caps.data?.capabilities?.timesister?.jobs === 4, caps.data?.capabilities?.timesister)
 		expect('project with lead pblead and a budget', await ocs(A, 'PUT', `/records/project/${PJ}`, { version: 0, data: project }), 200)
 		expect('a project without pblead', await ocs(A, 'PUT', `/records/project/${PX}`, { version: 0, data: {
 			schema: 1, id: PX, name: `Other ${RUN}`, codes: ['PX'], subprojects: [{ code: 'PX.1', name: 'One' }], leads: [] } }), 200)

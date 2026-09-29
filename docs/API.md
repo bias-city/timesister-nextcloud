@@ -975,7 +975,8 @@ tell; the API never shows it.
 
 ## Weekly numbers of the Jobs, 0.7.2 (2026-09-28)
 
-Still `api: 2`; only additions. The capability says `jobs: 3`. Each
+Still `api: 2`; only additions. The capability says `jobs: 3`, from
+0.7.4 `jobs: 4` (the non-billable hours `booked_nb`). Each
 person's client reports, besides the booked hours per Job, its **weekly
 numbers**: what the person can carry and what their Jobs take, week by
 week. The server stores them per person and uses them to check the
@@ -984,7 +985,7 @@ cannot check that step.
 
 | Method | Path | Who | Body / answer |
 |---|---|---|---|
-| POST | `/jobs/weeks` | every member, for themselves | `{ pensum?, jobs: [key…], weeks: [{ start, full, available, holidays?, vacation?, days?, jobs?: { <key>: { booked, planned } } }] }` → `{ reported_at }` |
+| POST | `/jobs/weeks` | every member, for themselves | `{ pensum?, jobs: [key…], weeks: [{ start, full, available, holidays?, vacation?, days?, jobs?: { <key>: { booked, booked_nb?, planned } } }] }` → `{ reported_at }` |
 | GET | `/jobs/weeks?uid=` | the person; Team Admins everyone; Leads whom they may at least view | `{ people: [{ uid, display_name, role, reported_at, pensum, weeks }] }` |
 | GET | `/jobs/{key}/capacity?by=` | Team Admin, Lead of the project | `{ user, display_name, reported, reported_at, fits, weeks }` |
 
@@ -993,15 +994,18 @@ cannot check that step.
   holidays − vacation); `holidays` in days, `vacation` in hours; `days`
   seven weights Monday–Sunday (0–1: a holiday by its factor, a vacation
   day 0; default Monday–Friday 1) for spreading a Job; per Job the
-  `booked` and `planned` hours of this week. `jobs` at the top lists the
+  `booked` and `planned` hours of this week and, since 0.7.4 (`jobs: 4`),
+  `booked_nb`: the non-billable part of `booked` (0 to `booked`, missing
+  means 0). `jobs` at the top lists the
   Jobs the report accounts for (In Progress and Done). At most 80 weeks,
   200 Jobs per week, 500 at the top; numbers 0–1000. A new report replaces
   the old one.
 - **Reading:** everyone readable is listed, `weeks: null` and
   `reported_at: null` if their client never reported. Per week `start`,
   `week` (ISO), `full`, `available`, `holidays`, `vacation`, `load` (the
-  sum), `jobs` – only the Jobs the reader sees – and `other` with the rest
-  merged (`null` if nothing). Leads read whom the shares matrix lets them
+  sum), `jobs` – only the Jobs the reader sees, each `{ booked, booked_nb,
+  planned }` – and `other` with the rest merged the same way (`null` if
+  nothing). Reports stored before 0.7.4 give `booked_nb: 0`. Leads read whom the shares matrix lets them
   at least view (the matrix level, not whether it is applied yet); anyone
   else `403`.
 - **Capacity check** on `accept-counter`: the counter-proposal's hours are
