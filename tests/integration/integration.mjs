@@ -3,7 +3,7 @@
 // Integration check of the app against a running test Nextcloud with the
 // accounts from seed.mjs. Checks every row of the permissions table from
 // API.md and every endpoint, plus roles and departure (version 2), projects
-// (catalog and lead), Jobs and their weekly numbers, the shares matrix, team boundary, conflicts, batch, delta, history,
+// (catalog and lead), Jobs and their weekly numbers, the shares matrix, billing marks and externals, team boundary, conflicts, batch, delta, history,
 // backups (with consent, visible copy and weekly job), heartbeat
 // and concurrency.
 //
@@ -17,6 +17,7 @@ import { konten } from './teil-konten.mjs'
 import { projekte } from './teil-projekte.mjs'
 import { sicherungen } from './teil-sicherungen.mjs'
 import { freigaben } from './teil-freigaben.mjs'
+import { abrechnung } from './teil-abrechnung.mjs'
 import { jobs } from './teil-jobs.mjs'
 import { wochen } from './teil-wochen.mjs'
 import { summary } from './harness.mjs'
@@ -24,6 +25,7 @@ import { summary } from './harness.mjs'
 await teams()
 await konten()
 await freigaben()
+await abrechnung()
 await datensaetze()
 await projekte()
 await jobs()

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Weekly numbers of the Jobs (0.7.2, per day 0.7.3, non-billable 0.7.4): each client reports its own weeks,
+// Weekly numbers of the Jobs (0.7.2, per day 0.7.3, non-billable 0.7.4, day weights to readers 0.7.5): each client reports its own weeks,
 // who reads them (the person, Team Admins, Leads with at least “view” in
 // the shares matrix), and the capacity check when a Lead accepts a
 // counter-proposal – with the person's reported weeks, a running Job the
@@ -61,9 +61,10 @@ export async function wochen() {
 		const own = await ocs(AU, 'GET', '/jobs/weeks')
 		const me = own.data?.people?.[0]
 		check('atuser1 reads only their own', own.status === 200 && own.data?.people?.length === 1 && me?.uid === 'atuser1' && me?.pensum === 50, own.text.slice(0, 300))
-		check('… week 0: load 10, the Job by key, the unknown one as “other”', me?.weeks?.length === 6 && me.weeks[0].start === W0
+		check('… week 0: load 10, the Job by key, the unknown one as “other”, the day weights (0.7.5)', me?.weeks?.length === 6 && me.weeks[0].start === W0
 			&& me.weeks[0].week === isoWeek(W0) && me.weeks[0].load === 10 && me.weeks[0].jobs?.[key(1)]?.planned === 5
-			&& me.weeks[0].other?.booked === 2 && me.weeks[0].other?.planned === 3 && me.weeks[0].days === undefined, JSON.stringify(me?.weeks?.[0]))
+			&& me.weeks[0].other?.booked === 2 && me.weeks[0].other?.planned === 3
+			&& JSON.stringify(me.weeks[0].days) === '[1,1,1,1,1,0,0]', JSON.stringify(me?.weeks?.[0]))
 		check('… non-billable (0.7.4): 0 where none was sent, merged into “other”', me?.weeks?.[0]?.jobs?.[key(1)]?.booked_nb === 0
 			&& me?.weeks?.[0]?.other?.booked_nb === 0.5, JSON.stringify(me?.weeks?.[0]))
 		const lead = await ocs(AL, 'GET', '/jobs/weeks')

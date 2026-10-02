@@ -118,6 +118,32 @@ class AccessRulesTest extends TestCase {
 		$this->assertSame($want, $got === 'ok' ? $source : $got);
 	}
 
+	/** External persons (0.7.6): only a column, only Team Admins, only none or view. */
+	public function testExternals(): void {
+		$ext = ['ext-roman', 'ext-' . str_repeat('x', 70)];
+		$src = fn (string $actor, string $role, string $viewer, string $owner, string $level) =>
+			self::code(fn () => AccessRules::authorize($actor, $role, $viewer, $owner, self::ROLES, [], $ext, $level));
+		$this->assertSame('ok', $src('petra', 'admin', 'lea', 'ext-roman', 'view'));
+		$this->assertSame('ok', $src('petra', 'admin', 'lea', 'ext-roman', 'none'));
+		$this->assertSame('ok', $src('petra', 'admin', 'lea', 'ext-roman', 'default'));
+		$this->assertSame('422 invalid', $src('petra', 'admin', 'lea', 'ext-roman', 'edit'));
+		$this->assertSame('422 invalid', $src('petra', 'admin', 'lea', $ext[1], 'view'));
+		$this->assertSame('403 forbidden', $src('lea', 'lead', 'lea', 'ext-roman', 'view'));
+		$this->assertSame('404 not_found', $src('petra', 'admin', 'ext-roman', 'lea', 'view'));
+		$this->assertSame('404 not_found', $src('petra', 'admin', 'lea', 'ext-unknown', 'view'));
+		$this->assertSame('404 not_found', $src('petra', 'admin', 'atuser1', 'ext-roman', 'view'));
+
+		$this->assertSame('view', AccessRules::defaultExternalLevel('admin'));
+		$this->assertSame('none', AccessRules::defaultExternalLevel('lead'));
+		$e = self::entries([['lea', 'ext-roman', 'view'], ['paul', 'ext-roman', 'none'], ['mia', 'ext-roman', 'edit']]);
+		$f = AccessRules::externalField('lea', 'ext-roman', self::ROLES, $e);
+		$this->assertSame(['view', 'view', null, null, false], [$f['level'], $f['admin_level'], $f['self_level'], $f['overridden'], $f['resting']]);
+		$this->assertSame('none', AccessRules::externalField('paul', 'ext-roman', self::ROLES, $e)['level'], 'a Team Admin can be switched off');
+		$this->assertSame('view', AccessRules::externalField('petra', 'ext-roman', self::ROLES, $e)['level'], 'Team Admins see by default');
+		$this->assertSame('none', AccessRules::externalField('noah', 'ext-roman', self::ROLES, $e)['level']);
+		$this->assertSame('view', AccessRules::externalField('mia', 'ext-roman', self::ROLES, $e)['level'], 'a stored edit reads as view');
+	}
+
 	public function testValidate(): void {
 		foreach (['none', 'view', 'edit', 'default'] as $l) {
 			$this->assertSame($l, AccessRules::validateLevel($l));

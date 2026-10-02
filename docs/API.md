@@ -929,13 +929,13 @@ with the unchanged record (a resent request is not an error).
 
 ### Rules (checked by the server)
 
-- **Volume:** with a budget, all Jobs of a work package together never
-  exceed its hours (the sum of the work package's `hours`). Offered, waiting
-  and In Progress Jobs hold their full hours; returned, declined, rejected
-  and Done ones only what was booked (`progress.hours`) – the rest goes
-  back. Checked on offer, on a change of hours or a new offer, and when a
-  counter-proposal is accepted. `422 invalid` with `rule: "volume"`,
-  `free` and `total` (hours).
+- **Volume (no longer a rule since 0.7.5):** Jobs may together go above
+  the hours of a work package; the clients show by how much. Offered,
+  waiting and In Progress Jobs hold their full hours; returned, declined,
+  rejected and Done ones only what was booked (`progress.hours`).
+- **Offered only to oneself (0.7.5):** when the recipients are exactly the
+  sender, the Job is accepted at once (`in_progress`, assignee = sender),
+  and nobody is notified.
 - **No overlap:** no two Jobs on the same work package or a common code,
   with overlapping periods, for the same person (open offer, waiting
   counter-proposal or In Progress). Checked on offer, change, accept and
@@ -1003,7 +1003,9 @@ cannot check that step.
 - **Reading:** everyone readable is listed, `weeks: null` and
   `reported_at: null` if their client never reported. Per week `start`,
   `week` (ISO), `full`, `available`, `holidays`, `vacation`, `load` (the
-  sum), `jobs` – only the Jobs the reader sees, each `{ booked, booked_nb,
+  sum), since 0.7.5 `days` (the seven weights as reported, so a reader can
+  split a week at a month's end; a report without them reads Monday–Friday
+  1), `jobs` – only the Jobs the reader sees, each `{ booked, booked_nb,
   planned }` – and `other` with the rest merged the same way (`null` if
   nothing). Reports stored before 0.7.4 give `booked_nb: 0`. Leads read whom the shares matrix lets them
   at least view (the matrix level, not whether it is applied yet); anyone
@@ -1030,3 +1032,70 @@ cannot check that step.
   waits).
 - **Stored:** columns `job_weeks` (JSON) and `job_weeks_at` in
   `ts_client_status` (migration 1006).
+
+## Billing marks and externals, 0.7.6 (2026-10-01)
+
+Still `api: 2`; only additions. The capability says `billing: 1`. Plan
+and decisions: `PLAN-EXTERNE.md`. The billing mark leaves the event: a
+Lead who may only *see* a time calendar cannot write into it, and nobody
+writes into a feed.
+
+### The record
+
+Kind `billing`, one per person and event UID. Key: the person's key, `+`
+and the first 32 hex digits of the UID's SHA-256 (`alice+3f9c…`), so the
+key stays within the key pattern whatever the UID holds and the person can
+be read off a tombstone.
+
+```json
+{ "person": "alice", "uid": "7f3a-…@example.test", "billed_on": "2026-09-30",
+  "by": "pbadmin", "checksum": "a1b2…",
+  "source": "manual", "external_id": null, "document": null }
+```
+
+- `person` must be a person key, `uid` non-empty (at most 1024 bytes), and
+  the key must equal the derivation, otherwise `422 invalid`. `billed_on`
+  is a date. `by` (64), `checksum` (128), `source` (64), `external_id` and
+  `document` (256) are optional text: the checksum is the client's
+  fingerprint of the billed state (the clients notice "changed after
+  billing"); `source`, `external_id` and `document` are carried through
+  untouched for a later hand-over to an accounting system
+  (`PLAN-BACKLOG.md`, item 2).
+- A series counts as one event (one UID). Undoing deletes the record; the
+  history says who did what when.
+
+### Rights (checked by the server)
+
+| | user | lead | admin |
+|---|---|---|---|
+| write (`PUT`, `DELETE`, batch, restore) | – | persons they may at least **view** in the shares matrix (members and externals) | all |
+| read (delta, `GET`, history) | own person | the same as write | all |
+
+A Lead's `POST /records/batch` is accepted when every write is a billing
+mark; otherwise `403 forbidden` as before. Marks of the own person are
+readable so the client can lock the events.
+
+### Externals in the shares matrix
+
+An **external** is a live person record with a non-empty `feed` whose key
+is no active member and whose `accounts` name none. In `GET /team/access`
+they follow the team in `members` with `role: "external"` and
+`external: true`; their fields carry `external: true`, `self_level` null,
+`applied` null, `effective` true, `pending` false. Team Admins get every
+external column, everyone else the own row.
+
+- Levels `none` or `view`; `edit` answers `422 invalid` ("A feed is
+  read-only"). Only Team Admins set them (source `admin`); `default`
+  removes the entry. Defaults: Team Admins `view`, everyone else `none`.
+  A key longer than 64 characters cannot be a column (`422`).
+- Nothing is pending: the server hands the feed address out or not.
+
+### Feed only for those who may
+
+`person.data.feed` is delivered to Team Admins, the person themselves and
+Leads with at least `view` on that person; everyone else gets the record
+**without** `feed` – in the delta, `GET /records/person/{key}` and the
+history. Setting an external's field gives their person record a new
+`revision` (the `version` stays), so every client receives it again with
+the next delta. A client whose copy lost the address drops the feed
+calendar.

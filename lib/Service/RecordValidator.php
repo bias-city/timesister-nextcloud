@@ -14,9 +14,11 @@ namespace OCA\TimeSister\Service;
  * of identifiers, size.
  */
 final class RecordValidator {
-	public const KINDS = ['person', 'region', 'project', 'customer', 'setting', 'job'];
+	public const KINDS = ['person', 'region', 'project', 'customer', 'setting', 'job', 'billing'];
 	/** Jobs (0.6.0): readable as records, written only through /jobs. */
 	public const JOB = 'job';
+	/** Billing marks (0.7.6): rights per person, see {@see BillingRules}. */
+	public const BILLING = BillingRules::KIND;
 	public const SETTING_KEYS = ['targethours', 'settings'];
 	public const KEY_PATTERN = '/^[A-Za-z0-9@._+-]{1,128}$/';
 	public const MAX_DATA_BYTES = 262144; // 256 KB
@@ -74,6 +76,8 @@ final class RecordValidator {
 			if (!isset($data->id) || !is_string($data->id) || $data->id !== $key) {
 				throw ApiException::invalid('The field “id” must equal the key.');
 			}
+		} elseif ($kind === self::BILLING) {
+			BillingRules::validate($key, $data);
 		}
 		$accounts = [];
 		if ($kind === 'person' && property_exists($data, 'accounts') && $data->accounts !== null) {

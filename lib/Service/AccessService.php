@@ -9,6 +9,8 @@ namespace OCA\TimeSister\Service;
 use OCA\TimeSister\Db\Access;
 use OCA\TimeSister\Db\AccessMapper;
 use OCA\TimeSister\Db\ClientStatusMapper;
+use OCA\TimeSister\Db\RecordMapper;
+use OCA\TimeSister\Db\TenantMapper;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\IDBConnection;
 
@@ -16,16 +18,74 @@ use OCP\IDBConnection;
  * The shares matrix on the server (GET/PUT /team/access, reminders,
  * `/me.share_targets`). The rules are in {@see AccessRules}; here only
  * storage, the team and notifications.
+ *
+ * Since 0.7.6 external persons (a person record with a feed and no
+ * account) are columns too: who may see their feed. Their person record
+ * carries `feed` only for those who may.
  */
 final class AccessService {
+	/** @var array<int,array<string,string>> tenant → key → name */
+	private array $externals = [];
+	/** @var array<string,array<string,string>> "tenant:uid" → owner → level */
+	private array $levels = [];
+
 	public function __construct(
 		private AccessMapper $mapper,
 		private ClientStatusMapper $status,
 		private TenantService $tenants,
 		private ShareReminder $reminder,
+		private RecordMapper $records,
+		private TenantMapper $tenantMapper,
 		private IDBConnection $db,
 		private ITimeFactory $time,
 	) {
+	}
+
+	/**
+	 * The team's external persons: live person records with a non-empty
+	 * `feed` that belong to no active member. Key → display name, by name.
+	 *
+	 * @return array<string,string>
+	 */
+	public function externals(int $tenantId): array {
+		if (!isset($this->externals[$tenantId])) {
+			$roles = $this->tenants->memberRoles($tenantId);
+			$out = [];
+			foreach ($this->records->findLiveByKind($tenantId, 'person') as $r) {
+				$raw = $r->getData();
+				$d = $raw === null ? null : json_decode($raw, true);
+				if (!is_array($d) || !is_string($d['feed'] ?? null) || trim($d['feed']) === '') {
+					continue;
+				}
+				if (isset($roles[$r->getRkey()]) || array_intersect($r->accountList(), array_map('strval', array_keys($roles))) !== []) {
+					continue;
+				}
+				$name = trim((string)($d['first_name'] ?? '') . ' ' . (string)($d['last_name'] ?? ''));
+				$out[$r->getRkey()] = $name === '' ? $r->getRkey() : $name;
+			}
+			uasort($out, static fn (string $a, string $b) => strcmp(mb_strtolower($a), mb_strtolower($b)));
+			$this->externals[$tenantId] = $out;
+		}
+		return $this->externals[$tenantId];
+	}
+
+	/** @return list<string> */
+	private function externalKeys(int $tenantId): array {
+		return array_map('strval', array_keys($this->externals($tenantId)));
+	}
+
+	/**
+	 * May the caller read a person's feed address? Team Admins, the person
+	 * themselves, and whoever may at least view them in the matrix.
+	 *
+	 * @param list<string> $accounts the person record's accounts
+	 */
+	public function canSeeFeed(Membership $m, string $personKey, array $accounts = []): bool {
+		if ($m->manages() || AccessPolicy::isOwnPerson($m->uid, $personKey, $accounts)) {
+			return true;
+		}
+		$level = $this->levelsOf($m)[$personKey] ?? AccessRules::NONE;
+		return AccessRules::rank($level) >= AccessRules::rank(AccessRules::VIEW);
 	}
 
 	/** @return array<string,array<string,array<string,array{level:string,at:int,by:string}>>> source → viewer → owner → entry */
@@ -118,6 +178,10 @@ final class AccessService {
 	 * @return array<string,string>
 	 */
 	public function levelsOf(Membership $m): array {
+		$id = $m->tenantId . ':' . $m->uid;
+		if (isset($this->levels[$id])) {
+			return $this->levels[$id];
+		}
 		$roles = $this->tenants->memberRoles($m->tenantId);
 		$flags = $this->tenants->overrideFlags($m->tenantId);
 		$entries = $this->entries($m->tenantId);
@@ -127,7 +191,13 @@ final class AccessService {
 				$out[$owner] = AccessRules::field($m->uid, $owner, $roles, $flags, $entries)['level'];
 			}
 		}
-		return $out;
+		// External persons: their column says who may see the feed.
+		if (isset($roles[$m->uid])) {
+			foreach ($this->externalKeys($m->tenantId) as $key) {
+				$out[$key] = AccessRules::externalField($m->uid, $key, $roles, $entries)['level'];
+			}
+		}
+		return $this->levels[$id] = $out;
 	}
 
 	public function mayOverride(Membership $m): bool {
@@ -158,8 +228,33 @@ final class AccessService {
 			}
 			$members[] = $e;
 		}
+		// External persons after the team: columns only, marked `external`.
+		$externals = $this->externals($m->tenantId);
+		foreach ($externals as $key => $name) {
+			$members[] = ['uid' => $key, 'display_name' => $name, 'role' => 'external', 'external' => true];
+		}
 		$fields = [];
 		foreach ($uids as $viewer) {
+			if ($all || $viewer === $m->uid) {
+				foreach (array_map('strval', array_keys($externals)) as $owner) {
+					$f = AccessRules::externalField($viewer, $owner, $roles, $entries);
+					$fields[] = [
+						'viewer' => $viewer,
+						'owner' => $owner,
+						'level' => $f['level'],
+						'admin_level' => $f['admin_level'],
+						'self_level' => null,
+						'overridden' => null,
+						'resting' => false,
+						'applied' => null,
+						'effective' => true,
+						'pending' => false,
+						'external' => true,
+						'changed_at' => Time::iso($f['changed_at']),
+						'changed_by' => $f['changed_by'],
+					];
+				}
+			}
 			foreach ($uids as $owner) {
 				if ($viewer === $owner || (!$all && $viewer !== $m->uid && $owner !== $m->uid)) {
 					continue;
@@ -200,11 +295,16 @@ final class AccessService {
 	public function set(Membership $m, array $changes): array {
 		$roles = $this->tenants->memberRoles($m->tenantId);
 		$flags = $this->tenants->overrideFlags($m->tenantId);
+		$externals = $this->externalKeys($m->tenantId);
 		$todo = [];
+		$touched = [];
 		foreach ($changes as $c) {
 			$level = $c['level'];
-			$source = AccessRules::authorize($m->uid, $m->role, $c['viewer'], $c['owner'], $roles, $flags);
+			$source = AccessRules::authorize($m->uid, $m->role, $c['viewer'], $c['owner'], $roles, $flags, $externals, $level);
 			$todo[$c['viewer'] . "\n" . $c['owner'] . "\n" . $source] = [$c['viewer'], $c['owner'], $source, $level];
+			if (in_array($c['owner'], $externals, true)) {
+				$touched[$c['owner']] = true;
+			}
 		}
 		$before = $this->snapshot($m->tenantId);
 		$now = $this->time->getTime();
@@ -230,11 +330,24 @@ final class AccessService {
 				$a->setUpdatedAt($now);
 				$found === null ? $this->mapper->insert($a) : $this->mapper->update($a);
 			}
+			// An external person's record reads differently now (with or
+			// without `feed`): a new revision, so every client fetches it again.
+			$keys = array_map('strval', array_keys($touched));
+			if ($keys !== []) {
+				$rev = $this->tenantMapper->bumpRevision($m->tenantId, count($keys)) - count($keys);
+				foreach ($keys as $key) {
+					$r = $this->records->findOne($m->tenantId, 'person', $key);
+					if ($r !== null) {
+						$this->records->touchRevision($r->getId(), ++$rev);
+					}
+				}
+			}
 			$this->db->commit();
 		} catch (\Throwable $e) {
 			$this->db->rollBack();
 			throw $e;
 		}
+		$this->levels = [];
 		// Whoever changes their own column applies it on their own client: no reminder to themselves.
 		$this->remindWithdrawals($m->tenantId, $before, $m->uid);
 		return $this->matrix($m);

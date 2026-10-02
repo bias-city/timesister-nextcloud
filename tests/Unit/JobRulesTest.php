@@ -104,12 +104,11 @@ class JobRulesTest extends TestCase {
 
 	public function testVolume(): void {
 		$a = self::job('a', ['hours' => 30]);
-		$this->assertSame('ok', self::code(fn () => JobRules::checkVolume(self::job('b', ['hours' => 10.5]), 40.5, [$a])));
-		[$code, $extra] = self::err(fn () => JobRules::checkVolume(self::job('b', ['hours' => 11]), 40.5, [$a]));
-		$this->assertSame('422 invalid', $code);
-		$this->assertSame(['rule' => 'volume', 'free' => 10.5, 'total' => 40.5], $extra);
+		$this->assertSame(0.0, JobRules::volumeOver(self::job('b', ['hours' => 10.5]), 40.5, [$a]));
+		// Above the work package: allowed, the overrun is reported.
+		$this->assertSame(0.5, JobRules::volumeOver(self::job('b', ['hours' => 11]), 40.5, [$a]));
 		// The Job itself does not count twice (a change).
-		$this->assertSame('ok', self::code(fn () => JobRules::checkVolume(['hours' => 40.5] + $a, 40.5, [$a])));
+		$this->assertSame(0.0, JobRules::volumeOver(['hours' => 40.5] + $a, 40.5, [$a]));
 		// Declined gives everything back, returned keeps what was booked.
 		$declined = JobFlow::decline($a, 'pbuser1', self::NOW);
 		$this->assertSame(0.0, JobRules::hold($declined));
@@ -118,10 +117,10 @@ class JobRulesTest extends TestCase {
 		$this->assertSame(30.0, JobRules::hold($running));
 		$returned = JobFlow::giveBack($running, null, 'pbuser1', self::NOW);
 		$this->assertSame(12.0, JobRules::hold($returned));
-		$this->assertSame('ok', self::code(fn () => JobRules::checkVolume(self::job('b', ['hours' => 28.5]), 40.5, [$returned])));
+		$this->assertSame(0.0, JobRules::volumeOver(self::job('b', ['hours' => 28.5]), 40.5, [$returned]));
 		// Another work package, or no budget: no limit from this one.
-		$this->assertSame('ok', self::code(fn () => JobRules::checkVolume(self::job('c', ['work_package' => 'AP2', 'code' => 'D200.2', 'hours' => 20]), 20, [$a])));
-		$this->assertSame('ok', self::code(fn () => JobRules::checkVolume(self::job('d', ['budget' => null, 'work_package' => null, 'hours' => 999]), 0, [$a])));
+		$this->assertSame(0.0, JobRules::volumeOver(self::job('c', ['work_package' => 'AP2', 'code' => 'D200.2', 'hours' => 20]), 20, [$a]));
+		$this->assertSame(0.0, JobRules::volumeOver(self::job('d', ['budget' => null, 'work_package' => null, 'hours' => 999]), 0, [$a]));
 	}
 
 	public function testOverlap(): void {

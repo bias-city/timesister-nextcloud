@@ -123,9 +123,9 @@ final class JobWeeks {
 	// ---------------------------------------------------------- reading
 
 	/**
-	 * A stored report for a reader: per week the load, the Jobs the reader
-	 * sees by key and the others merged into `other` (null if none). A
-	 * report from before 0.7.4 reads `booked_nb` as 0.
+	 * A stored report for a reader: per week the load, the day weights
+	 * (0.7.5), the Jobs the reader sees by key and the others merged into
+	 * `other` (null if none). A report from before 0.7.4 reads `booked_nb` as 0.
 	 *
 	 * @param array<string,mixed> $report from {@see parse()}
 	 * @param callable(string):bool $sees whether the reader sees this Job
@@ -160,6 +160,8 @@ final class JobWeeks {
 				'available' => (float)($w['available'] ?? 0),
 				'holidays' => (float)($w['holidays'] ?? 0),
 				'vacation' => (float)($w['vacation'] ?? 0),
+				// 0.7.5: the day weights, so a reader splits a week at a month's end.
+				'days' => self::days($w['days'] ?? null),
 				'load' => round($load, 2),
 				'jobs' => $jobs === [] ? new \stdClass() : $jobs,
 				'other' => $other['booked'] + $other['planned'] > 0.004
@@ -168,6 +170,18 @@ final class JobWeeks {
 			];
 		}
 		return $out;
+	}
+
+	/**
+	 * Seven weights Monday–Sunday; a stored report without them reads as Monday–Friday.
+	 * @return list<float>
+	 */
+	private static function days(mixed $days): array {
+		$d = is_array($days) ? array_values($days) : [];
+		if (count($d) !== 7) {
+			return [1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0];
+		}
+		return array_map(static fn (mixed $x): float => is_numeric($x) ? (float)$x : 0.0, $d);
 	}
 
 	// ----------------------------------------------------------- the check

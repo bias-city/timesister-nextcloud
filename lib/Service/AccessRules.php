@@ -43,6 +43,18 @@ final class AccessRules {
 		return $viewerRole === Role::ADMIN ? self::EDIT : self::NONE;
 	}
 
+	/**
+	 * An external person's column (0.7.6: a person without account, with a
+	 * feed): Team Admins see, everyone else nothing. A feed is read-only,
+	 * so `edit` never applies.
+	 */
+	public static function defaultExternalLevel(string $viewerRole): string {
+		return $viewerRole === Role::ADMIN ? self::VIEW : self::NONE;
+	}
+
+	/** The longest key an external person may have as a column (`ts_access.owner`). */
+	public const OWNER_MAX = 64;
+
 	/** Nextcloud's share right for a level; null for none. */
 	public static function access(string $level): ?string {
 		return match ($level) {
@@ -99,11 +111,28 @@ final class AccessRules {
 	 * `admin`), everyone else only their own column (as `self`), and only
 	 * while their Team Admin allows overriding.
 	 *
+	 * An external person is only a column (`$externals`): only Team Admins
+	 * set it, and only to none or view.
+	 *
 	 * @param array<string,string> $roles uid → role, active members
 	 * @param array<string,bool> $mayOverride uid → “allow overriding”
+	 * @param list<string> $externals keys of the external persons
+	 * @param string $level the level to set (only checked for an external column)
 	 * @return string the source, admin or self
 	 */
-	public static function authorize(string $actorUid, string $actorRole, string $viewer, string $owner, array $roles, array $mayOverride): string {
+	public static function authorize(string $actorUid, string $actorRole, string $viewer, string $owner, array $roles, array $mayOverride, array $externals = [], string $level = self::NONE): string {
+		if (isset($roles[$viewer]) && !isset($roles[$owner]) && in_array($owner, $externals, true)) {
+			if (!Role::manages($actorRole)) {
+				throw ApiException::forbidden('Only Team Admins set shares; everyone else only for their own time calendar.');
+			}
+			if (strlen($owner) > self::OWNER_MAX) {
+				throw ApiException::invalid('The key of this external person is too long for the shares matrix (at most 64 characters).');
+			}
+			if ($level === self::EDIT) {
+				throw ApiException::invalid('A feed is read-only: an external person can be seen, not edited.');
+			}
+			return self::SOURCE_ADMIN;
+		}
 		if (!isset($roles[$viewer]) || !isset($roles[$owner])) {
 			throw ApiException::notFound('This account is not in the team.');
 		}
@@ -149,6 +178,33 @@ final class AccessRules {
 			'resting' => $s !== null && !$applies,
 			'changed_at' => $used['at'] ?? null,
 			'changed_by' => $used['by'] ?? null,
+		];
+	}
+
+	/**
+	 * One field of an external person's column: only a Team Admin's entry
+	 * or the default; nobody overrides, nothing is pending (there is no
+	 * owner's client – the server hands the feed out or not).
+	 *
+	 * @param array<string,string> $roles uid → role, active members
+	 * @param array<string,array<string,array<string,array{level:string,at:int,by:string}>>> $entries
+	 * @return array{level:string,admin_level:string,self_level:?string,overridden:?string,resting:bool,changed_at:?int,changed_by:?string}
+	 */
+	public static function externalField(string $viewer, string $owner, array $roles, array $entries): array {
+		$a = $entries[self::SOURCE_ADMIN][$viewer][$owner] ?? null;
+		$level = $a['level'] ?? self::defaultExternalLevel($roles[$viewer] ?? Role::USER);
+		// An `edit` stored before 0.7.6 cannot occur, but a feed stays read-only.
+		if ($level === self::EDIT) {
+			$level = self::VIEW;
+		}
+		return [
+			'level' => $level,
+			'admin_level' => $level,
+			'self_level' => null,
+			'overridden' => null,
+			'resting' => false,
+			'changed_at' => $a['at'] ?? null,
+			'changed_by' => $a['by'] ?? null,
 		];
 	}
 

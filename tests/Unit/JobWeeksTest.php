@@ -170,7 +170,12 @@ class JobWeeksTest extends TestCase {
 		$this->assertSame(['booked' => 1.0, 'booked_nb' => 0.0, 'planned' => 2.0], $p[0]['other']);
 		$p = JobWeeks::present($r, fn (string $k) => true);
 		$this->assertNull($p[0]['other']);
-		$this->assertArrayNotHasKey('days', $p[0]);
+		// 0.7.5: the day weights, to split a week at a month's end; stored without them Monday–Friday.
+		$this->assertSame([1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0], $p[0]['days']);
+		$r = self::report([self::week(self::MON, 32, [], [1, 1, 0.5, 0, 1, 0, 0])]);
+		$this->assertSame([1.0, 1.0, 0.5, 0.0, 1.0, 0.0, 0.0], JobWeeks::present($r, fn (string $k) => true)[0]['days']);
+		$alt = ['weeks' => [['start' => self::MON, 'full' => 42, 'available' => 32, 'jobs' => []]]];
+		$this->assertSame([1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0], JobWeeks::present($alt, fn (string $k) => true)[0]['days']);
 	}
 
 	/** 0.7.4: the non-billable part of the booked hours – kept, merged into `other`, 0 for older reports. */

@@ -33,7 +33,44 @@ final class RecordService {
 		private AccessPolicy $policy,
 		private ITimeFactory $time,
 		private JobAccess $jobs,
+		private AccessService $access,
 	) {
+	}
+
+	/** May the caller mark this person's events as billed (0.7.6)? */
+	private function canBill(Membership $m, string $person): bool {
+		if ($m->manages()) {
+			return true;
+		}
+		return BillingRules::canWrite($m->role, $this->access->levelsOf($m)[$person] ?? null);
+	}
+
+	/** Billing marks: whoever may write them, and the person themselves. */
+	private function canReadBilling(Membership $m, string $key, array $ownKeys): bool {
+		$person = BillingRules::personOf($key);
+		return $person !== null && (in_array($person, $ownKeys, true) || $this->canBill($m, $person));
+	}
+
+	/** The rights of a write: billing marks per person, everything else Team Admins. */
+	private function requireWriteOf(Membership $m, string $kind, string $key): void {
+		if ($kind === RecordValidator::BILLING) {
+			if (!$this->canBill($m, BillingRules::requirePerson($key))) {
+				throw ApiException::forbidden('Only Team Admins, and Leads who may see this person’s time calendar, mark it as billed.');
+			}
+			return;
+		}
+		$this->policy->requireWrite($m);
+	}
+
+	/** A person without `feed` for whoever may not see it (0.7.6). */
+	private function trimPerson(Membership $m, Record $r, mixed $data): mixed {
+		if ($r->getKind() !== 'person' || !($data instanceof \stdClass) || !isset($data->feed)
+			|| $this->access->canSeeFeed($m, $r->getRkey(), $r->accountList())) {
+			return $data;
+		}
+		$copy = clone $data;
+		unset($copy->feed);
+		return $copy;
 	}
 
 	/** Jobs change only through /jobs (JobService), never as records. */
@@ -72,6 +109,7 @@ final class RecordService {
 		if ($r->getKind() === 'project' && $data instanceof \stdClass && !$this->policy->canSeeFullProject($m, $data, $ownKeys)) {
 			$out['data'] = ProjectAccess::catalog($data);
 		}
+		$out['data'] = $this->trimPerson($m, $r, $out['data']);
 		return $out;
 	}
 
@@ -107,6 +145,12 @@ final class RecordService {
 				}
 				continue;
 			}
+			if ($r->getKind() === RecordValidator::BILLING) {
+				if ($this->canReadBilling($m, $r->getRkey(), $own)) {
+					$out[] = $this->present($r);
+				}
+				continue;
+			}
 			if ($this->policy->canRead($m, $r->getKind(), $r->getRkey(), $r->accountList())) {
 				$out[] = $this->presentFor($m, $r, $own);
 			}
@@ -125,7 +169,10 @@ final class RecordService {
 			}
 			return $this->jobs->presentFor($m, $r, $own, $this->present($r));
 		}
-		if (!$this->policy->canRead($m, $kind, $key, $r?->accountList() ?? [])) {
+		$readable = $kind === RecordValidator::BILLING
+			? $this->canReadBilling($m, $key, $this->ownKeys($m))
+			: $this->policy->canRead($m, $kind, $key, $r?->accountList() ?? []);
+		if (!$readable) {
 			throw ApiException::forbidden('This account may not read this record.');
 		}
 		if ($r === null || $r->isTombstone()) {
@@ -148,15 +195,15 @@ final class RecordService {
 	/** @return array<string,mixed> the new record */
 	public function put(Membership $m, string $kind, string $key, \stdClass $body): array {
 		self::noJob($kind);
-		if ($kind !== 'project') {
-			$this->policy->requireWrite($m);
-		}
 		RecordValidator::checkAddress($kind, $key);
+		if ($kind !== 'project') {
+			$this->requireWriteOf($m, $kind, $key);
+		}
 		$version = RecordValidator::checkVersion($body->version ?? null);
 		if (!property_exists($body, 'data')) {
 			throw ApiException::missing('data');
 		}
-		if (!$this->policy->canWrite($m)) {
+		if ($kind === 'project' && !$this->policy->canWrite($m)) {
 			$this->requireProjectLead($m, $key);
 		}
 		$v = RecordValidator::validate($kind, $key, $body->data);
@@ -183,8 +230,8 @@ final class RecordService {
 	/** @return array<string,mixed> the tombstone */
 	public function delete(Membership $m, string $kind, string $key, mixed $version): array {
 		self::noJob($kind);
-		$this->policy->requireWrite($m);
 		RecordValidator::checkAddress($kind, $key);
+		$this->requireWriteOf($m, $kind, $key);
 		if ($version === null || $version === '') {
 			throw ApiException::missing('version', true);
 		}
@@ -196,8 +243,12 @@ final class RecordService {
 
 	/** @return array{revision:int,records:list<array<string,mixed>>} */
 	public function batch(Membership $m, \stdClass $body): array {
-		$this->policy->requireWrite($m);
 		$writes = $body->writes ?? null;
+		// A Lead's batch may hold billing marks only; their rights are checked per write.
+		if (!$this->policy->canWrite($m) && (!is_array($writes) || $writes === []
+			|| array_filter($writes, static fn (mixed $w) => !($w instanceof \stdClass) || ($w->kind ?? null) !== RecordValidator::BILLING) !== [])) {
+			$this->policy->requireWrite($m);
+		}
 		if (!is_array($writes) || !array_is_list($writes)) {
 			throw ApiException::badRequest('“writes” must be a list.');
 		}
@@ -219,6 +270,9 @@ final class RecordService {
 				}
 				RecordValidator::checkAddress($kind, $key);
 				self::noJob($kind);
+				if ($kind === RecordValidator::BILLING) {
+					$this->requireWriteOf($m, $kind, $key);
+				}
 				$version = RecordValidator::checkVersion($w->version ?? null);
 				if (!property_exists($w, 'data')) {
 					throw ApiException::invalid('“data” is missing (null means delete).');
@@ -255,24 +309,28 @@ final class RecordService {
 				throw ApiException::forbidden('This account may not read the history of this record.');
 			}
 		}
-		// Project: also its leads (by the current version).
+		// Project: also its leads (by the current version). Billing: whoever reads the mark.
 		$raw = $r?->getData();
 		$lead = $kind === 'project' && $r !== null && !$r->isTombstone() && $raw !== null
 			&& $this->policy->canSeeFullProject($m, Json::decode($raw), $this->ownKeys($m));
+		if ($kind === RecordValidator::BILLING) {
+			$lead = $this->canReadBilling($m, $key, $this->ownKeys($m));
+		}
 		if (!$lead && $kind !== RecordValidator::JOB && !$this->policy->canReadHistory($m, $kind, $key, $r?->accountList() ?? [])) {
 			throw ApiException::forbidden('This account may not read the history of this record.');
 		}
 		if ($r === null) {
 			throw ApiException::notFound('This record does not exist.');
 		}
-		return array_map(static function (History $h): array {
+		return array_map(function (History $h) use ($m, $r): array {
 			$raw = $h->getData();
+			$data = ($h->getDeleted() === 1 || $raw === null) ? null : Json::decode($raw);
 			return [
 				'version' => $h->getVersion(),
 				'deleted' => $h->getDeleted() === 1,
 				'modified_by' => $h->getModifiedBy(),
 				'modified_at' => Time::iso($h->getModifiedAt()),
-				'data' => ($h->getDeleted() === 1 || $raw === null) ? null : Json::decode($raw),
+				'data' => $this->trimPerson($m, $r, $data),
 			];
 		}, $this->history->findFor($m->tenantId, $kind, $key, self::HISTORY_LIMIT));
 	}
@@ -280,8 +338,8 @@ final class RecordService {
 	/** @return array<string,mixed> the new record */
 	public function restore(Membership $m, string $kind, string $key, \stdClass $body): array {
 		self::noJob($kind);
-		$this->policy->requireWrite($m);
 		RecordValidator::checkAddress($kind, $key);
+		$this->requireWriteOf($m, $kind, $key);
 		$version = RecordValidator::checkVersion($body->version ?? null, 'version');
 		$current = RecordValidator::checkVersion($body->current ?? null, 'current');
 		$h = $this->history->findVersion($m->tenantId, $kind, $key, $version);

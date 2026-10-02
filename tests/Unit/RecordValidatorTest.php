@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Tests\Unit;
 
 use OCA\TimeSister\Service\ApiException;
+use OCA\TimeSister\Service\BillingRules;
 use OCA\TimeSister\Service\Json;
 use OCA\TimeSister\Service\RecordValidator;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -76,6 +77,40 @@ class RecordValidatorTest extends TestCase {
 			$this->assertSame('422 invalid', self::code(fn () => RecordValidator::validate($kind, '4711', self::obj('{"id":4711}'))), $kind);
 			$this->assertSame('422 invalid', self::code(fn () => RecordValidator::validate($kind, 'K1', self::obj('{}'))), $kind);
 		}
+	}
+
+	/** Billing marks (0.7.6): person and uid, the derived key, the date, the optional texts. */
+	public function testBilling(): void {
+		$key = BillingRules::key('alice', 'abc-123@example.test');
+		$this->assertMatchesRegularExpression('/^alice\+[0-9a-f]{32}$/', $key);
+		$this->assertTrue(RecordValidator::isKey($key));
+		$this->assertSame('alice', BillingRules::personOf($key));
+		$this->assertNull(BillingRules::personOf('alice'));
+		$this->assertNull(BillingRules::personOf('+' . str_repeat('a', 32)));
+		$this->assertNull(BillingRules::personOf('alice+' . str_repeat('g', 32)));
+		$this->assertSame('a+b', BillingRules::personOf('a+b+' . str_repeat('0', 32)), 'the last + separates');
+		$ok = '{"person":"alice","uid":"abc-123@example.test","billed_on":"2026-09-30","by":"petra","checksum":"ff","source":"manual"}';
+		$this->assertSame('ok', self::code(fn () => RecordValidator::validate('billing', $key, self::obj($ok))));
+		$this->assertSame('422 invalid', self::code(fn () => RecordValidator::validate('billing', 'alice+' . str_repeat('0', 32), self::obj($ok))), 'key does not match');
+		$this->assertSame('422 invalid', self::code(fn () => RecordValidator::validate('billing', $key, self::obj('{"person":"alice","uid":"abc-123@example.test"}'))), 'no date');
+		$this->assertSame('422 invalid', self::code(fn () => RecordValidator::validate('billing', $key, self::obj('{"person":"alice","uid":"abc-123@example.test","billed_on":"2026-02-30"}'))), 'no such day');
+		$this->assertSame('422 invalid', self::code(fn () => RecordValidator::validate('billing', $key, self::obj('{"person":"alice","uid":"","billed_on":"2026-09-30"}'))), 'empty uid');
+		$this->assertSame('422 invalid', self::code(fn () => RecordValidator::validate('billing', $key, self::obj('{"uid":"abc-123@example.test","billed_on":"2026-09-30"}'))), 'no person');
+		$long = '{"person":"alice","uid":"abc-123@example.test","billed_on":"2026-09-30","external_id":"' . str_repeat('x', 257) . '"}';
+		$this->assertSame('422 invalid', self::code(fn () => RecordValidator::validate('billing', $key, self::obj($long))), 'text too long');
+		$this->assertSame('422 invalid', self::code(fn () => RecordValidator::validate('billing', $key, self::obj('{"person":"alice","uid":"abc-123@example.test","billed_on":"2026-09-30","document":7}'))), 'text not text');
+		$this->assertSame('422 invalid', self::code(fn () => BillingRules::requirePerson('alice')));
+		$this->assertSame('alice', BillingRules::requirePerson($key));
+
+		$this->assertTrue(BillingRules::canWrite('admin', null));
+		$this->assertTrue(BillingRules::canWrite('lead', 'view'));
+		$this->assertTrue(BillingRules::canWrite('lead', 'edit'));
+		$this->assertFalse(BillingRules::canWrite('lead', 'none'));
+		$this->assertFalse(BillingRules::canWrite('lead', null));
+		$this->assertFalse(BillingRules::canWrite('user', 'edit'));
+		$this->assertTrue(BillingRules::canRead('user', null, true));
+		$this->assertFalse(BillingRules::canRead('user', 'edit', false));
+		$this->assertTrue(BillingRules::canRead('lead', 'view', false));
 	}
 
 	public function testSettings(): void {

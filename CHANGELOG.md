@@ -1,5 +1,27 @@
 # Changes
 
+## 0.8.0 – 2026-10-02 (beta)
+
+- First release in the Nextcloud App Store, for the beta of the TimeSister Mac app 0.4.0.
+- Contains everything listed below under 0.1.0 to 0.7.6; no further changes. API version 2.
+- Modules (Jobs, Budgets, Clients) need no change here: the clients keep the switches in the settings record (`setting/settings`, field `modules`).
+
+## 0.7.6 – unreleased
+
+- API unchanged in form (`api: 2`), only additions; the capability gains `billing: 1`.
+- **Billing marks as records:** kind `billing`, one per person and event UID (key: the person's key, `+`, 32 hex digits of the UID's SHA-256); `data`: `person`, `uid`, `billed_on`, optional `by`, `checksum`, and – carried through for a later hand-over to an accounting system – `source`, `external_id`, `document`. Written by Team Admins and by Leads who may at least view the person in the shares matrix (members and externals); read by the same and by the person themselves. Users never write them. `POST /records/batch` takes a Lead's batch when it holds billing marks only.
+- **Externals in the shares matrix:** a person record with a feed and no account is a column after the team (`external: true`, `role: "external"`), levels `none` or `view` only (`edit` → `422`), set by Team Admins only, Team Admins see by default, nothing pending (there is no owner's client). `GET /team/access` lists them for Team Admins and, as the own row, for everyone.
+- **Feed only for those who may:** `person.data.feed` goes to Team Admins, the person themselves and Leads with at least `view` on that person; everyone else gets the record without `feed` – in the delta, single reads and the history. Changing an external's column gives their person record a new revision (same version), so clients fetch it again.
+- No migration.
+
+## 0.7.5 – unreleased
+
+- API unchanged in form (`api: 2`), only an addition; the capability stays `jobs: 4`.
+- **Day weights for readers:** `GET /jobs/weeks` returns per week also `days`, the seven weights the client reported (a holiday by its factor, a vacation day 0). With them a reader splits a week that runs over a month's end – the clients' monthly view of the team's capacity. Same read rights as the rest of the week (the person, Team Admins, Leads who may at least view); a report stored without weights reads Monday–Friday 1. Clients tell it by the field being there.
+- No migration: the numbers stay JSON in `ts_client_status.job_weeks`.
+- **Above the work package allowed:** the volume rule no longer refuses (`422 rule: volume` is gone); the clients show the overrun.
+- **A Job offered only to oneself** is accepted at once and notifies nobody.
+
 ## 0.7.4 – unreleased
 
 - API unchanged in form (`api: 2`), only additions; the capability names `jobs: 4`.

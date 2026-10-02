@@ -197,7 +197,6 @@
 		"The code {code} does not belong to this work package.": "Der Code {code} gehört nicht zu diesem Arbeitspaket.",
 		"This work package does not exist in the budget.": "Dieses Arbeitspaket gibt es im Budget nicht.",
 		"This budget does not exist in the project.": "Dieses Budget gibt es im Projekt nicht.",
-		"Too many hours: the work package has {free} h left of {total} h.": "Zu viele Stunden: Das Arbeitspaket hat noch {free} h von {total} h frei.",
 		"{user} already has a {job} on this code in this period ({from} – {to}).": "{user} hat schon einen {job} auf diesem Code in diesem Zeitraum ({from} – {to}).",
 		"The project {project} does not exist.": "Das Projekt {project} gibt es nicht.",
 		"Only Team Admins and the project’s Leads offer a {job} for it.": "Einen {job} für ein Projekt bieten nur Team Admins und die Leads des Projekts an.",
@@ -215,7 +214,14 @@
 		"_This counter-proposal does not fit the capacity of {user}: week {weeks} above the capacity line._::_This counter-proposal does not fit the capacity of {user}: weeks {weeks} above the capacity line._": [
 			"Dieser Gegenvorschlag passt nicht in die Kapazität von {user}: KW {weeks} über der Pensum-Linie.",
 			"Dieser Gegenvorschlag passt nicht in die Kapazität von {user}: KW {weeks} über der Pensum-Linie."
-		]
+		],
+		"The key of a billing mark is the person’s key, “+” and 32 hex digits of the event UID’s SHA-256.": "Der Schlüssel einer Abrechnungsmarke ist der Schlüssel der Person, „+“ und 32 Hexziffern des SHA-256 der Termin-UID.",
+		"For a billing mark, “person” must be the person’s key and “uid” the event’s UID.": "Bei einer Abrechnungsmarke muss „person“ der Schlüssel der Person sein und „uid“ die UID des Termins.",
+		"“billed_on” must be a date (YYYY-MM-DD).": "„billed_on“ muss ein Datum sein (JJJJ-MM-TT).",
+		"“{field}” must be text of at most {max} characters.": "„{field}“ muss Text mit höchstens {max} Zeichen sein.",
+		"The key of this external person is too long for the shares matrix (at most 64 characters).": "Der Schlüssel dieser externen Person ist zu lang für die Freigabe-Matrix (höchstens 64 Zeichen).",
+		"A feed is read-only: an external person can be seen, not edited.": "Ein Feed ist nur lesbar: Eine externe Person kann man sehen, nicht editieren.",
+		"Only Team Admins, and Leads who may see this person’s time calendar, mark it as billed.": "Als abgerechnet markieren nur Team Admins und Leads, die den Zeitkalender dieser Person sehen dürfen."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

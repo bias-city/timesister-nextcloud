@@ -8,7 +8,7 @@ namespace OCA\TimeSister\Service;
 
 /**
  * Jobs (0.6.0): checking what comes in, the target in the project, and the
- * two rules – volume and no overlap – plus who sees a Job. Pure: knows
+ * rule of no overlap (volume is only measured since 0.7.5), plus who sees a Job. Pure: knows
  * only arrays, so everything here is testable without Nextcloud.
  *
  * A Job is kept as an array in the form of the record's `data` (API.md,
@@ -329,14 +329,16 @@ final class JobRules {
 	}
 
 	/**
-	 * Volume: all Jobs of a work package together never above its hours.
+	 * Volume: by how many hours all Jobs of a work package together go above
+	 * its hours (0 when they fit). Going above is allowed since 0.7.5 – the
+	 * clients show it; the server no longer refuses.
 	 *
 	 * @param list<array<string,mixed>> $others the other live Jobs of the team
 	 * @param array<string,mixed> $job the Job as it would be
 	 */
-	public static function checkVolume(array $job, float $apHours, array $others): void {
+	public static function volumeOver(array $job, float $apHours, array $others): float {
 		if (($job['budget'] ?? null) === null) {
-			return;
+			return 0.0;
 		}
 		$used = 0.0;
 		foreach ($others as $o) {
@@ -344,11 +346,8 @@ final class JobRules {
 				$used += self::hold($o);
 			}
 		}
-		$need = self::hold($job);
-		if ($used + $need > $apHours + self::EPS) {
-			$free = max(0.0, round($apHours - $used, 2));
-			throw new ApiException(422, ApiException::INVALID, Message::of('Too many hours: the work package has {free} h left of {total} h.', ['free' => self::num($free), 'total' => self::num($apHours)]), ['rule' => 'volume', 'free' => $free, 'total' => $apHours]);
-		}
+		$over = $used + self::hold($job) - $apHours;
+		return $over > self::EPS ? round($over, 2) : 0.0;
 	}
 
 	/**

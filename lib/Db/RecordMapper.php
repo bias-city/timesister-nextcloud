@@ -126,6 +126,15 @@ final class RecordMapper extends QBMapper {
 		return ['live' => $live, 'all' => $all, 'persons_account_deleted' => $gone, 'last' => $last];
 	}
 
+	/** A new revision without a new version: the record reads differently for someone (0.7.6, feed). */
+	public function touchRevision(int $id, int $revision): void {
+		$qb = $this->db->getQueryBuilder();
+		$qb->update($this->getTableName())
+			->set('revision', $qb->createNamedParameter($revision, IQueryBuilder::PARAM_INT))
+			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
+		$qb->executeStatement();
+	}
+
 	public function markAccountDeleted(int $id, int $now): void {
 		$qb = $this->db->getQueryBuilder();
 		$qb->update($this->getTableName())

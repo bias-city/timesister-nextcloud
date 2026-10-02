@@ -82,9 +82,13 @@ export async function jobs() {
 		check('pbuser1 is notified: new offer', n1?.subject === 'Lea Planer offers you a Job: Basics', n1)
 
 		head('Jobs: volume and overlap')
-		const vol = await ocs(L, 'PUT', path(key(2)), offer({ hours: 20, recipients: ['pbuser2'] }))
-		check('AP1 has 10 h left → 422 rule volume', vol.status === 422 && vol.data?.rule === 'volume' && vol.data?.free === 10, vol.text.slice(0, 300))
-		expect('10 h fit', await ocs(L, 'PUT', path(key(2)), offer({ hours: 10, recipients: ['pbuser2'] })), 200)
+		// 0.7.5: above the work package is allowed; offered only to oneself it is taken at once.
+		const selbst = await ocs(L, 'PUT', path(key(20)), offer({ hours: 20, recipients: ['pblead'] }))
+		made.push(key(20))
+		check('AP1 has 10 h left, 20 h to oneself: allowed, In Progress at once', selbst.status === 200
+			&& selbst.data?.data?.state === 'in_progress' && selbst.data?.data?.assignee === 'pblead', selbst.text.slice(0, 300))
+		check('… and nobody is notified', !(await noteFor(L, key(20))))
+		expect('10 h for pbuser2', await ocs(L, 'PUT', path(key(2)), offer({ hours: 10, recipients: ['pbuser2'] })), 200)
 		made.push(key(2))
 		const dup = await ocs(L, 'PUT', path(key(3)), offer({ budget: null, work_package: null, hours: 5, start: '2026-10-20', end: '2026-11-10' }))
 		check('same code, overlapping period, same person → 422 rule overlap', dup.status === 422 && dup.data?.rule === 'overlap'
@@ -99,8 +103,6 @@ export async function jobs() {
 		check('pbuser1\'s offer notification is gone', !(await noteFor(U1, key(1))))
 		expect('accepting it now is not possible', await ocs(U1, 'POST', `${path(key(1))}/accept`), 409, 'conflict')
 		expect('pbuser1 cannot answer their own', await ocs(U1, 'POST', `${path(key(1))}/accept-counter`), 403, 'forbidden')
-		const tooMuch = await ocs(L, 'POST', `${path(key(1))}/accept-counter`)
-		check('accepting 36 h exceeds AP1 → 422 volume', tooMuch.status === 422 && tooMuch.data?.rule === 'volume', tooMuch.text.slice(0, 200))
 		expect('changing while it waits', await ocs(L, 'POST', `${path(key(1))}/change`, { hours: 20 }), 409, 'conflict')
 		const rej = await ocs(L, 'POST', `${path(key(1))}/reject-counter`)
 		check('pblead rejects it', rej.status === 200 && rej.data?.data?.state === 'rejected', rej.text.slice(0, 200))

@@ -62,14 +62,17 @@ final class JobService {
 				throw ApiException::conflict(Message::of('A {job} with this key already exists.', ['job' => JobWord::JOB]));
 			}
 			$job = JobFlow::create($key, $f, $target, $m->uid, Time::iso($ts) ?? '');
-			$others = $this->others($m);
-			if ($target['ap_hours'] !== null) {
-				JobRules::checkVolume($job, $target['ap_hours'], $others);
+			// Offered only to oneself: taken at once, nobody to notify.
+			$selbst = $f['recipients'] === [$m->uid];
+			if ($selbst) {
+				$job = JobFlow::accept($job, $m->uid, Time::iso($ts) ?? '');
 			}
-			JobRules::checkOverlap($job, $f['recipients'], $others, $this->name(...));
+			// Volume is no longer a rule (0.7.5): above the work package is
+			// allowed, the clients show it.
+			JobRules::checkOverlap($job, $f['recipients'], $this->others($m), $this->name(...));
 			$rec = $this->store($m, null, $key, $job, $rev, $ts);
 			return ['write' => true, 'record' => $rec,
-				'after' => fn () => $this->notify->send(Notifier::JOB_OFFERED, $job, $f['recipients'], $m->uid)];
+				'after' => $selbst ? null : fn () => $this->notify->send(Notifier::JOB_OFFERED, $job, $f['recipients'], $m->uid)];
 		});
 	}
 
@@ -101,7 +104,7 @@ final class JobService {
 			}
 			$codes = isset($c['code']) ? JobRules::target($project, (string)$c['code'], $job['budget'], $job['work_package'])['codes'] : null;
 			$new = JobFlow::change($job, $c, $codes, $m->uid, $now);
-			$this->checkRules($m, $new, $project, $new['state'] !== $job['state'] || isset($c['hours']));
+			$this->checkRules($m, $new);
 			return [$new, function () use ($m, $job, $new): void {
 				$before = self::activeUids($job);
 				$after = self::activeUids($new);
@@ -148,7 +151,7 @@ final class JobService {
 			$this->requireManage($m, $job);
 			$new = $accept ? JobFlow::acceptCounter($job, $by, $m->uid, $now) : JobFlow::rejectCounter($job, $by, $m->uid, $now);
 			if ($accept && $project !== null && $new !== $job) {
-				$this->checkRules($m, $new, $project, true);
+				$this->checkRules($m, $new);
 			}
 			// The person cannot check it here: the server does, with their reported weeks (0.7.2).
 			if ($accept && $new !== $job && ($new['state'] ?? '') === JobRules::IN_PROGRESS) {
@@ -421,19 +424,13 @@ final class JobService {
 	}
 
 	/**
-	 * Volume (when the Job holds hours of a work package) and overlap for
-	 * the persons it counts for.
+	 * Overlap for the persons the Job counts for. Volume is no longer a
+	 * rule (0.7.5): going above a work package is allowed.
 	 *
 	 * @param array<string,mixed> $job
-	 * @param array<string,mixed> $project
 	 */
-	private function checkRules(Membership $m, array $job, array $project, bool $volume): void {
-		$others = $this->others($m);
-		if ($volume && $job['budget'] !== null && in_array($job['state'], JobRules::HOLDING, true)) {
-			$t = JobRules::target($project, (string)$job['code'], $job['budget'], $job['work_package']);
-			JobRules::checkVolume($job, (float)$t['ap_hours'], $others);
-		}
-		JobRules::checkOverlap($job, self::activeUids($job), $others, $this->name(...));
+	private function checkRules(Membership $m, array $job): void {
+		JobRules::checkOverlap($job, self::activeUids($job), $this->others($m), $this->name(...));
 	}
 
 	/**
