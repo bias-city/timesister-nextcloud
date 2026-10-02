@@ -1,5 +1,9 @@
 # Changes
 
+## 0.8.1 – 2026-10-02 (beta)
+
+- App Store: current screenshots (teams in the admin settings, the Mac app's week and the team's capacity). No code changes.
+
 ## 0.8.0 – 2026-10-02 (beta)
 
 - First release in the Nextcloud App Store, for the beta of the TimeSister Mac app 0.4.0.

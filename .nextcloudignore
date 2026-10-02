@@ -13,5 +13,5 @@
 /tools
 /UPDATE.md
 /vendor
-# Image for the App Store, linked there via GitHub
-/img/screenshot-admin.png
+# Images for the App Store, linked there via GitHub
+/img/screenshot-*.png
