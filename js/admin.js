@@ -353,11 +353,32 @@
 		return new Map([...out].sort(([, a], [, b]) => (b.role === 'admin') - (a.role === 'admin')))
 	}
 
+	// Short name: lowercase letters, digits, hyphens (TeamRules::SLUG_PATTERN).
+	function slugFrom(text) {
+		return text.toLowerCase()
+			.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+			.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+			.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32).replace(/-+$/, '')
+	}
+	// The suggestion follows the name until someone types a short name of their own.
+	let slugSuggested = ''
+	function suggestSlug() {
+		const slug = $('ts-slug')
+		if (editing !== null || (slug.value && slug.value !== slugSuggested)) return
+		slugSuggested = slugFrom($('ts-name').value)
+		slug.value = slugSuggested
+	}
+	function tidySlug() {
+		const slug = $('ts-slug'), v = slug.value.toLowerCase().replace(/\s+/g, '-')
+		if (v !== slug.value) slug.value = v
+	}
+
 	function openForm(team) {
 		editing = team ? team.id : null
 		$('ts-form-title').textContent = team ? tr('edit_team') : tr('new_team')
 		$('ts-name').value = team ? team.name : ''
 		$('ts-slug').value = team ? team.slug : ''
+		slugSuggested = ''
 		$('ts-error').textContent = ''
 		fillSelects(team)
 		fillAdmins(team)
@@ -446,6 +467,8 @@
 		$('ts-new').addEventListener('click', () => openForm(null))
 		$('ts-cancel').addEventListener('click', closeForm)
 		$('ts-form').addEventListener('submit', save)
+		$('ts-name').addEventListener('input', suggestSlug)
+		$('ts-slug').addEventListener('input', tidySlug)
 		load()
 	}
 

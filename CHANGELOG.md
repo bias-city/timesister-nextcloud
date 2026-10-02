@@ -1,5 +1,9 @@
 # Changes
 
+## 0.8.3 – 2026-10-02 (beta)
+
+- Admin settings, new team: the short name is suggested from the name (lowercase, umlauts spelled out, hyphens), typing turns capitals and spaces into the allowed form, and a hint names the rule (lowercase letters, digits, hyphens, 2 to 32 characters). Before, the form only said “fill in this field”.
+
 ## 0.8.2 – 2026-10-02 (beta)
 
 - App Store: the screenshots now come from bias.city/timesister. No code changes.

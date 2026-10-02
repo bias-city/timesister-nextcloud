@@ -48,6 +48,8 @@
 		"No": "Nein",
 		"A team builds on an existing Nextcloud group, the team group. Its group admins are the team’s Team Admins. The roles Team Admin, Lead and User and leaving the team are set here under Members or in the Mac app; master data, calendar shares and backups in the Mac app.": "Ein Team baut auf einer bestehenden Nextcloud-Gruppe auf, der Teamgruppe. Deren Gruppenadmins sind die Team Admins des Teams. Die Rollen Team Admin, Lead und User und Austritte setzt du hier unter Mitglieder oder in der Mac-App; Stammdaten, Kalenderfreigaben und Sicherungen pflegst du in der Mac-App.",
 		"Team group": "Teamgruppe",
+		"Lowercase letters, digits and hyphens, 2 to 32 characters.": "Kleinbuchstaben, Ziffern und Bindestrich, 2 bis 32 Zeichen.",
+		"Lowercase letters, digits and hyphens, 2 to 32 characters – suggested from the name, e.g. studio-kleinbasel.": "Kleinbuchstaben, Ziffern und Bindestrich, 2 bis 32 Zeichen – wird aus dem Namen vorgeschlagen, etwa studio-kleinbasel.",
 		"All members of the team. The group admins of the team group are the team’s Team Admins.": "Alle Mitglieder des Teams. Die Gruppenadmins der Teamgruppe sind die Team Admins des Teams.",
 		"Team Admins": "Team Admins",
 		"Team Admins are the group admins of the team group. Choose the role Team Admin under Members, or appoint them in Nextcloud’s user management.": "Team Admins sind die Gruppenadmins der Teamgruppe. Wähle die Rolle Team Admin unter Mitglieder, oder lege sie in der Benutzerverwaltung von Nextcloud fest.",

@@ -22,7 +22,8 @@
 			<label for="ts-name"><?php p($l->t('Name')); ?></label>
 			<input id="ts-name" name="name" type="text" maxlength="100" required autocomplete="off">
 			<label for="ts-slug"><?php p($l->t('Short name')); ?></label>
-			<input id="ts-slug" name="slug" type="text" maxlength="32" pattern="[a-z0-9\-]{2,32}" required autocomplete="off">
+			<input id="ts-slug" name="slug" type="text" maxlength="32" pattern="[a-z0-9\-]{2,32}" required autocomplete="off" aria-describedby="ts-slug-hint" title="<?php p($l->t('Lowercase letters, digits and hyphens, 2 to 32 characters.')); ?>">
+			<p id="ts-slug-hint" class="ts-hint ts-muted"><?php p($l->t('Lowercase letters, digits and hyphens, 2 to 32 characters – suggested from the name, e.g. studio-kleinbasel.')); ?></p>
 			<label for="ts-g-team"><?php p($l->t('Team group')); ?></label>
 			<select id="ts-g-team" name="team" required aria-describedby="ts-g-team-hint"></select>
 			<p id="ts-g-team-hint" class="ts-hint ts-muted"><?php p($l->t('All members of the team. The group admins of the team group are the team’s Team Admins.')); ?></p>
