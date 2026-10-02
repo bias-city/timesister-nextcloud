@@ -1,5 +1,9 @@
 # Changes
 
+## 0.8.2 – 2026-10-02 (beta)
+
+- App Store: the screenshots now come from bias.city/timesister. No code changes.
+
 ## 0.8.1 – 2026-10-02 (beta)
 
 - App Store: current screenshots (teams in the admin settings, the Mac app's week and the team's capacity). No code changes.
