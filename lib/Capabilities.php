@@ -18,6 +18,8 @@ use OCP\Capabilities\ICapability;
  * `jobs: 4` since 0.7.4: the weekly numbers carry the non-billable booked
  * hours. `billing: 1` since 0.7.6: billing marks as records of kind
  * `billing`, externals in the shares matrix, feed only for those who may.
+ * `absences: 1` since 0.9.0. `team_backup: 1` since 0.10.0: the team
+ * backup as a ZIP with restore and move on the admin page.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -25,7 +27,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int}} */
+	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -34,6 +36,7 @@ final class Capabilities implements ICapability {
 				'jobs' => 4,
 				'billing' => 1,
 				'absences' => 1,
+				'team_backup' => 1,
 			],
 		];
 	}

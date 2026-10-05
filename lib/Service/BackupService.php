@@ -179,6 +179,21 @@ final class BackupService {
 	}
 
 	/**
+	 * A calendar from an imported team backup (0.10.0): protected and
+	 * visible like a weekly backup, `source = "import"`, on the day the
+	 * backup was taken. A backup of another source on that day stays.
+	 *
+	 * @return array{backup:array<string,mixed>,kept:bool} kept: an existing backup of that day was left as it is
+	 */
+	public function storeImported(int $tenantId, string $uid, string $day, string $ics): array {
+		$existing = $this->backups->findDay($tenantId, $uid, $day);
+		if ($existing !== null && $existing->getSha256() !== hash('sha256', $ics) && $existing->getSource() !== BackupRules::SOURCE_IMPORT) {
+			return ['backup' => $this->present($existing), 'kept' => true];
+		}
+		return ['backup' => $this->present($this->store($tenantId, $uid, $day, $ics, BackupRules::SOURCE_IMPORT)), 'kept' => false];
+	}
+
+	/**
 	 * Export the time calendar once and store it per store only on a
 	 * changed checksum: with the admin (`$admin`, with the protected
 	 * copy) and in the own home (`$own`). 404 without a calendar. If the

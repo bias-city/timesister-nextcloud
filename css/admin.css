@@ -55,6 +55,14 @@
 #timesister-admin #ts-members { overflow-x: auto; }
 #timesister-admin #ts-members select { margin: 0; }
 
+/* Restore from ZIP: the mapping table and the mode choice. */
+#timesister-admin #ts-import-preview { margin-top: 12px; }
+#timesister-admin #ts-import-preview table select { margin: 0; width: 100%; }
+#timesister-admin #ts-import-preview .ts-mode { margin: 12px 0 0; }
+#timesister-admin #ts-import-preview .ts-mode label { display: block; padding: 2px 0; }
+#timesister-admin #ts-import-preview .ts-mode input { margin-right: 6px; }
+#timesister-admin .ts-result { margin-top: 12px; }
+
 @media (max-width: 640px) {
 	#timesister-admin .ts-grid { grid-template-columns: 1fr; }
 	#timesister-admin .ts-grid .ts-hint { grid-column: 1; }

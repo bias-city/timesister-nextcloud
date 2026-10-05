@@ -202,6 +202,10 @@
 				h('td', { class: 'ts-right' },
 					h('button', { type: 'button', class: 'button', onclick: () => openForm(t) }, tr('edit')),
 					' ',
+					h('button', { type: 'button', class: 'button', title: tr('export_zip_title'), onclick: () => exportTeam(t) }, tr('export_zip')),
+					' ',
+					h('button', { type: 'button', class: 'button', onclick: () => openImport(t) }, tr('import_zip')),
+					' ',
 					h('button', {
 						type: 'button',
 						class: 'button ts-icon',
@@ -448,6 +452,170 @@
 		}
 	}
 
+	// --- Team backup as ZIP (0.10.0) ---
+
+	let importing = null // the team a ZIP goes into
+	let preview = null // the server's preview of the uploaded ZIP
+
+	/** Download through fetch, so the OCS headers and the request token travel along. */
+	async function exportTeam(t) {
+		try {
+			const res = await fetch(overview.api_base + '/admin/teams/' + t.id + '/export', {
+				credentials: 'same-origin',
+				headers: { 'OCS-APIRequest': 'true', requesttoken: requestToken() },
+			})
+			if (!res.ok) {
+				let msg = tr('error_status', { status: res.status })
+				try {
+					const json = await res.json()
+					msg = (json.ocs && json.ocs.data && json.ocs.data.message) || msg
+				} catch (e) { /* no JSON body */ }
+				throw new Error(msg)
+			}
+			const m = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '')
+			const name = m ? m[1] : 'timesister-' + t.slug + '.zip'
+			const url = URL.createObjectURL(await res.blob())
+			const a = h('a', { href: url, download: name })
+			document.body.append(a)
+			a.click()
+			a.remove()
+			setTimeout(() => URL.revokeObjectURL(url), 10000)
+		} catch (e) {
+			window.alert(tr('export_failed', { message: e.message }))
+		}
+	}
+
+	function openImport(t) {
+		closeForm()
+		importing = t
+		preview = null
+		$('ts-import-title').textContent = tr('import_title', { name: t.name })
+		$('ts-import-file').value = ''
+		$('ts-import-preview').textContent = ''
+		$('ts-import-error').textContent = ''
+		$('ts-import-go').disabled = true
+		$('ts-import').hidden = false
+		$('ts-import-file').focus()
+	}
+
+	function closeImport() {
+		$('ts-import').hidden = true
+		importing = null
+		preview = null
+	}
+
+	async function previewUpload() {
+		const file = $('ts-import-file').files[0]
+		$('ts-import-preview').textContent = ''
+		$('ts-import-error').textContent = ''
+		$('ts-import-go').disabled = true
+		preview = null
+		if (!file || !importing) {
+			return
+		}
+		$('ts-import-preview').append(h('p', { class: 'ts-muted', text: tr('previewing') }))
+		const form = new FormData()
+		form.append('file', file, file.name)
+		try {
+			const res = await fetch(overview.api_base + '/admin/teams/' + importing.id + '/import/preview', {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'OCS-APIRequest': 'true', Accept: 'application/json', requesttoken: requestToken() },
+				body: form,
+			})
+			let json = null
+			try {
+				json = await res.json()
+			} catch (e) {
+				json = null
+			}
+			const data = json && json.ocs ? json.ocs.data : null
+			if (!res.ok) {
+				throw new Error((data && data.message) || tr('error_status', { status: res.status }))
+			}
+			preview = data
+			renderPreview()
+		} catch (e) {
+			$('ts-import-preview').textContent = ''
+			$('ts-import-error').textContent = e.message
+		}
+	}
+
+	function renderPreview() {
+		const box = $('ts-import-preview')
+		box.textContent = ''
+		const p = preview
+		const records = Object.values(p.records || {}).reduce((n, c) => n + c, 0)
+		box.append(h('p', {},
+			h('strong', { text: tr('preview_source', { name: p.team.name, date: formatTime(p.taken_at) }) }),
+			' · ',
+			h('span', { class: 'ts-muted', text: tr('preview_counts', { n: records, c: (p.calendars || []).filter((c) => !c.missing).length, a: p.absences || 0 }) })))
+		if (p.target && !p.target.empty) {
+			box.append(h('p', { class: 'ts-bad', text: tr('preview_not_empty') }))
+		}
+		// Person of the backup → account here: same identifier when it exists, otherwise without account.
+		const accounts = p.accounts || []
+		const rows = (p.persons || []).map((m) => {
+			const sel = h('select', { 'data-uid': m.uid, 'aria-label': tr('account_for', { name: m.uid }) },
+				h('option', { value: '', text: tr('no_account') }),
+				accounts.map((a) => h('option', { value: a.uid, selected: a.uid === m.uid && m.exists ? true : undefined, text: a.display_name && a.display_name !== a.uid ? a.display_name + ' (' + a.uid + ')' : a.uid })))
+			if (m.exists && !accounts.some((a) => a.uid === m.uid)) {
+				sel.append(h('option', { value: m.uid, selected: true, text: m.uid }))
+			}
+			return h('tr', { class: m.left_at ? 'ts-left' : '' },
+				h('td', {}, h('span', { text: memberLabel(m) }), ' ', h('span', { class: 'ts-muted', text: roleName(m.role) + (m.left_at ? ' · ' + tr('left') : '') })),
+				h('td', {}, sel, m.exists ? null : h('div', { class: 'ts-muted', text: tr('not_here') }), m.member ? h('div', { class: 'ts-muted', text: tr('already_member') }) : null))
+		})
+		box.append(h('table', {},
+			h('thead', {}, h('tr', {}, h('th', { text: tr('person_col') }), h('th', { text: tr('account_col') }))),
+			h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { class: 'ts-muted', colspan: 2, text: tr('no_members') })))))
+		box.append(h('div', { class: 'ts-mode' },
+			h('label', {}, h('input', { type: 'radio', name: 'ts-mode', value: 'merge', checked: true }), tr('mode_merge')),
+			h('label', {}, h('input', { type: 'radio', name: 'ts-mode', value: 'replace' }), tr('mode_replace'))))
+		$('ts-import-go').disabled = false
+	}
+
+	async function runImport(ev) {
+		ev.preventDefault()
+		if (!preview || !importing) {
+			return
+		}
+		const mapping = {}
+		for (const sel of $('ts-import-preview').querySelectorAll('select[data-uid]')) {
+			mapping[sel.dataset.uid] = sel.value === '' ? null : sel.value
+		}
+		const mode = ($('ts-import-preview').querySelector('input[name=ts-mode]:checked') || {}).value || 'merge'
+		$('ts-import-go').disabled = true
+		$('ts-import-error').textContent = ''
+		const busy = h('p', { class: 'ts-muted', text: tr('importing') })
+		$('ts-import-preview').append(busy)
+		try {
+			const r = await api('POST', '/admin/teams/' + importing.id + '/import', { token: preview.token, mapping, mode })
+			renderResult(r)
+			preview = null
+			await load()
+		} catch (e) {
+			busy.remove()
+			$('ts-import-error').textContent = e.message
+			$('ts-import-go').disabled = false
+		}
+	}
+
+	function renderResult(r) {
+		const box = $('ts-import-preview')
+		box.textContent = ''
+		const rec = r.records || {}
+		const stored = (r.calendars || []).filter((c) => c.stored).map((c) => c.uid)
+		const kept = (r.calendars || []).filter((c) => c.kept_existing).map((c) => c.uid)
+		const list = h('ul', { class: 'ts-list ts-result' },
+			h('li', { text: tr('import_done', { inserted: rec.inserted || 0, updated: rec.updated || 0, tombstoned: rec.tombstoned || 0, members: (r.members && r.members.rows) || 0, calendars: stored.length }) }),
+			r.pre_backup ? h('li', { text: tr('pre_backup', { path: r.pre_backup.visible || r.pre_backup.protected }) }) : null,
+			(r.without_account || []).length ? h('li', { text: tr('without_account', { list: r.without_account.join(', ') }) }) : null,
+			kept.length ? h('li', { text: tr('calendars_kept', { list: kept.join(', ') }) }) : null,
+			h('li', { class: 'ts-muted', text: tr('new_after_reload') }))
+		box.append(h('p', { class: 'ts-ok', text: tr('import_ok', { name: r.team ? r.team.name : '' }) }), list)
+	}
+
 	async function load() {
 		try {
 			teams = await api('GET', '/admin/teams')
@@ -469,6 +637,9 @@
 		$('ts-form').addEventListener('submit', save)
 		$('ts-name').addEventListener('input', suggestSlug)
 		$('ts-slug').addEventListener('input', tidySlug)
+		$('ts-import-cancel').addEventListener('click', closeImport)
+		$('ts-import-file').addEventListener('change', previewUpload)
+		$('ts-import').addEventListener('submit', runImport)
 		load()
 	}
 

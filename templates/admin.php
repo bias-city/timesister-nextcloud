@@ -46,6 +46,21 @@
 		</div>
 	</form>
 
+	<form id="ts-import" class="ts-form" hidden>
+		<h3 id="ts-import-title"><?php p($l->t('Restore from ZIP')); ?></h3>
+		<p class="ts-hint ts-muted"><?php p($l->t('A team backup (ZIP) from “Back up team”. Restoring into the same Nextcloud or moving to another one: choose for every person which account here takes over. Calendars are stored as backups per person; people fetch them in the Mac app under “Old events”.')); ?></p>
+		<div class="ts-grid">
+			<label for="ts-import-file"><?php p($l->t('Backup (ZIP)')); ?></label>
+			<input id="ts-import-file" type="file" accept=".zip,application/zip">
+		</div>
+		<div id="ts-import-preview" aria-live="polite"></div>
+		<p id="ts-import-error" class="ts-error" role="alert"></p>
+		<div class="ts-actions">
+			<button type="button" id="ts-import-cancel" class="button"><?php p($l->t('Cancel')); ?></button>
+			<button type="submit" id="ts-import-go" class="button primary" disabled><?php p($l->t('Import')); ?></button>
+		</div>
+	</form>
+
 	<h3><?php p($l->t('Status')); ?></h3>
 	<div id="ts-state"></div>
 </div>

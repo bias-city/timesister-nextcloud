@@ -100,6 +100,19 @@ final class RecordMapper extends QBMapper {
 		));
 	}
 
+	/**
+	 * Every record of the team, including tombstones, for the team backup.
+	 *
+	 * @return list<Record>
+	 */
+	public function findAll(int $tenantId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')->from($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->orderBy('kind')->addOrderBy('rkey');
+		return $this->findEntities($qb);
+	}
+
 	/** @return array{live:int,all:int,persons_account_deleted:int,last:?int} */
 	public function stats(int $tenantId): array {
 		$qb = $this->db->getQueryBuilder();

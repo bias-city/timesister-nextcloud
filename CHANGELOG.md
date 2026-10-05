@@ -1,5 +1,13 @@
 # Changes
 
+## 0.10.0 – 2026-10-05 (beta)
+
+API unchanged (`api: 2`), only additions; the capability gains `team_backup: 1`.
+
+- **Team backup as a ZIP.** On the admin page, every team has “Back up team (ZIP)” (`GET /admin/teams/{id}/export`): `manifest.json` with checksums, `team.json` (team, members, shares, consents), every record with its history under `records/<kind>/<key>.json`, `status.json`, `absences.json` and a fresh export of every active member's time calendar under `calendars/`. Person records carry their `feed`, so the ZIP is confidential (`contains_secrets: true`).
+- **Restore and move.** “Restore from ZIP” uploads the ZIP for a preview (`POST /admin/teams/{id}/import/preview`): the people of the backup, whether their account exists here, and the accounts of this Nextcloud to map to. `POST /admin/teams/{id}/import` with `token`, `mapping` (old account → new account or `null` for “without account”) and `mode` `merge` or `replace` writes records with history, roles, shares, consents, absences and status in one transaction, puts mapped accounts into the team group and stores the calendars as backups per person (`source: "import"`), which people fetch in the Mac app under “Old events”. Before importing into a team with content, the server stores a backup of it (protected and with the backup owner under `TimeSister Backups/_team/`).
+- Limits: ZIP 200 MB, entries 50 MB, 600 MB unpacked, no absolute paths or `..`; only Nextcloud admins, write routes with brute-force protection.
+
 ## 0.9.1 – 2026-10-05 (beta)
 
 Three findings of the security review; API unchanged (`api: 2`).

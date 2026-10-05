@@ -12,6 +12,7 @@ use OCA\TimeSister\Service\Json;
 use OCA\TimeSister\Service\Message;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\DataResponse;
+use OCP\AppFramework\Http\Response;
 use OCP\AppFramework\OCSController;
 use OCP\IL10N;
 use OCP\IRequest;
@@ -37,9 +38,17 @@ abstract class BaseController extends OCSController {
 	}
 
 	protected function run(callable $fn): DataResponse {
-		try {
+		$r = $this->respond(static function () use ($fn): DataResponse {
 			$result = $fn();
 			return $result instanceof DataResponse ? $result : new DataResponse($result);
+		});
+		return $r instanceof DataResponse ? $r : new DataResponse([], 500);
+	}
+
+	/** Like run(), but the callable may answer with any Response, e.g. a download. */
+	protected function respond(callable $fn): Response {
+		try {
+			return $fn();
 		} catch (ApiException $e) {
 			$r = new DataResponse($e->toData($this->l), $e->getStatus());
 			if ($e->getStatus() === 403 && in_array($this->request->getMethod(), ['PUT', 'POST', 'DELETE'], true)) {

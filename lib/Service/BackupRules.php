@@ -11,6 +11,10 @@ final class BackupRules {
 	public const MAX_BYTES = 20 * 1024 * 1024; // 20 MB after decoding
 	public const SOURCE_CLIENT = 'client';
 	public const SOURCE_SERVER = 'server';
+	/** A calendar from a team backup (ZIP) that was imported (0.10.0). */
+	public const SOURCE_IMPORT = 'import';
+	/** Team backups (ZIP) with the backup owner: `TimeSister Backups/_team/`. */
+	public const TEAM_FOLDER = '_team';
 	/**
 	 * Folder of the visible copies in the backup owner's home and in the
 	 * person's own home. Up to 0.3 it was “TimeSister-Sicherungen”; files

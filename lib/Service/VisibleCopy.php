@@ -38,6 +38,18 @@ final class VisibleCopy {
 	}
 
 	/**
+	 * A team backup (ZIP) with the backup owner under
+	 * `TimeSister Backups/_team/<name>`; not tracked, so thinning leaves it.
+	 *
+	 * @return array{path:string,file_id:int} path relative to `$owner`'s home
+	 */
+	public function writeTeamFile(string $owner, string $name, string $content): array {
+		$root = $this->folder($this->root->getUserFolder($owner), BackupRules::VISIBLE_ROOT);
+		$dir = $this->folder($root, BackupRules::TEAM_FOLDER);
+		return ['path' => BackupRules::VISIBLE_ROOT . '/' . BackupRules::TEAM_FOLDER . '/' . $name, 'file_id' => $this->put($dir, $name, $content)];
+	}
+
+	/**
 	 * The copy in the person's own home.
 	 *
 	 * @return array{path:string,file_id:int} path relative to `$uid`'s home

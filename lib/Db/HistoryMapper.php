@@ -29,6 +29,19 @@ final class HistoryMapper extends QBMapper {
 		return $this->findEntities($qb);
 	}
 
+	/**
+	 * Every version of the team, for the team backup.
+	 *
+	 * @return list<History> by kind, key and version ascending
+	 */
+	public function findByTenant(int $tenantId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')->from($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->orderBy('kind')->addOrderBy('rkey')->addOrderBy('version');
+		return $this->findEntities($qb);
+	}
+
 	public function findVersion(int $tenantId, string $kind, string $key, int $version): ?History {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
