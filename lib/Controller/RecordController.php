@@ -12,6 +12,7 @@ use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
+use OCP\AppFramework\Http\Attribute\BruteForceProtection;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\IL10N;
 use OCP\IRequest;
@@ -57,6 +58,7 @@ final class RecordController extends BaseController {
 
 	/** PUT /records/{kind}/{key} */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/records/{kind}/{key}')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function update(string $kind, string $key): DataResponse {
@@ -68,6 +70,7 @@ final class RecordController extends BaseController {
 
 	/** DELETE /records/{kind}/{key}?version=<n> */
 	#[ApiRoute(verb: 'DELETE', url: '/api/v1/records/{kind}/{key}')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function destroy(string $kind, string $key): DataResponse {
@@ -79,6 +82,7 @@ final class RecordController extends BaseController {
 
 	/** POST /records/batch */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/records/batch')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function batch(): DataResponse {
@@ -97,6 +101,7 @@ final class RecordController extends BaseController {
 
 	/** POST /records/{kind}/{key}/restore */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/records/{kind}/{key}/restore')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function restore(string $kind, string $key): DataResponse {

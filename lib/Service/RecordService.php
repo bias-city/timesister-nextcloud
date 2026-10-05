@@ -34,7 +34,19 @@ final class RecordService {
 		private ITimeFactory $time,
 		private JobAccess $jobs,
 		private AccessService $access,
+		private TenantService $team,
 	) {
+	}
+
+	/** `setting/settings`: a vacation calendar only in a Team Admin's own account – the job writes there without rights checks. */
+	private function checkSettings(Membership $m, string $kind, string $key, mixed $data): void {
+		if ($kind !== 'setting' || $key !== 'settings') {
+			return;
+		}
+		$vc = AbsenceRules::vacationCalendar($data);
+		if ($vc !== null) {
+			AbsenceRules::checkVacationCalendar($vc, $this->team->memberRoles($m->tenantId), true);
+		}
 	}
 
 	/** May the caller mark this person's events as billed (0.7.6)? */
@@ -207,6 +219,7 @@ final class RecordService {
 			$this->requireProjectLead($m, $key);
 		}
 		$v = RecordValidator::validate($kind, $key, $body->data);
+		$this->checkSettings($m, $kind, $key, $body->data);
 		return $this->write($m, [[
 			'kind' => $kind, 'key' => $key, 'version' => $version,
 			'json' => $v['json'], 'accounts' => $v['accounts'],
@@ -286,6 +299,7 @@ final class RecordService {
 					$ops[] = ['kind' => $kind, 'key' => $key, 'version' => $version, 'json' => null, 'accounts' => null];
 				} else {
 					$v = RecordValidator::validate($kind, $key, $w->data);
+					$this->checkSettings($m, $kind, $key, $w->data);
 					$ops[] = ['kind' => $kind, 'key' => $key, 'version' => $version, 'json' => $v['json'], 'accounts' => $v['accounts']];
 				}
 			} catch (ApiException $e) {
@@ -350,7 +364,9 @@ final class RecordService {
 		if ($h->getDeleted() === 1 || $raw === null) {
 			throw ApiException::invalid('This version is a deletion and cannot be restored.');
 		}
-		$v = RecordValidator::validate($kind, $key, Json::decode($raw));
+		$data = Json::decode($raw);
+		$v = RecordValidator::validate($kind, $key, $data);
+		$this->checkSettings($m, $kind, $key, $data);
 		return $this->write($m, [[
 			'kind' => $kind, 'key' => $key, 'version' => $current,
 			'json' => $v['json'], 'accounts' => $v['accounts'],

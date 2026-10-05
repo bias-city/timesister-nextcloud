@@ -10,6 +10,7 @@ use OCA\TimeSister\Service\AccessPolicy;
 use OCA\TimeSister\Service\MemberService;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
+use OCP\AppFramework\Http\Attribute\BruteForceProtection;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\DataResponse;
@@ -42,6 +43,7 @@ final class TeamController extends BaseController {
 
 	/** PUT /team/members/{uid} – role, leaving date and “allow overriding”; Team Admins. */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/team/members/{uid}')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function updateMember(string $uid): DataResponse {

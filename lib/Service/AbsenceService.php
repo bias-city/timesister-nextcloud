@@ -30,6 +30,7 @@ final class AbsenceService {
 		private AbsenceMapper $absences,
 		private RecordMapper $records,
 		private TenantMapper $tenants,
+		private TenantService $team,
 		private IManager $calendars,
 		private IFactory $l10n,
 		private ITimeFactory $time,
@@ -93,6 +94,13 @@ final class AbsenceService {
 		$settings = $this->settings($tenantId);
 		$vc = AbsenceRules::vacationCalendar($settings);
 		if ($vc === null) {
+			return null;
+		}
+		// Checked again here: the job has no rights context, so it must never enter a foreign account.
+		try {
+			AbsenceRules::checkVacationCalendar($vc, $this->team->memberRoles($tenantId), false);
+		} catch (ApiException $e) {
+			$this->logger->warning('TimeSister: vacation calendar of team {team} skipped – {reason}', ['app' => 'timesister', 'team' => $tenantId, 'reason' => $e->getText()->text()]);
 			return null;
 		}
 		$cal = $this->calendar($vc['owner'], $vc['uri']);

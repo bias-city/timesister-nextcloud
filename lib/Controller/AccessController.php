@@ -10,6 +10,7 @@ use OCA\TimeSister\Service\AccessRules;
 use OCA\TimeSister\Service\AccessService;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
+use OCP\AppFramework\Http\Attribute\BruteForceProtection;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\DataResponse;
@@ -36,6 +37,7 @@ final class AccessController extends BaseController {
 
 	/** PUT /team/access – `{changes: [{viewer, owner, level}]}`, all or none. */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/team/access')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function update(): DataResponse {
@@ -47,6 +49,7 @@ final class AccessController extends BaseController {
 
 	/** PUT /team/access/{viewer}/{owner} – `{level: none|view|edit|default}`. */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/team/access/{viewer}/{owner}')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function updateField(string $viewer, string $owner): DataResponse {
@@ -59,6 +62,7 @@ final class AccessController extends BaseController {
 
 	/** POST /team/access/remind – a notification to everyone with pending shares. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/team/access/remind')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 30, period: 60)]
 	public function remind(): DataResponse {

@@ -14,6 +14,7 @@ use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
+use OCP\AppFramework\Http\Attribute\BruteForceProtection;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\IL10N;
 use OCP\IRequest;
@@ -36,6 +37,7 @@ final class BackupController extends BaseController {
 
 	/** POST /backups – the own backup of one day. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/backups')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 60, period: 60)]
 	public function create(): DataResponse {
@@ -72,6 +74,7 @@ final class BackupController extends BaseController {
 
 	/** POST /backups/now – back up to the server immediately. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/backups/now')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 20, period: 60)]
 	public function now(): DataResponse {
@@ -89,6 +92,7 @@ final class BackupController extends BaseController {
 
 	/** PUT /backups/consent – set or withdraw the own consent. */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/backups/consent')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function setConsent(): DataResponse {
@@ -108,6 +112,7 @@ final class BackupController extends BaseController {
 
 	/** PUT /backups/own-copy – turn on or off, own account. */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/backups/own-copy')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function setOwnCopy(): DataResponse {

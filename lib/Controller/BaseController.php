@@ -25,6 +25,8 @@ abstract class BaseController extends OCSController {
 	/** A record is at most 256 KB; the body may be somewhat larger. */
 	public const MAX_RECORD_BODY = 1024 * 1024;
 	public const MAX_BATCH_BODY = 50 * 1024 * 1024;
+	/** `#[BruteForceProtection(action: …)]` of every write route. */
+	public const BRUTE_FORCE_ACTION = 'timesister';
 
 	public function __construct(
 		IRequest $request,
@@ -39,7 +41,12 @@ abstract class BaseController extends OCSController {
 			$result = $fn();
 			return $result instanceof DataResponse ? $result : new DataResponse($result);
 		} catch (ApiException $e) {
-			return new DataResponse($e->toData($this->l), $e->getStatus());
+			$r = new DataResponse($e->toData($this->l), $e->getStatus());
+			if ($e->getStatus() === 403 && in_array($this->request->getMethod(), ['PUT', 'POST', 'DELETE'], true)) {
+				// A refused write counts for Nextcloud's brute-force throttling; the write routes carry the attribute.
+				$r->throttle(['action' => self::BRUTE_FORCE_ACTION]);
+			}
+			return $r;
 		}
 	}
 

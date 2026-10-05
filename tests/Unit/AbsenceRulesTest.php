@@ -53,6 +53,40 @@ class AbsenceRulesTest extends TestCase {
 		$this->assertSame('413 too_large', self::code(fn () => AbsenceRules::parseItems($many)));
 	}
 
+	/** 0.9.1: control characters in a reported field are refused (400), and a CR never reaches an ICS line raw. */
+	public function testControlCharactersAreRefusedAndEscaped(): void {
+		$this->assertSame('400 invalid', self::code(fn () => AbsenceRules::parseItems([self::item("zz\r\nSUMMARY:x", '2026-07-06', '2026-07-11')])));
+		$this->assertSame('400 invalid', self::code(fn () => AbsenceRules::parseItems([self::item("a\0b", '2026-07-06', '2026-07-11')])));
+		$this->assertSame('400 invalid', self::code(fn () => AbsenceRules::parseItems([self::item('a', "2026-07-06\t", '2026-07-11')])));
+		$this->assertSame('400 invalid', self::code(fn () => AbsenceRules::parseItems([self::item('a', '2026-07-06', '2026-07-11', "vacation\x7f")])));
+		$this->assertCount(1, AbsenceRules::parseItems([self::item('a/20260706T090000Z', '2026-07-06', '2026-07-11')]), 'plain values still pass');
+
+		$row = ['uid' => 'Mia', 'source_uid' => "abc\r\nSUMMARY:Eingeschleust", 'kind' => 'vacation', 'start' => '2026-07-06', 'end' => '2026-07-11'];
+		$ics = AbsenceRules::ics($row, 'Ferien', "Mi\x00M Mia\rMuster", '20260101T000000Z');
+		$this->assertStringContainsString("X-TIMESISTER-QUELLE:abc\\nSUMMARY:Eingeschleust\r\n", $ics);
+		$this->assertStringContainsString("SUMMARY:Ferien · MiM Mia\\nMuster\r\n", $ics);
+		$this->assertSame(1, substr_count($ics, "\r\nSUMMARY:"), 'no second property');
+		$back = AbsenceRules::parseMirror($ics);
+		$this->assertSame("abc\nSUMMARY:Eingeschleust", $back['source_uid'] ?? null, 'round trip keeps the key stable');
+	}
+
+	/** 0.9.1: the calendar must belong to a member of the team – a Team Admin when stored – and the URL to that owner. */
+	public function testVacationCalendarMustBeInTheTeam(): void {
+		$roles = ['atadmin' => 'admin', 'atlead' => 'lead', 'atuser' => 'user'];
+		$vc = static fn (string $owner, ?string $urlOwner = null): array => [
+			'owner' => $owner, 'uri' => 'timesister-ferien',
+			'url' => 'http://x/remote.php/dav/calendars/' . ($urlOwner ?? $owner) . '/timesister-ferien/',
+		];
+		$ok = static fn (array $vc, bool $adminOnly): string => self::code(fn () => AbsenceRules::checkVacationCalendar($vc, $roles, $adminOnly));
+		$this->assertSame('ok', $ok($vc('atadmin'), true));
+		$this->assertSame('ok', $ok($vc('atlead'), false), 'the job accepts any member');
+		$this->assertSame('422 invalid', $ok($vc('atlead'), true), 'storing needs a Team Admin');
+		$this->assertSame('422 invalid', $ok($vc('pbadmin'), false), 'not in this team');
+		$this->assertSame('422 invalid', $ok($vc('atadmin', 'pbadmin'), true), 'URL of somebody else');
+		$this->assertSame('422 invalid', $ok(['owner' => 'atadmin', 'uri' => 'personal', 'url' => 'http://x/personal'], true), 'no CalDAV path');
+		$this->assertSame('ok', $ok($vc('atadmin'), false));
+	}
+
 	public function testKindsAndCalendarFromSettings(): void {
 		$this->assertSame(['vacation'], AbsenceRules::kinds(null));
 		$this->assertSame(['vacation'], AbsenceRules::kinds((object)['vacation_code' => 'FERIEN']));

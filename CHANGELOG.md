@@ -1,5 +1,13 @@
 # Changes
 
+## 0.9.1 – 2026-10-05 (beta)
+
+Three findings of the security review; API unchanged (`api: 2`).
+
+- **The vacation calendar stays in the team.** `vacation_calendar` in the settings record is accepted only when `owner` is a Team Admin of the team and `url` is a calendar of that owner (`…/remote.php/dav/calendars/<owner>/<calendar>/`), otherwise `422 invalid` – on `PUT`, in a batch and on restore. The background job checks again (owner still a member, URL still theirs) and skips the team with a warning in the log; before, a Team Admin could point the mirror at any account's calendar.
+- **`PUT /me/absences`:** control characters in `source_uid`, `kind`, `start` or `end` are refused with `400 invalid`; in the written events a CR is escaped like a line break and other control characters are dropped. Before, a CR in `source_uid` made the job rewrite the event on every run.
+- **Brute-force protection:** every writing route (`PUT`, `POST`, `DELETE`) carries `#[BruteForceProtection(action: 'timesister')]`, and a refused write (`403`) counts for Nextcloud's throttling.
+
 ## 0.9.0 – 2026-10-04 (beta)
 
 - API unchanged in form (`api: 2`), only additions; the capability gains `absences: 1`.

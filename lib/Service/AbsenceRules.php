@@ -28,6 +28,8 @@ final class AbsenceRules {
 	public const P_PERSON = 'X-TIMESISTER-PERSON';
 	public const P_SOURCE = 'X-TIMESISTER-QUELLE';
 	public const P_KIND = 'X-TIMESISTER-ART';
+	/** C0 controls and DEL – never in a reported field, never raw in an ICS line. */
+	public const CONTROL_CHARS = '/[\x00-\x1F\x7F]/';
 
 	/** The category's word, in the team's language. */
 	public static function label(IL10N $l, string $kind): string {
@@ -59,6 +61,13 @@ final class AbsenceRules {
 			$bad = static fn (string $field): ApiException => ApiException::invalid(Message::of('“{field}” of item {n} is invalid.', ['field' => $field, 'n' => $n + 1]));
 			if (!($i instanceof \stdClass)) {
 				throw $bad('items');
+			}
+			// Control characters would break the ICS lines the server writes: 400.
+			foreach (['source_uid', 'kind', 'start', 'end'] as $field) {
+				$v = $i->$field ?? null;
+				if (is_string($v) && preg_match(self::CONTROL_CHARS, $v)) {
+					throw ApiException::badRequest(Message::of('“{field}” of item {n} must not contain control characters.', ['field' => $field, 'n' => $n + 1]));
+				}
 			}
 			$source = $i->source_uid ?? null;
 			if (!is_string($source) || trim($source) === '' || strlen($source) > 255) {
@@ -119,6 +128,24 @@ final class AbsenceRules {
 		return ['url' => $url, 'owner' => $owner, 'uri' => $uri];
 	}
 
+	/**
+	 * A `vacation_calendar` may only be used when the owner is in the team
+	 * (a Team Admin, when `$adminOnly`) and the URL names a calendar of that
+	 * owner – this keeps the job out of foreign accounts. Otherwise 422.
+	 *
+	 * @param array{url:string,owner:string,uri:string} $vc
+	 * @param array<string,string> $roles uid → role, those who left excluded
+	 */
+	public static function checkVacationCalendar(array $vc, array $roles, bool $adminOnly): void {
+		$role = $roles[$vc['owner']] ?? null;
+		if ($role === null || ($adminOnly && $role !== Role::ADMIN)) {
+			throw ApiException::invalid('“vacation_calendar.owner” must be a Team Admin of this team.');
+		}
+		if (BackupRules::calendarUriFromUrl($vc['url'], $vc['owner']) === null) {
+			throw ApiException::invalid(Message::of('“vacation_calendar.url” must be a calendar of “{owner}” (…/remote.php/dav/calendars/{owner}/<calendar>/).', ['owner' => $vc['owner']]));
+		}
+	}
+
 	/** Does the person record say “not in the vacation calendar”? */
 	public static function optedOut(?\stdClass $person): bool {
 		return $person !== null && ($person->vacation_calendar_optout ?? null) === true;
@@ -158,7 +185,10 @@ final class AbsenceRules {
 	 * @param array{uid:string,source_uid:string,kind:string,start:string,end:string} $row
 	 */
 	public static function ics(array $row, string $label, string $personName, string $stamp, bool $cancelled = false): string {
-		$esc = static fn (string $s): string => str_replace(['\\', ';', ',', "\n"], ['\\\\', '\\;', '\\,', '\\n'], $s);
+		// RFC 5545 escaping; a bare CR would end the line, so it becomes \n like LF,
+		// and the other control characters are dropped.
+		$esc = static fn (string $s): string => str_replace(['\\', ';', ',', "\r\n", "\r", "\n"], ['\\\\', '\\;', '\\,', '\\n', '\\n', '\\n'],
+			(string)preg_replace('/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/', '', $s));
 		$lines = [
 			'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:' . self::PRODID,
 			'BEGIN:VEVENT',

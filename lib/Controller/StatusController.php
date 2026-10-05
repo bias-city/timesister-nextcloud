@@ -11,6 +11,7 @@ use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
+use OCP\AppFramework\Http\Attribute\BruteForceProtection;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\IL10N;
 use OCP\IRequest;
@@ -30,6 +31,7 @@ final class StatusController extends BaseController {
 
 	/** POST /status */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/status')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function create(): DataResponse {

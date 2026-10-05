@@ -15,6 +15,7 @@ use OCA\TimeSister\Service\Role;
 use OCA\TimeSister\Service\TenantService;
 use OCA\TimeSister\Service\Time;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
+use OCP\AppFramework\Http\Attribute\BruteForceProtection;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\DataResponse;
@@ -74,6 +75,7 @@ final class MeController extends BaseController {
 
 	/** PUT /me/calendar-share – own account only. */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/me/calendar-share')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function setCalendarShare(): DataResponse {
@@ -89,6 +91,7 @@ final class MeController extends BaseController {
 	 * next year) for the shared vacation calendar; replaces what was there.
 	 */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/me/absences')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 60, period: 60)]
 	public function setAbsences(): DataResponse {

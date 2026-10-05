@@ -13,6 +13,7 @@ use OCA\TimeSister\Service\TeamAdminService;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
+use OCP\AppFramework\Http\Attribute\BruteForceProtection;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\IGroupManager;
 use OCP\IL10N;
@@ -49,6 +50,7 @@ final class AdminTeamController extends BaseController {
 
 	/** POST /admin/teams */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/admin/teams')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function create(): DataResponse {
 		return $this->run(function () {
@@ -59,6 +61,7 @@ final class AdminTeamController extends BaseController {
 
 	/** PUT /admin/teams/{id} */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/admin/teams/{id}', requirements: ['id' => '\d+'])]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function update(int $id): DataResponse {
 		return $this->run(function () use ($id) {
@@ -69,6 +72,7 @@ final class AdminTeamController extends BaseController {
 
 	/** DELETE /admin/teams/{id} */
 	#[ApiRoute(verb: 'DELETE', url: '/api/v1/admin/teams/{id}', requirements: ['id' => '\d+'])]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function destroy(int $id): DataResponse {
 		return $this->run(function () use ($id) {
@@ -84,6 +88,7 @@ final class AdminTeamController extends BaseController {
 	 * a team admin.
 	 */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/admin/teams/{id}/members/{uid}', requirements: ['id' => '\d+'])]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function updateMember(int $id, string $uid): DataResponse {
 		return $this->run(function () use ($id, $uid) {

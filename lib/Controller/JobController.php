@@ -11,6 +11,7 @@ use OCA\TimeSister\Service\JobWeeksService;
 use OCA\TimeSister\Service\Json;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
+use OCP\AppFramework\Http\Attribute\BruteForceProtection;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\DataResponse;
@@ -39,6 +40,7 @@ final class JobController extends BaseController {
 
 	/** PUT /jobs/{key} – offer a new Job; sent again, it stays as it is. */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/jobs/{key}')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function offer(string $key): DataResponse {
@@ -47,6 +49,7 @@ final class JobController extends BaseController {
 
 	/** DELETE /jobs/{key} – only whoever created it. */
 	#[ApiRoute(verb: 'DELETE', url: '/api/v1/jobs/{key}')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function destroy(string $key): DataResponse {
@@ -55,6 +58,7 @@ final class JobController extends BaseController {
 
 	/** POST /jobs/{key}/change */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/{key}/change')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function change(string $key): DataResponse {
@@ -63,6 +67,7 @@ final class JobController extends BaseController {
 
 	/** POST /jobs/{key}/accept – the first recipient wins. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/{key}/accept')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function accept(string $key): DataResponse {
@@ -71,6 +76,7 @@ final class JobController extends BaseController {
 
 	/** POST /jobs/{key}/counter */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/{key}/counter')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function counter(string $key): DataResponse {
@@ -79,6 +85,7 @@ final class JobController extends BaseController {
 
 	/** POST /jobs/{key}/accept-counter – optional `{ by }`: whose, while several wait. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/{key}/accept-counter')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function acceptCounter(string $key): DataResponse {
@@ -87,6 +94,7 @@ final class JobController extends BaseController {
 
 	/** POST /jobs/{key}/reject-counter – optional `{ by }`. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/{key}/reject-counter')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function rejectCounter(string $key): DataResponse {
@@ -95,6 +103,7 @@ final class JobController extends BaseController {
 
 	/** POST /jobs/{key}/decline */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/{key}/decline')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function decline(string $key): DataResponse {
@@ -103,6 +112,7 @@ final class JobController extends BaseController {
 
 	/** POST /jobs/{key}/return – optional `{ note }`. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/{key}/return')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function giveBack(string $key): DataResponse {
@@ -111,6 +121,7 @@ final class JobController extends BaseController {
 
 	/** POST /jobs/{key}/done */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/{key}/done')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function done(string $key): DataResponse {
@@ -119,6 +130,7 @@ final class JobController extends BaseController {
 
 	/** POST /jobs/{key}/paid – `{ paid: bool }`, default true; Team Admins. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/{key}/paid')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function paid(string $key): DataResponse {
@@ -127,6 +139,7 @@ final class JobController extends BaseController {
 
 	/** POST /jobs/progress – `{ jobs: { key: { hours, invoiced } } }` from the person's client. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/progress')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function progress(): DataResponse {
@@ -135,6 +148,7 @@ final class JobController extends BaseController {
 
 	/** POST /jobs/weeks – the caller's weekly numbers from their client (0.7.2). */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/weeks')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 120, period: 60)]
 	public function reportWeeks(): DataResponse {

@@ -1117,6 +1117,12 @@ the shares current). The settings record names it:
   "absence_calendar_kinds": ["vacation", "sickness"] }
 ```
 
+Since 0.9.1 the server accepts `vacation_calendar` only when `owner` is a
+Team Admin of the team and `url` is a calendar of that owner
+(`…/remote.php/dav/calendars/<owner>/<calendar>/`), otherwise `422 invalid`;
+the background job skips a team whose owner has left or whose URL no longer
+matches, with a warning in the log.
+
 `absence_calendar_kinds` lists the categories that appear – `vacation`,
 `sickness`, `parental`, `civil_service`, `unpaid`; missing means
 `["vacation"]`, an empty list means none. Unknown names are ignored.
@@ -1134,7 +1140,8 @@ absences for this and next year.
   instance as `<uid>/<recurrence-id>`); the same source twice: the last one
   counts. `kind` one of the categories (missing: `vacation`). `start` and
   `end` are days, `end` exclusive and after `start`.
-- At most 400 items (`413 too_large`); invalid items `422 invalid`.
+- At most 400 items (`413 too_large`); invalid items `422 invalid`; control
+  characters in a field `400 invalid` (0.9.1).
 - The server replaces the person's rows (table `ts_absences`). Answer:
   `{ "stored": 3, "opted_out": false }`.
 - Opt-out: a person record with `vacation_calendar_optout: true` (set by the

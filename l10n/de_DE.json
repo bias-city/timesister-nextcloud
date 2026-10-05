@@ -231,7 +231,10 @@
 		"Unpaid": "Unbezahlt",
 		"“{field}” must be a list.": "„{field}“ muss eine Liste sein.",
 		"At most {max} absences per person.": "Höchstens {max} Absenzen je Person.",
-		"“{field}” of item {n} is invalid.": "„{field}“ von Eintrag {n} ist ungültig."
+		"“{field}” of item {n} is invalid.": "„{field}“ von Eintrag {n} ist ungültig.",
+		"“{field}” of item {n} must not contain control characters.": "„{field}“ von Eintrag {n} darf keine Steuerzeichen enthalten.",
+		"“vacation_calendar.owner” must be a Team Admin of this team.": "„vacation_calendar.owner“ muss Team Admin dieses Teams sein.",
+		"“vacation_calendar.url” must be a calendar of “{owner}” (…/remote.php/dav/calendars/{owner}/<calendar>/).": "„vacation_calendar.url“ muss ein Kalender von „{owner}“ sein (…/remote.php/dav/calendars/{owner}/<calendar>/)."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }
