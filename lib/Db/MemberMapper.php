@@ -53,11 +53,11 @@ final class MemberMapper extends QBMapper {
 		return $out;
 	}
 
-	public function deleteByTenant(int $tenantId): void {
+	public function deleteByTenant(int $tenantId): int {
 		$qb = $this->db->getQueryBuilder();
 		$qb->delete($this->getTableName())
 			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)));
-		$qb->executeStatement();
+		return $qb->executeStatement();
 	}
 
 	/** Account deleted: a new account with the same identifier inherits no role. */

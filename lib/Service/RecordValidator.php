@@ -19,7 +19,7 @@ final class RecordValidator {
 	public const JOB = 'job';
 	/** Billing marks (0.7.6): rights per person, see {@see BillingRules}. */
 	public const BILLING = BillingRules::KIND;
-	public const SETTING_KEYS = ['targethours', 'settings'];
+	public const SETTING_KEYS = ['targethours', 'settings', PrivacyRules::KEY];
 	public const KEY_PATTERN = '/^[A-Za-z0-9@._+-]{1,128}$/';
 	public const MAX_DATA_BYTES = 262144; // 256 KB
 	/** Kinds whose key lives in the field `id`. */
@@ -66,7 +66,10 @@ final class RecordValidator {
 			throw ApiException::invalid('“data” must be a JSON object.');
 		}
 		if ($kind === 'setting' && !in_array($key, self::SETTING_KEYS, true)) {
-			throw ApiException::invalid('Settings are called “targethours” or “settings”.');
+			throw ApiException::invalid('Settings are called “targethours”, “settings” or “privacy”.');
+		}
+		if ($kind === 'setting' && $key === PrivacyRules::KEY) {
+			PrivacyRules::validate($data);
 		}
 		if ($kind === 'person') {
 			if (!isset($data->login) || !is_string($data->login) || $data->login !== $key) {

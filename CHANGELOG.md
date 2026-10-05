@@ -1,5 +1,21 @@
 # Changes
 
+## 0.10.2 – 2026-10-05 (beta)
+
+API unchanged (`api: 2`), only additions; the capability gains `privacy_notice: 1`.
+
+- **Privacy notice per team.** `GET /team/privacy?format=html|md` gives every member a privacy notice of their team as a download (`timesister-privacy-<slug>-<date>.html|md`), in the language of the account; the Nextcloud admin gets it for any team with `GET /admin/teams/{id}/privacy`. The content is read live from the team: members with role, Team Admins, Leads with their projects, the shares matrix (who sees or edits whose time calendar), backup owner, consents, modules switched on, absence categories, vacation calendar, externals (count only, never a feed address). Nine sections: controller and contact, purpose, data and categories, where the data is stored, who has access, backups, retention and deletion with the legal references as a template (ArG 46, ArGV 1 Art. 73, OR 958f, DSG 6/19/25/32, GDPR 5(1)(e)/6(1)(b,c)/13/15/17(3)(b)/30/32), rights of the persons, and the note that it is a template from the team's settings and no legal advice. Empty fields read “[to be completed]”. The HTML is printable and loads nothing from outside; everything foreign is escaped.
+- **Record `setting/privacy`.** Team Admins keep the entries like `setting/settings`: `controller {name, address, contact}`, `privacy_contact`, `hosting {provider, location}`, `retention {time_years (5), billing_years (10), note}`, `law` (`ch`, `eu`, `both`; default `both`), `authority`. Texts at most 500 characters, years 0–30, otherwise `422`. The Nextcloud admin writes it from the admin page through `PUT /admin/teams/{id}/privacy` with `{ data }`.
+- **Admin page:** “Edit team” gains the section “Privacy” with these fields and the buttons “Privacy notice (HTML)” and “(Markdown)”.
+- **New team from a team ZIP.** “New team” takes a team ZIP as a second way: `POST /admin/teams/import/preview` (without a team) checks the file and names name, short name and the people of the backup; the admin chooses the team group, may change name and short name and maps the people to accounts here; `POST /admin/teams/from-zip` with `{ token, name, slug, group, mapping }` creates the team and imports into it (`merge`). A taken short name or group is `409` before anything is created; fails the import, the empty team is removed again and the message says so.
+
+## 0.10.1 – 2026-10-05 (beta)
+
+API unchanged (`api: 2`).
+
+- **Delete a team with content.** `DELETE /admin/teams/{id}` now takes `{ "confirm": "<team name>" }` (typed name, trimmed, case does not matter; otherwise `422 confirm`) and deletes any team. A team with content is stored first as a team ZIP, exactly as before an import: protected under `exports/t<id>/` in the app data and visible with the backup owner under `TimeSister Backups/_team/`; if the protected copy cannot be written, `409 conflict` and nothing is deleted. Then records with history, status, absences, members, shares, consents, the group mapping and the server backups go in one transaction, and the protected calendar backups in the app data are removed. The Nextcloud group, the accounts, their time calendars and the visible `.ics` files with the backup owner stay. The answer names the ZIP paths and the counts per table.
+- **Admin page:** the trash icon opens a small form instead of a browser dialog: type the team name, “Delete team” becomes active only when it matches; the result shows the ZIP path and the counts.
+
 ## 0.10.0 – 2026-10-05 (beta)
 
 API unchanged (`api: 2`), only additions; the capability gains `team_backup: 1`.

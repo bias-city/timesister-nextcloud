@@ -9,6 +9,7 @@ namespace OCA\TimeSister\Controller;
 use OCA\TimeSister\Service\ApiException;
 use OCA\TimeSister\Service\TeamAdminService;
 use OCA\TimeSister\Service\TeamExportService;
+use OCA\TimeSister\Service\TeamFromZipService;
 use OCA\TimeSister\Service\TeamImportService;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
@@ -24,7 +25,7 @@ use OCP\IUserSession;
 
 /**
  * The team backup as a ZIP (0.10.0): download, preview of an upload and
- * import. **Without** `#[NoAdminRequired]`: Nextcloud itself only lets
+ * import; a new team from a ZIP (0.10.2). **Without** `#[NoAdminRequired]`: Nextcloud itself only lets
  * admins in; the check here is the second door.
  */
 final class AdminBackupController extends BaseController {
@@ -35,6 +36,7 @@ final class AdminBackupController extends BaseController {
 		private TeamAdminService $admin,
 		private TeamExportService $export,
 		private TeamImportService $import,
+		private TeamFromZipService $fromZip,
 		private IGroupManager $groupManager,
 		private IUserSession $userSession,
 	) {
@@ -62,6 +64,29 @@ final class AdminBackupController extends BaseController {
 		return $this->run(function () use ($id) {
 			$this->requireAdmin();
 			return $this->import->preview($this->admin->find($id), $this->request->getUploadedFile('file'));
+		});
+	}
+
+	/** POST /admin/teams/import/preview – multipart field `file`, for a team that does not exist yet (0.10.2). */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/admin/teams/import/preview')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[UserRateLimit(limit: 20, period: 60)]
+	public function previewNew(): DataResponse {
+		return $this->run(function () {
+			$this->requireAdmin();
+			return $this->import->preview(null, $this->request->getUploadedFile('file'));
+		});
+	}
+
+	/** POST /admin/teams/from-zip – `{ token, name, slug, group, mapping }`: create the team, then import (0.10.2). */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/admin/teams/from-zip')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[UserRateLimit(limit: 20, period: 60)]
+	public function fromZip(): DataResponse {
+		return $this->run(function () {
+			$actor = $this->requireAdmin();
+			$in = array_intersect_key($this->request->getParams(), array_flip(['token', 'name', 'slug', 'group', 'mapping']));
+			return $this->fromZip->create($actor, $in);
 		});
 	}
 

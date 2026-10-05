@@ -19,7 +19,8 @@ use OCP\Capabilities\ICapability;
  * hours. `billing: 1` since 0.7.6: billing marks as records of kind
  * `billing`, externals in the shares matrix, feed only for those who may.
  * `absences: 1` since 0.9.0. `team_backup: 1` since 0.10.0: the team
- * backup as a ZIP with restore and move on the admin page.
+ * backup as a ZIP with restore and move on the admin page. `privacy_notice: 1`
+ * since 0.10.2: GET /team/privacy and the record `setting/privacy`.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -27,7 +28,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int}} */
+	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -37,6 +38,7 @@ final class Capabilities implements ICapability {
 				'billing' => 1,
 				'absences' => 1,
 				'team_backup' => 1,
+				'privacy_notice' => 1,
 			],
 		];
 	}

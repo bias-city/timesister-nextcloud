@@ -10,6 +10,7 @@ use OCA\TimeSister\Service\ApiException;
 use OCA\TimeSister\Service\MemberService;
 use OCA\TimeSister\Service\Role;
 use OCA\TimeSister\Service\TeamAdminService;
+use OCA\TimeSister\Service\TeamDeleteService;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
@@ -33,6 +34,7 @@ final class AdminTeamController extends BaseController {
 		IL10N $l,
 		private TeamAdminService $admin,
 		private MemberService $members,
+		private TeamDeleteService $deleter,
 		private IGroupManager $groupManager,
 		private IUserSession $userSession,
 	) {
@@ -70,15 +72,14 @@ final class AdminTeamController extends BaseController {
 		});
 	}
 
-	/** DELETE /admin/teams/{id} */
+	/** DELETE /admin/teams/{id} with `{ "confirm": "<team name>" }`; a team with content is stored as a ZIP first (0.10.1). */
 	#[ApiRoute(verb: 'DELETE', url: '/api/v1/admin/teams/{id}', requirements: ['id' => '\d+'])]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function destroy(int $id): DataResponse {
 		return $this->run(function () use ($id) {
 			$this->requireAdmin();
-			$this->admin->delete($id);
-			return ['id' => $id, 'deleted' => true];
+			return $this->deleter->delete($this->admin->find($id), $this->request->getParam('confirm'));
 		});
 	}
 

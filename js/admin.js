@@ -34,6 +34,8 @@
 	const TEXTS = loadState('l10n') || {}
 	// Role words: the same in every language, never translated.
 	const ROLE_NAMES = loadState('roles') || {}
+	// setting/privacy per team ID (0.10.2): { version, data }.
+	const PRIVACY = loadState('privacy') || {}
 	const roleName = (r) => ROLE_NAMES[r] || r
 
 	/** Translated text for a key; {name} is replaced with vars.name. */
@@ -378,6 +380,7 @@
 	}
 
 	function openForm(team) {
+		closeDelete()
 		editing = team ? team.id : null
 		$('ts-form-title').textContent = team ? tr('edit_team') : tr('new_team')
 		$('ts-name').value = team ? team.name : ''
@@ -391,6 +394,14 @@
 		// New team: no backup requirement. Who sees which calendar is set in the Mac app.
 		const s = (team && team.settings) || {}
 		$('ts-backup-required').checked = s.backup_required === true
+		// From a team ZIP (0.10.2): only for a new team; the privacy section only for an existing one.
+		zipPreview = null
+		$('ts-zip').value = ''
+		$('ts-zip-row').hidden = team !== null
+		$('ts-zip-preview').textContent = ''
+		$('ts-save').textContent = tr('save')
+		$('ts-privacy').hidden = !team
+		fillPrivacy(team)
 		$('ts-form').hidden = false
 		$('ts-name').focus()
 	}
@@ -398,6 +409,55 @@
 	function closeForm() {
 		$('ts-form').hidden = true
 		editing = null
+		zipPreview = null
+	}
+
+	// --- Privacy notice (0.10.2): the record setting/privacy and the two downloads ---
+
+	const PRIVACY_TEXTS = [['name', 'controller', 'name'], ['address', 'controller', 'address'], ['contact', 'controller', 'contact'],
+		['dpo', null, 'privacy_contact'], ['provider', 'hosting', 'provider'], ['location', 'hosting', 'location'],
+		['note', 'retention', 'note'], ['authority', null, 'authority']]
+	const PRIVACY_YEARS = [['time', 'time_years'], ['billing', 'billing_years']]
+
+	function fillPrivacy(team) {
+		const d = (team && PRIVACY[String(team.id)] && PRIVACY[String(team.id)].data) || {}
+		for (const [id, group, key] of PRIVACY_TEXTS) {
+			const v = group ? (d[group] || {})[key] : d[key]
+			$('ts-p-' + id).value = typeof v === 'string' ? v : ''
+		}
+		const r = d.retention || {}
+		for (const [id, key] of PRIVACY_YEARS) {
+			$('ts-p-' + id).value = Number.isInteger(r[key]) ? String(r[key]) : ''
+		}
+		$('ts-p-law').value = ['ch', 'eu', 'both'].includes(d.law) ? d.law : 'both'
+	}
+
+	/** The record as PUT /admin/teams/{id}/privacy takes it: texts trimmed, years as integers. */
+	function privacyData() {
+		const data = { controller: {}, hosting: {}, retention: {}, law: $('ts-p-law').value }
+		for (const [id, group, key] of PRIVACY_TEXTS) {
+			const v = $('ts-p-' + id).value.trim()
+			if (group) {
+				data[group][key] = v
+			} else {
+				data[key] = v
+			}
+		}
+		for (const [id, key] of PRIVACY_YEARS) {
+			const n = parseInt($('ts-p-' + id).value, 10)
+			if (Number.isInteger(n) && n >= 0 && n <= 30) {
+				data.retention[key] = n
+			}
+		}
+		return data
+	}
+
+	function downloadPrivacy(format) {
+		if (editing === null) {
+			return
+		}
+		const t = teams.find((x) => x.id === editing)
+		download('/admin/teams/' + editing + '/privacy?format=' + format, 'timesister-privacy-' + (t ? t.slug : editing) + '.' + format, 'privacy_failed')
 	}
 
 	async function save(ev) {
@@ -417,7 +477,14 @@
 		$('ts-save').disabled = true
 		$('ts-error').textContent = ''
 		try {
-			if (editing === null) {
+			if (editing === null && zipPreview) {
+				// From a team ZIP: create the team and import in one call; a failure removes the team again.
+				const mapping = {}
+				for (const sel of $('ts-members').querySelectorAll('select[data-uid]')) {
+					mapping[sel.dataset.uid] = sel.value === '' ? null : sel.value
+				}
+				await api('POST', '/admin/teams/from-zip', { token: zipPreview.token, name: body.name, slug: body.slug, group: body.groups.team, mapping })
+			} else if (editing === null) {
 				await api('POST', '/admin/teams', body)
 			} else {
 				const changes = memberChanges()
@@ -430,6 +497,12 @@
 						throw new Error(tr('member_failed', { name: uid, message: e.message }))
 					}
 				}
+				// The privacy record, written against its current version on the server.
+				try {
+					await api('PUT', '/admin/teams/' + editing + '/privacy', { data: privacyData() })
+				} catch (e) {
+					throw new Error(tr('privacy_save_failed', { message: e.message }))
+				}
 			}
 			// Status and group assignment come fresh from the server.
 			window.location.reload()
@@ -440,16 +513,74 @@
 		}
 	}
 
-	async function removeTeam(t) {
-		if (!window.confirm(tr('confirm_delete', { name: t.name }))) {
+	// --- Deleting a team with content (0.10.1): type the name, a ZIP is stored first ---
+
+	let deleting = null // the team the delete form is open for
+
+	function removeTeam(t) {
+		closeForm()
+		closeImport()
+		deleting = t
+		$('ts-delete-title').textContent = tr('delete_title', { name: t.name })
+		$('ts-delete-ask').textContent = tr('delete_ask', { name: t.name })
+		$('ts-delete-name').value = ''
+		$('ts-delete-name').disabled = false
+		$('ts-delete-result').textContent = ''
+		$('ts-delete-error').textContent = ''
+		$('ts-delete-go').disabled = true
+		$('ts-delete').hidden = false
+		$('ts-delete-name').focus()
+	}
+
+	function closeDelete() {
+		$('ts-delete').hidden = true
+		deleting = null
+	}
+
+	/** Like the server: trimmed, case does not matter. */
+	function sameName(a, b) {
+		return String(a).trim().toLowerCase() === String(b).trim().toLowerCase()
+	}
+
+	function checkDeleteName() {
+		$('ts-delete-go').disabled = !deleting || !sameName($('ts-delete-name').value, deleting.name)
+	}
+
+	async function runDelete(ev) {
+		ev.preventDefault()
+		const t = deleting
+		if (!t || !sameName($('ts-delete-name').value, t.name)) {
 			return
 		}
+		$('ts-delete-error').textContent = ''
+		$('ts-delete-go').disabled = true
+		$('ts-delete-name').disabled = true
+		$('ts-delete-result').textContent = tr('deleting')
 		try {
-			await api('DELETE', '/admin/teams/' + t.id)
-			window.location.reload()
+			const r = await api('DELETE', '/admin/teams/' + t.id, { confirm: $('ts-delete-name').value })
+			renderDeleted(t, r)
+			deleting = null
+			await load()
 		} catch (e) {
-			window.alert(e.message)
+			$('ts-delete-result').textContent = ''
+			$('ts-delete-error').textContent = e.message
+			$('ts-delete-name').disabled = false
+			checkDeleteName()
 		}
+	}
+
+	function renderDeleted(t, r) {
+		const box = $('ts-delete-result')
+		box.textContent = ''
+		const b = r.backup || null
+		const c = r.counts || {}
+		const list = h('ul', { class: 'ts-list ts-result' },
+			b === null ? h('li', { text: tr('delete_empty') })
+				: b.visible ? h('li', { text: tr('delete_backup', { path: b.visible }) })
+					: h('li', { text: tr('delete_backup_protected_only', { path: b.protected }) }),
+			h('li', { text: tr('delete_counts', { records: c.records || 0, versions: c.versions || 0, members: c.members || 0, backups: c.backups || 0, absences: c.absences || 0 }) }),
+			h('li', { class: 'ts-muted', text: tr('delete_stays') }))
+		box.append(h('p', { class: 'ts-ok', text: tr('delete_ok', { name: t.name }) }), list)
 	}
 
 	// --- Team backup as ZIP (0.10.0) ---
@@ -457,10 +588,14 @@
 	let importing = null // the team a ZIP goes into
 	let preview = null // the server's preview of the uploaded ZIP
 
+	function exportTeam(t) {
+		download('/admin/teams/' + t.id + '/export', 'timesister-' + t.slug + '.zip', 'export_failed')
+	}
+
 	/** Download through fetch, so the OCS headers and the request token travel along. */
-	async function exportTeam(t) {
+	async function download(path, fallbackName, failKey) {
 		try {
-			const res = await fetch(overview.api_base + '/admin/teams/' + t.id + '/export', {
+			const res = await fetch(overview.api_base + path, {
 				credentials: 'same-origin',
 				headers: { 'OCS-APIRequest': 'true', requesttoken: requestToken() },
 			})
@@ -473,7 +608,7 @@
 				throw new Error(msg)
 			}
 			const m = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') || '')
-			const name = m ? m[1] : 'timesister-' + t.slug + '.zip'
+			const name = m ? m[1] : fallbackName
 			const url = URL.createObjectURL(await res.blob())
 			const a = h('a', { href: url, download: name })
 			document.body.append(a)
@@ -481,12 +616,13 @@
 			a.remove()
 			setTimeout(() => URL.revokeObjectURL(url), 10000)
 		} catch (e) {
-			window.alert(tr('export_failed', { message: e.message }))
+			window.alert(tr(failKey, { message: e.message }))
 		}
 	}
 
 	function openImport(t) {
 		closeForm()
+		closeDelete()
 		importing = t
 		preview = null
 		$('ts-import-title').textContent = tr('import_title', { name: t.name })
@@ -514,30 +650,90 @@
 			return
 		}
 		$('ts-import-preview').append(h('p', { class: 'ts-muted', text: tr('previewing') }))
-		const form = new FormData()
-		form.append('file', file, file.name)
 		try {
-			const res = await fetch(overview.api_base + '/admin/teams/' + importing.id + '/import/preview', {
-				method: 'POST',
-				credentials: 'same-origin',
-				headers: { 'OCS-APIRequest': 'true', Accept: 'application/json', requesttoken: requestToken() },
-				body: form,
-			})
-			let json = null
-			try {
-				json = await res.json()
-			} catch (e) {
-				json = null
-			}
-			const data = json && json.ocs ? json.ocs.data : null
-			if (!res.ok) {
-				throw new Error((data && data.message) || tr('error_status', { status: res.status }))
-			}
-			preview = data
+			preview = await uploadForPreview('/admin/teams/' + importing.id + '/import/preview', file)
 			renderPreview()
 		} catch (e) {
 			$('ts-import-preview').textContent = ''
 			$('ts-import-error').textContent = e.message
+		}
+	}
+
+	/** The ZIP as multipart `file`; the server answers with the preview and a token. */
+	async function uploadForPreview(path, file) {
+		const form = new FormData()
+		form.append('file', file, file.name)
+		const res = await fetch(overview.api_base + path, {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: { 'OCS-APIRequest': 'true', Accept: 'application/json', requesttoken: requestToken() },
+			body: form,
+		})
+		let json = null
+		try {
+			json = await res.json()
+		} catch (e) {
+			json = null
+		}
+		const data = json && json.ocs ? json.ocs.data : null
+		if (!res.ok) {
+			throw new Error((data && data.message) || tr('error_status', { status: res.status }))
+		}
+		return data
+	}
+
+	/** Person of the backup → account here: the same identifier when it exists, otherwise without account. */
+	function mappingTable(p) {
+		const accounts = p.accounts || []
+		const rows = (p.persons || []).map((m) => {
+			const sel = h('select', { 'data-uid': m.uid, 'aria-label': tr('account_for', { name: m.uid }) },
+				h('option', { value: '', text: tr('no_account') }),
+				accounts.map((a) => h('option', { value: a.uid, selected: a.uid === m.uid && m.exists ? true : undefined, text: a.display_name && a.display_name !== a.uid ? a.display_name + ' (' + a.uid + ')' : a.uid })))
+			if (m.exists && !accounts.some((a) => a.uid === m.uid)) {
+				sel.append(h('option', { value: m.uid, selected: true, text: m.uid }))
+			}
+			return h('tr', { class: m.left_at ? 'ts-left' : '' },
+				h('td', {}, h('span', { text: memberLabel(m) }), ' ', h('span', { class: 'ts-muted', text: roleName(m.role) + (m.left_at ? ' · ' + tr('left') : '') })),
+				h('td', {}, sel, m.exists ? null : h('div', { class: 'ts-muted', text: tr('not_here') }), m.member ? h('div', { class: 'ts-muted', text: tr('already_member') }) : null))
+		})
+		return h('table', {},
+			h('thead', {}, h('tr', {}, h('th', { text: tr('person_col') }), h('th', { text: tr('account_col') }))),
+			h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { class: 'ts-muted', colspan: 2, text: tr('no_members') }))))
+	}
+
+	// --- New team from a team ZIP (0.10.2) ---
+
+	let zipPreview = null // the server's preview of the ZIP chosen in "new team"
+
+	async function previewZip() {
+		const file = $('ts-zip').files[0]
+		zipPreview = null
+		$('ts-zip-preview').textContent = ''
+		$('ts-error').textContent = ''
+		$('ts-save').textContent = tr('save')
+		if (!file || editing !== null) {
+			fillMembers(null)
+			return
+		}
+		$('ts-zip-preview').append(h('p', { class: 'ts-muted', text: tr('previewing') }))
+		try {
+			const p = await uploadForPreview('/admin/teams/import/preview', file)
+			zipPreview = p
+			const records = Object.values(p.records || {}).reduce((n, c) => n + c, 0)
+			$('ts-zip-preview').textContent = ''
+			$('ts-zip-preview').append(
+				h('p', {}, h('strong', { text: tr('zip_source', { name: p.team.name, slug: p.team.slug, date: formatTime(p.taken_at), n: records, p: (p.persons || []).length }) })),
+				h('p', { class: 'ts-hint ts-muted', text: tr('zip_group_hint') }))
+			// Name and short name from the backup; the admin may change them.
+			$('ts-name').value = p.team.name || ''
+			$('ts-slug').value = p.team.slug || slugFrom(p.team.name || '')
+			slugSuggested = ''
+			$('ts-members').textContent = ''
+			$('ts-members').append(mappingTable(p))
+			$('ts-save').textContent = tr('create_import')
+		} catch (e) {
+			$('ts-zip-preview').textContent = ''
+			$('ts-error').textContent = e.message
 		}
 	}
 
@@ -553,22 +749,7 @@
 		if (p.target && !p.target.empty) {
 			box.append(h('p', { class: 'ts-bad', text: tr('preview_not_empty') }))
 		}
-		// Person of the backup → account here: same identifier when it exists, otherwise without account.
-		const accounts = p.accounts || []
-		const rows = (p.persons || []).map((m) => {
-			const sel = h('select', { 'data-uid': m.uid, 'aria-label': tr('account_for', { name: m.uid }) },
-				h('option', { value: '', text: tr('no_account') }),
-				accounts.map((a) => h('option', { value: a.uid, selected: a.uid === m.uid && m.exists ? true : undefined, text: a.display_name && a.display_name !== a.uid ? a.display_name + ' (' + a.uid + ')' : a.uid })))
-			if (m.exists && !accounts.some((a) => a.uid === m.uid)) {
-				sel.append(h('option', { value: m.uid, selected: true, text: m.uid }))
-			}
-			return h('tr', { class: m.left_at ? 'ts-left' : '' },
-				h('td', {}, h('span', { text: memberLabel(m) }), ' ', h('span', { class: 'ts-muted', text: roleName(m.role) + (m.left_at ? ' · ' + tr('left') : '') })),
-				h('td', {}, sel, m.exists ? null : h('div', { class: 'ts-muted', text: tr('not_here') }), m.member ? h('div', { class: 'ts-muted', text: tr('already_member') }) : null))
-		})
-		box.append(h('table', {},
-			h('thead', {}, h('tr', {}, h('th', { text: tr('person_col') }), h('th', { text: tr('account_col') }))),
-			h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { class: 'ts-muted', colspan: 2, text: tr('no_members') })))))
+		box.append(mappingTable(p))
 		box.append(h('div', { class: 'ts-mode' },
 			h('label', {}, h('input', { type: 'radio', name: 'ts-mode', value: 'merge', checked: true }), tr('mode_merge')),
 			h('label', {}, h('input', { type: 'radio', name: 'ts-mode', value: 'replace' }), tr('mode_replace'))))
@@ -637,9 +818,15 @@
 		$('ts-form').addEventListener('submit', save)
 		$('ts-name').addEventListener('input', suggestSlug)
 		$('ts-slug').addEventListener('input', tidySlug)
+		$('ts-zip').addEventListener('change', previewZip)
+		$('ts-p-html').addEventListener('click', () => downloadPrivacy('html'))
+		$('ts-p-md').addEventListener('click', () => downloadPrivacy('md'))
 		$('ts-import-cancel').addEventListener('click', closeImport)
 		$('ts-import-file').addEventListener('change', previewUpload)
 		$('ts-import').addEventListener('submit', runImport)
+		$('ts-delete-cancel').addEventListener('click', closeDelete)
+		$('ts-delete-name').addEventListener('input', checkDeleteName)
+		$('ts-delete').addEventListener('submit', runDelete)
 		load()
 	}
 

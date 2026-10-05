@@ -44,6 +44,14 @@ final class ProtectedStore {
 		}
 	}
 
+	/** Deleting a team (0.10.1): its whole folder; a missing one is not an error. */
+	public function deleteTeam(int $tenantId): void {
+		try {
+			$this->appData->getFolder('t' . $tenantId)->delete();
+		} catch (NotFoundException) {
+		}
+	}
+
 	private function folder(int $tenantId, string $uid, bool $create): ISimpleFolder {
 		$teamName = 't' . $tenantId;
 		try {

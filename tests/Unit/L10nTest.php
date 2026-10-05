@@ -24,7 +24,7 @@ class L10nTest extends TestCase {
 	private const Q = "'((?:[^'\\\\]|\\\\.)*)'";
 	private const LANGUAGES = ['de', 'de_DE'];
 	/** The factories of ApiException that take a message. */
-	private const FACTORIES = '(?:forbidden|notFound|conflict|invalid|badRequest|tooLarge)';
+	private const FACTORIES = '(?:forbidden|notFound|conflict|invalid|confirm|badRequest|tooLarge)';
 
 	/** @return list<string> */
 	private static function files(): array {

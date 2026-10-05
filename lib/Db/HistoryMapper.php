@@ -87,4 +87,12 @@ final class HistoryMapper extends QBMapper {
 		} while (count($ids) === 1000);
 		return $total;
 	}
+
+	/** Deleting a team (0.10.1): every row of it. @return int rows */
+	public function deleteByTenant(int $tenantId): int {
+		$qb = $this->db->getQueryBuilder();
+		$qb->delete($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)));
+		return $qb->executeStatement();
+	}
 }

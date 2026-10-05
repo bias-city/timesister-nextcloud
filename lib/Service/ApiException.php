@@ -23,6 +23,7 @@ final class ApiException extends \RuntimeException {
 	public const CONFLICT = 'conflict';
 	public const INVALID = 'invalid';
 	public const TOO_LARGE = 'too_large';
+	public const CONFIRM = 'confirm';
 
 	private Message $text;
 
@@ -63,6 +64,11 @@ final class ApiException extends \RuntimeException {
 
 	public static function invalid(Message|string $message): self {
 		return new self(422, self::INVALID, $message);
+	}
+
+	/** 422 with code `confirm`: the typed confirmation does not match. */
+	public static function confirm(Message|string $message): self {
+		return new self(422, self::CONFIRM, $message);
 	}
 
 	public static function badRequest(Message|string $message): self {

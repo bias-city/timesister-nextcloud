@@ -117,10 +117,11 @@ async function restOhneSicherungen() {
 	}
 
 	// ---------------------------------------------------------------------------
-	head('Deleting a team with records')
+	head('Deleting a team needs the typed name (0.10.1); pb is never deleted here')
 	{
 		const pb = (await ocs(ADMIN, 'GET', '/admin/teams')).data?.find?.((t) => t.slug === 'pb')
-		expect('DELETE /admin/teams/{pb}', await ocs(ADMIN, 'DELETE', `/admin/teams/${pb?.id}`), 409, 'conflict')
+		expect('DELETE /admin/teams/{pb} without confirm', await ocs(ADMIN, 'DELETE', `/admin/teams/${pb?.id}`), 422, 'confirm')
+		expect('DELETE /admin/teams/{pb} wrong name', await ocs(ADMIN, 'DELETE', `/admin/teams/${pb?.id}`, { confirm: 'pb' }), 422, 'confirm')
 	}
 
 	// ---------------------------------------------------------------------------

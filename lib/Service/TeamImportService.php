@@ -70,10 +70,12 @@ final class TeamImportService {
 	/**
 	 * POST /admin/teams/{id}/import/preview: the uploaded ZIP checked and
 	 * kept under a token; what it holds and which accounts exist here.
+	 * Without a team (0.10.2, POST /admin/teams/import/preview): the same
+	 * for a team that is yet to be created, `target` is null.
 	 *
 	 * @return array<string,mixed>
 	 */
-	public function preview(Tenant $t, mixed $upload): array {
+	public function preview(?Tenant $t, mixed $upload): array {
 		if (!is_array($upload) || ($upload['error'] ?? null) !== UPLOAD_ERR_OK || !is_string($upload['tmp_name'] ?? null)) {
 			$code = is_array($upload) ? ($upload['error'] ?? null) : null;
 			if ($code === UPLOAD_ERR_INI_SIZE || $code === UPLOAD_ERR_FORM_SIZE) {
@@ -173,9 +175,8 @@ final class TeamImportService {
 	 * @param array<string,mixed> $b from {@see ZipReader::read}
 	 * @return array<string,mixed>
 	 */
-	private function summary(Tenant $t, array $b): array {
-		$tid = $t->getId();
-		$here = $this->tenants->members($tid);
+	private function summary(?Tenant $t, array $b): array {
+		$here = $t === null ? [] : $this->tenants->members($t->getId());
 		$persons = [];
 		foreach ($b['team']['members'] as $m) {
 			$persons[] = $m + [
@@ -201,7 +202,7 @@ final class TeamImportService {
 			'persons' => $persons,
 			'calendars' => $b['calendars'],
 			'absences' => count($b['absences']),
-			'target' => ['id' => $tid, 'name' => $t->getName(), 'empty' => !$this->hasContent($tid)],
+			'target' => $t === null ? null : ['id' => $t->getId(), 'name' => $t->getName(), 'empty' => !$this->hasContent($t->getId())],
 			'accounts' => $accounts,
 		];
 	}

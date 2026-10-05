@@ -7,6 +7,8 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Settings;
 
 use OCA\TimeSister\AppInfo\Application;
+use OCA\TimeSister\Db\TenantMapper;
+use OCA\TimeSister\Service\PrivacyNotice;
 use OCA\TimeSister\Service\RoleName;
 use OCA\TimeSister\Service\TeamAdminService;
 use OCP\App\IAppManager;
@@ -24,6 +26,8 @@ use OCP\Util;
 final class AdminSettings implements ISettings {
 	public function __construct(
 		private TeamAdminService $admin,
+		private PrivacyNotice $notice,
+		private TenantMapper $tenants,
 		private IInitialState $initialState,
 		private IAppManager $appManager,
 		private IURLGenerator $url,
@@ -42,6 +46,12 @@ final class AdminSettings implements ISettings {
 			'state' => $this->admin->overview(),
 			'groups' => $this->admin->allGroups(),
 		]);
+		// The record setting/privacy per team (0.10.2), for the privacy section of "edit team".
+		$privacy = [];
+		foreach ($this->tenants->findAll() as $t) {
+			$privacy[(string)$t->getId()] = $this->notice->settings($t);
+		}
+		$this->initialState->provideInitialState('privacy', $privacy);
 		// Texts for js/admin.js, translated by the server, without OC.L10N.
 		$this->initialState->provideInitialState('l10n', $this->jsTexts());
 		// Role words: the same in every language, never through the l10n.
@@ -96,7 +106,6 @@ final class AdminSettings implements ISettings {
 			'other_team' => $l->t('– used by another team'),
 			'new_team' => $l->t('New team'),
 			'edit_team' => $l->t('Edit team'),
-			'confirm_delete' => $l->t('Delete team “{name}”? This only works as long as it has no records and backups. The groups and accounts remain.'),
 			'load_failed' => $l->t('Teams cannot be loaded: {message}'),
 			'backups_stored_with' => $l->t('Backups stored with'),
 			'owner_auto' => $l->t('Automatic: first Team Admin'),
@@ -110,6 +119,7 @@ final class AdminSettings implements ISettings {
 			'no_server_backup' => $l->t('No server backup yet'),
 			'backup_required' => $l->t('Backup required'),
 			'yes' => $l->t('Yes'),
+			'save' => $l->t('Save'),
 			'no' => $l->t('No'),
 			// Team backup as ZIP (0.10.0).
 			'export_zip' => $l->t('Back up team (ZIP)'),
@@ -135,6 +145,24 @@ final class AdminSettings implements ISettings {
 			'pre_backup' => $l->t('Backup before importing: {path}'),
 			'without_account' => $l->t('Without account here: {list}'),
 			'calendars_kept' => $l->t('Calendar backup of that day kept, not replaced: {list}'),
+			// Deleting a team with content (0.10.1).
+			'delete_title' => $l->t('Delete “{name}”'),
+			'delete_ask' => $l->t('To confirm, type the team name “{name}”.'),
+			'deleting' => $l->t('Deleting …'),
+			'delete_ok' => $l->t('Team “{name}” deleted.'),
+			'delete_backup' => $l->t('Backup stored first: {path}'),
+			'delete_backup_protected_only' => $l->t('No backup owner: the ZIP lies only in the protected app data ({path}).'),
+			'delete_empty' => $l->t('The team was empty; no ZIP was stored.'),
+			'delete_counts' => $l->t('{records} records with {versions} versions · {members} member rows · {backups} server backups · {absences} absences'),
+			'delete_stays' => $l->t('The Nextcloud group, the accounts and their time calendars stay.'),
+			// Privacy notice (0.10.2).
+			'privacy_failed' => $l->t('The privacy notice could not be created: {message}'),
+			'privacy_save_failed' => $l->t('Privacy settings not saved: {message}'),
+			// New team from a team ZIP (0.10.2).
+			'create_import' => $l->t('Create and import'),
+			'zip_source' => $l->t('Backup of “{name}” ({slug}) from {date}: {n} records, {p} people'),
+			'zip_group_hint' => $l->t('Choose the team group here; name and short name come from the backup and can be changed.'),
+			'from_zip_ok' => $l->t('Team “{name}” created and the backup imported.'),
 		];
 	}
 

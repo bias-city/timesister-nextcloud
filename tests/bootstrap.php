@@ -18,3 +18,8 @@ spl_autoload_register(static function (string $class): void {
 		}
 	}
 });
+
+// IQueryBuilder's constants point at Doctrine's ParameterType, which the
+// app doesn't depend on. A mock of IDBConnection (TeamDeleteTest) loads
+// the interface, so the two constant holders get stand-ins.
+require_once __DIR__ . '/stubs/Doctrine.php';

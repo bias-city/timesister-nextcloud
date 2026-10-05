@@ -95,9 +95,10 @@ final class TeamExportService {
 	}
 
 	/**
-	 * Before an import into a team with content: the ZIP protected in
-	 * IAppData (`exports/t<id>/<name>`) and visible with the backup owner.
-	 * The protected copy must succeed; the visible one may fail.
+	 * Before an import into a team with content, and before deleting one
+	 * (0.10.1): the ZIP protected in IAppData (`exports/t<id>/<name>`) and
+	 * visible with the backup owner. The protected copy must succeed; the
+	 * visible one may fail.
 	 *
 	 * @return array{protected:string,visible:?string}
 	 */

@@ -6,12 +6,9 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
-use OCA\TimeSister\Db\AbsenceMapper;
-use OCA\TimeSister\Db\AccessMapper;
 use OCA\TimeSister\Db\BackupConsentMapper;
 use OCA\TimeSister\Db\BackupMapper;
 use OCA\TimeSister\Db\ClientStatusMapper;
-use OCA\TimeSister\Db\MemberMapper;
 use OCA\TimeSister\Db\RecordMapper;
 use OCA\TimeSister\Db\RoleGroup;
 use OCA\TimeSister\Db\RoleGroupMapper;
@@ -40,9 +37,6 @@ final class TeamAdminService {
 		private BackupMapper $backups,
 		private ClientStatusMapper $status,
 		private BackupConsentMapper $consents,
-		private MemberMapper $members,
-		private AccessMapper $access,
-		private AbsenceMapper $absences,
 		private TenantService $tenantService,
 		private WeekMarks $marks,
 		private ITimeFactory $time,
@@ -145,28 +139,7 @@ final class TeamAdminService {
 		return $this->present($t);
 	}
 
-	/** Only without records (including tombstones) and without backups. */
-	public function delete(int $id): void {
-		$t = $this->find($id);
-		if ($this->records->stats($id)['all'] > 0 || $this->backups->countByTenant($id) > 0) {
-			throw ApiException::conflict('The team still has records or backups and cannot be deleted.');
-		}
-		$this->db->beginTransaction();
-		try {
-			$this->roleGroups->deleteByTenant($id);
-			$this->status->deleteByTenant($id);
-			$this->consents->deleteByTenant($id);
-			$this->members->deleteByTenant($id);
-			$this->access->deleteByTenant($id);
-			$this->absences->deleteByTenant($id);
-			$this->tenants->delete($t);
-			$this->db->commit();
-		} catch (\Throwable $e) {
-			$this->db->rollBack();
-			throw $e;
-		}
-		$this->tenantService->reset();
-	}
+	// Deleting: TeamDeleteService (0.10.1).
 
 	/**
 	 * Status per team for the admin page.
