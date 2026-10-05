@@ -1,5 +1,13 @@
 # Changes
 
+## 0.9.0 – 2026-10-04 (beta)
+
+- API unchanged in form (`api: 2`), only additions; the capability gains `absences: 1`.
+- **The shared vacation calendar.** A Team Admin creates the calendar «TimeSister – Vacation» in their own account from the Mac app and shares it: the team group read-only, every Team Admin with write access. The settings record (`setting/settings`) names it: `vacation_calendar: {url, owner}`; `absence_calendar_kinds` says which categories appear (`vacation`, `sickness`, `parental`, `civil_service`, `unpaid`; default `["vacation"]`).
+- **`PUT /me/absences`:** every client reports the complete state of its own absences for this and next year – `items: [{source_uid, kind, start, end}]`, `end` exclusive, at most 400. The server replaces the person's rows (table `ts_absences`). A person with `vacation_calendar_optout: true` in their person record is stored nowhere, and what was there goes.
+- **Written by the server:** a background job (every 15 minutes) puts the absences of every team with a calendar into the owner's calendar as all-day events «<Category> · Initials Name» with `X-TIMESISTER-PERSON`, `X-TIMESISTER-QUELLE` and `X-TIMESISTER-ART`, over the public calendar API (`ICreateFromString`, no Sabre). Absences that are gone are written again with `STATUS:CANCELLED` – the API cannot delete; a Team Admin's Mac tidies them up. Events without the marks are never touched.
+- Migration: table `ts_absences`.
+
 ## 0.8.3 – 2026-10-02 (beta)
 
 - Admin settings, new team: the short name is suggested from the name (lowercase, umlauts spelled out, hyphens), typing turns capitals and spaces into the allowed form, and a hint names the rule (lowercase letters, digits, hyphens, 2 to 32 characters). Before, the form only said “fill in this field”.

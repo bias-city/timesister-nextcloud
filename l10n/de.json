@@ -223,7 +223,15 @@
 		"“{field}” must be text of at most {max} characters.": "„{field}“ muss Text mit höchstens {max} Zeichen sein.",
 		"The key of this external person is too long for the shares matrix (at most 64 characters).": "Der Schlüssel dieser externen Person ist zu lang für die Freigabe-Matrix (höchstens 64 Zeichen).",
 		"A feed is read-only: an external person can be seen, not edited.": "Ein Feed ist nur lesbar: Eine externe Person kann man sehen, nicht editieren.",
-		"Only Team Admins, and Leads who may see this person’s time calendar, mark it as billed.": "Als abgerechnet markieren nur Team Admins und Leads, die den Zeitkalender dieser Person sehen dürfen."
+		"Only Team Admins, and Leads who may see this person’s time calendar, mark it as billed.": "Als abgerechnet markieren nur Team Admins und Leads, die den Zeitkalender dieser Person sehen dürfen.",
+		"Vacation": "Ferien",
+		"Sickness": "Krankheit",
+		"Maternity/paternity": "Mutter-/Vaterschaft",
+		"Civil service": "Zivildienst",
+		"Unpaid": "Unbezahlt",
+		"“{field}” must be a list.": "„{field}“ muss eine Liste sein.",
+		"At most {max} absences per person.": "Höchstens {max} Absenzen je Person.",
+		"“{field}” of item {n} is invalid.": "„{field}“ von Eintrag {n} ist ungültig."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

@@ -1099,3 +1099,66 @@ history. Setting an external's field gives their person record a new
 `revision` (the `version` stays), so every client receives it again with
 the next delta. A client whose copy lost the address drops the feed
 calendar.
+
+## The shared vacation calendar, 0.9.0 (2026-10-04)
+
+Still `api: 2`; only additions. The capability says `absences: 1`. Plan:
+`PLAN-ABSENZEN.md`, section 4 (Mac app).
+
+### The calendar
+
+A Team Admin creates «TimeSister – Vacation» (URI `timesister-ferien`) in
+their own Nextcloud account from the Mac app and shares it: the team group
+**read-only**, every Team Admin **with write access** (the owner's Mac keeps
+the shares current). The settings record names it:
+
+```json
+{ "vacation_calendar": { "url": "https://…/remote.php/dav/calendars/atadmin/timesister-ferien/", "owner": "atadmin" },
+  "absence_calendar_kinds": ["vacation", "sickness"] }
+```
+
+`absence_calendar_kinds` lists the categories that appear – `vacation`,
+`sickness`, `parental`, `civil_service`, `unpaid`; missing means
+`["vacation"]`, an empty list means none. Unknown names are ignored.
+
+### `PUT /me/absences`
+
+Every member, own account only. Body: the **complete** state of the own
+absences for this and next year.
+
+```json
+{ "items": [ { "source_uid": "7f3a-…@example.test", "kind": "vacation", "start": "2026-07-06", "end": "2026-07-11" } ] }
+```
+
+- `source_uid`: the source event's UID (1–255 characters; a recurrence
+  instance as `<uid>/<recurrence-id>`); the same source twice: the last one
+  counts. `kind` one of the categories (missing: `vacation`). `start` and
+  `end` are days, `end` exclusive and after `start`.
+- At most 400 items (`413 too_large`); invalid items `422 invalid`.
+- The server replaces the person's rows (table `ts_absences`). Answer:
+  `{ "stored": 3, "opted_out": false }`.
+- Opt-out: a person record with `vacation_calendar_optout: true` (set by the
+  person in the Mac app) is stored nowhere; what was there is deleted, the
+  answer says `"opted_out": true`.
+
+### Written by the server
+
+A background job (every 15 minutes) goes through every team with a
+`vacation_calendar`, finds the owner's calendar by URI
+(`getCalendarsForPrincipal`) and writes one all-day event per row whose
+category is in `absence_calendar_kinds` and whose person has not opted out:
+
+```
+UID:ferien-<24 hex of sha256(lowercase uid + "\n" + source_uid + "\n" + kind)>@timesister
+DTSTART;VALUE=DATE / DTEND;VALUE=DATE (exclusive)
+SUMMARY:<Category> · <Initials Name>        – from the person record (initials, first_name, last_name), in the server's language
+X-TIMESISTER-QUELLE:<source_uid>  X-TIMESISTER-PERSON:<uid>  X-TIMESISTER-ART:<kind>
+```
+
+Object name `<UID>.ics`, written with `createFromString` (PUT semantics:
+the same name overwrites). Our events that are no longer wanted (row gone,
+category switched off, opt-out) are written again with `STATUS:CANCELLED`;
+the public API cannot delete. A Team Admin's Mac deletes cancelled marked
+events in this calendar when it syncs; every Mac hides them. Events without
+the `X-TIMESISTER-*` marks are never touched. An account deletion drops the
+person's rows; the next run cancels their events.

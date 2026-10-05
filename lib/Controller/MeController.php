@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Controller;
 
 use OCA\TimeSister\AppInfo\Application;
+use OCA\TimeSister\Service\AbsenceService;
 use OCA\TimeSister\Service\AccessService;
 use OCA\TimeSister\Service\CalendarShareService;
 use OCA\TimeSister\Service\RecordService;
@@ -30,6 +31,7 @@ final class MeController extends BaseController {
 		private CalendarShareService $calendarShare,
 		private AccessService $access,
 		private ITimeFactory $time,
+		private AbsenceService $absences,
 	) {
 		parent::__construct($request, $tenants, $l);
 	}
@@ -80,5 +82,16 @@ final class MeController extends BaseController {
 			$in = array_intersect_key($this->request->getParams(), array_flip(['enabled', 'uid']));
 			return $this->calendarShare->set($m->uid, $in);
 		});
+	}
+
+	/**
+	 * PUT /me/absences – the complete state of the own absences (this and
+	 * next year) for the shared vacation calendar; replaces what was there.
+	 */
+	#[ApiRoute(verb: 'PUT', url: '/api/v1/me/absences')]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function setAbsences(): DataResponse {
+		return $this->run(fn () => $this->absences->replace($this->tenants->current(), $this->body(self::MAX_RECORD_BODY)));
 	}
 }

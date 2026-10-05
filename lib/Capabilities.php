@@ -25,7 +25,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int}} */
+	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -33,6 +33,7 @@ final class Capabilities implements ICapability {
 				'version' => $this->appManager->getAppVersion(Application::APP_ID),
 				'jobs' => 4,
 				'billing' => 1,
+				'absences' => 1,
 			],
 		];
 	}

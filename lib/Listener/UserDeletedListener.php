@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Listener;
 
+use OCA\TimeSister\Db\AbsenceMapper;
 use OCA\TimeSister\Db\AccessMapper;
 use OCA\TimeSister\Db\BackupConsentMapper;
 use OCA\TimeSister\Db\MemberMapper;
@@ -30,6 +31,7 @@ final class UserDeletedListener implements IEventListener {
 		private BackupConsentMapper $consents,
 		private MemberMapper $members,
 		private AccessMapper $access,
+		private AbsenceMapper $absences,
 		private LoggerInterface $logger,
 	) {
 	}
@@ -42,6 +44,7 @@ final class UserDeletedListener implements IEventListener {
 		$this->consents->deleteByUid($uid);
 		$this->members->deleteByUid($uid);
 		$this->access->deleteByUid($uid);
+		$this->absences->deleteByUid($uid);
 		$n = $this->records->markAccountDeleted($uid);
 		if ($n > 0) {
 			// No identifier in the log: no personal data.

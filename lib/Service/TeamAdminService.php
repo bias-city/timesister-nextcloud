@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
+use OCA\TimeSister\Db\AbsenceMapper;
 use OCA\TimeSister\Db\AccessMapper;
 use OCA\TimeSister\Db\BackupConsentMapper;
 use OCA\TimeSister\Db\BackupMapper;
@@ -41,6 +42,7 @@ final class TeamAdminService {
 		private BackupConsentMapper $consents,
 		private MemberMapper $members,
 		private AccessMapper $access,
+		private AbsenceMapper $absences,
 		private TenantService $tenantService,
 		private WeekMarks $marks,
 		private ITimeFactory $time,
@@ -156,6 +158,7 @@ final class TeamAdminService {
 			$this->consents->deleteByTenant($id);
 			$this->members->deleteByTenant($id);
 			$this->access->deleteByTenant($id);
+			$this->absences->deleteByTenant($id);
 			$this->tenants->delete($t);
 			$this->db->commit();
 		} catch (\Throwable $e) {
