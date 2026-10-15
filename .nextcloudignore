@@ -14,16 +14,18 @@
 /UPDATE.md
 # Images for the App Store, linked there via GitHub
 /img/screenshot-*.png
-# The libraries (0.19.0: TCPDF, swiss-qr-bill and what they need) ship in
-# vendor/, installed with `composer install --no-dev` by the release
-# workflow. Should a dev install be packaged by hand, these dev-only
-# packages stay out.
+# The libraries (0.19.0: TCPDF, swiss-qr-bill; 0.20.0: horstoeko/zugferd
+# and what they need) ship in vendor/, installed with `composer install
+# --no-dev` by the release workflow. Should a dev install be packaged by
+# hand, these dev-only packages stay out (doctrine/lexer,
+# doctrine/instantiator and phpstan/phpdoc-parser stay: jms/serializer
+# needs them).
 /vendor/bin
 /vendor/amphp
 /vendor/danog
 /vendor/daverandom
 /vendor/dnoegel
-/vendor/doctrine
+/vendor/doctrine/deprecations
 /vendor/felixfbecker
 /vendor/fidry
 /vendor/kelunik
@@ -34,7 +36,6 @@
 /vendor/nikic
 /vendor/phar-io
 /vendor/phpdocumentor
-/vendor/phpstan
 /vendor/phpunit
 /vendor/revolt
 /vendor/sebastian
@@ -42,16 +43,13 @@
 /vendor/staabm
 /vendor/symfony/console
 /vendor/symfony/filesystem
-/vendor/symfony/finder
 /vendor/symfony/polyfill-intl-grapheme
 /vendor/symfony/polyfill-intl-normalizer
 /vendor/symfony/polyfill-php80
 /vendor/symfony/polyfill-php81
 /vendor/symfony/polyfill-php82
 /vendor/symfony/polyfill-php83
-/vendor/symfony/process
 /vendor/symfony/string
-/vendor/symfony/yaml
 /vendor/theseer
 /vendor/vimeo
 /vendor/webmozart
@@ -99,6 +97,23 @@
 /vendor/tecnickcom/tcpdf/fonts/pdfa*
 /vendor/tecnickcom/tcpdf/fonts/stsongstdlight*
 /vendor/tecnickcom/tcpdf/fonts/uni2cid_*
+# horstoeko/zugferd: the app builds and embeds; it validates nothing at runtime
+# (the XSD, Schematron and XSLT files, 6 MB, stay out – the unit tests use the
+# XSD from the dev install), reads no PDFs (smalot/pdfparser only for the
+# reader), calls no KoSIT validator (symfony/process, symfony/finder) and
+# needs no code lists beyond the few the builder references.
+/vendor/horstoeko/zugferd/src/schema
+/vendor/horstoeko/zugferd/src/validation
+/vendor/horstoeko/zugferd/src/quick
+/vendor/horstoeko/zugferd/src/codelistsenum
+/vendor/horstoeko/zugferd/src/ZugferdKositValidator.php
+/vendor/horstoeko/zugferd/src/ZugferdPdfValidator.php
+/vendor/horstoeko/zugferd/src/ZugferdDocumentValidator.php
+/vendor/horstoeko/zugferd/src/ZugferdXsdValidator.php
+/vendor/horstoeko/zugferd/src/ZugferdDocumentPdfReaderExt.php
+/vendor/smalot
+/vendor/symfony/finder
+/vendor/symfony/process
 # symfony/intl: the QR bill checks country codes only (regions, plus locales/meta.php)
 /vendor/symfony/intl/Resources/data/currencies
 /vendor/symfony/intl/Resources/data/languages

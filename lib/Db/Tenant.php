@@ -34,6 +34,10 @@ use OCP\DB\Types;
  * @method void setInvoicing(int $invoicing)
  * @method string|null getDocumentsJson()
  * @method void setDocumentsJson(?string $documentsJson)
+ * @method string|null getDatevJson()
+ * @method void setDatevJson(?string $datevJson)
+ * @method string|null getWebhooksJson()
+ * @method void setWebhooksJson(?string $webhooksJson)
  */
 final class Tenant extends Entity {
 	protected string $name = '';
@@ -54,6 +58,9 @@ final class Tenant extends Entity {
 	protected int $invoicing = 1;
 	/** Team setting `documents` (0.19.0) as JSON: folders, per year, chain mail; null: defaults. */
 	protected ?string $documentsJson = null;
+	/** Team settings `datev` and `webhooks` (0.20.0) as JSON; null: nothing set. */
+	protected ?string $datevJson = null;
+	protected ?string $webhooksJson = null;
 
 	public function __construct() {
 		$this->addType('name', Types::STRING);
@@ -68,6 +75,8 @@ final class Tenant extends Entity {
 		$this->addType('entriesSince', Types::STRING);
 		$this->addType('invoicing', Types::SMALLINT);
 		$this->addType('documentsJson', Types::STRING);
+		$this->addType('datevJson', Types::STRING);
+		$this->addType('webhooksJson', Types::STRING);
 	}
 
 	/** Issuing on the server (0.18.0) is on for this team. */

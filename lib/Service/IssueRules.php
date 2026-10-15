@@ -23,7 +23,7 @@ final class IssueRules {
 	/** The team's default VAT rate in `setting/settings`, percent. */
 	public const VAT_FIELD = 'vat';
 	/** Which customer fields are frozen. */
-	private const CUSTOMER_FIELDS = ['id', 'name', 'address_extra', 'street', 'postcode', 'city', 'country', 'email', 'phone', 'vat_id'];
+	private const CUSTOMER_FIELDS = ['id', 'name', 'address_extra', 'street', 'postcode', 'city', 'country', 'email', 'phone', 'vat_id', 'leitweg_id', 'datev_account'];
 	private const CONTROL_TEXT = '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/';
 
 	/** The draft's fitness for issuing: a draft without number, with a budget and something to bill. */
@@ -223,10 +223,11 @@ final class IssueRules {
 
 	/**
 	 * The frozen customer block: name and address lines, country, VAT id,
-	 * and the contact the draft names (`contact`: the id of one of the
-	 * customer's `contacts`, or free text).
+	 * the contact the draft names (`contact`: the id of one of the
+	 * customer's `contacts`, or free text), and since 0.20.0 the Leitweg-ID,
+	 * the DATEV account, `e_invoice` and the tax case.
 	 */
-	public static function customerBlock(\stdClass $customer, \stdClass $d): \stdClass {
+	public static function customerBlock(\stdClass $customer, \stdClass $d, ?string $issuerCountry = null): \stdClass {
 		$out = new \stdClass();
 		foreach (self::CUSTOMER_FIELDS as $f) {
 			$v = $customer->{$f} ?? null;
@@ -234,6 +235,12 @@ final class IssueRules {
 				$out->{$f} = $v;
 			}
 		}
+		// 0.20.0: whether an XRechnung is wanted, and the tax case – from the countries, or the draft's override.
+		if (($customer->e_invoice ?? null) === true) {
+			$out->e_invoice = true;
+		}
+		$override = $d->{TaxRules::FIELD} ?? null;
+		$out->{TaxRules::FIELD} = TaxRules::of($issuerCountry, $out->country ?? null, $out->vat_id ?? null, is_string($override) ? $override : null);
 		$contact = $d->contact ?? null;
 		if (is_string($contact) && $contact !== '') {
 			$out->contact = $contact;
@@ -256,7 +263,7 @@ final class IssueRules {
 	 * @param list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string}> $hours
 	 * @return array<string,mixed>
 	 */
-	public static function payload(string $key, string $number, string $issuedOn, string $issuedBy, string $dueOn, string $project, string $budget, ?string $customerKey, string $from, string $to, string $currency, float $vat, array $sums, \stdClass $issuer, \stdClass $customer, array $positions, array $hours, ?string $greeting, ?string $body, ?string $footer, ?string $reverses, ?string $credits): array {
+	public static function payload(string $key, string $number, string $issuedOn, string $issuedBy, string $dueOn, string $project, string $budget, ?string $customerKey, string $from, string $to, string $currency, float $vat, array $sums, \stdClass $issuer, \stdClass $customer, array $positions, array $hours, ?string $greeting, ?string $body, ?string $footer, ?string $reverses, ?string $credits, ?string $qrReference = null): array {
 		return [
 			'key' => $key,
 			'number' => $number,
@@ -281,7 +288,24 @@ final class IssueRules {
 			'footer' => $footer,
 			'reverses' => $reverses,
 			'credits' => $credits,
+			// 0.20.0: the QR reference of a QR-IBAN (null otherwise), printed on the bill.
+			'qr_reference' => $qrReference,
 		];
+	}
+
+	/** The issuer's account in the currency: `[iban, bic]` or null (0.20.0). @return ?array{0:string,1:?string} */
+	public static function accountOf(\stdClass $issuer, string $currency): ?array {
+		foreach ((array)($issuer->accounts ?? []) as $a) {
+			if (!($a instanceof \stdClass)) {
+				continue;
+			}
+			$iban = $a->iban ?? null;
+			if (strtoupper((string)($a->currency ?? '')) === $currency && is_string($iban) && $iban !== '') {
+				$bic = $a->bic ?? null;
+				return [strtoupper(str_replace(' ', '', $iban)), is_string($bic) && $bic !== '' ? $bic : null];
+			}
+		}
+		return null;
 	}
 
 	/** A text field of the draft, or null. */

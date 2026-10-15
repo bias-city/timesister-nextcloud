@@ -271,9 +271,9 @@ async function testteam() {
 	head('Team settings in /me (Planungsbüro, read only)')
 	{
 		const me = (await ocs(U1, 'GET', '/me')).data
-		// 0.17.0: `entries_since` (date or null) next to `backup_required`; `leads_see_calendars` is gone with the shares matrix. 0.18.0: `invoicing`. 0.19.0: `documents`.
-		check('/me names settings with backup_required, entries_since, invoicing and documents', typeof me?.settings?.backup_required === 'boolean'
-			&& 'entries_since' in (me?.settings || {}) && typeof me?.settings?.invoicing === 'boolean' && isObj(me?.settings?.documents) && Object.keys(me.settings).length === 4, me?.settings)
+		// 0.17.0: `entries_since` (date or null) next to `backup_required`; `leads_see_calendars` is gone with the shares matrix. 0.18.0: `invoicing`. 0.19.0: `documents`. 0.20.0: `datev`, `webhooks`.
+		check('/me names settings with backup_required, entries_since, invoicing, documents, datev and webhooks', typeof me?.settings?.backup_required === 'boolean'
+			&& 'entries_since' in (me?.settings || {}) && typeof me?.settings?.invoicing === 'boolean' && isObj(me?.settings?.documents) && isObj(me?.settings?.datev) && Array.isArray(me?.settings?.webhooks) && Object.keys(me.settings).length === 6, me?.settings)
 		const team = (await ocs(A, 'GET', '/team')).data
 		check('/team names the same settings', JSON.stringify(team?.settings) === JSON.stringify(me?.settings), team?.settings)
 	}
@@ -300,17 +300,19 @@ async function testteam() {
 		const auto = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, backup_owner: null })
 		check('backup_owner null: automatic again', auto.data?.backup_owner === first, auto.text)
 
-		// 0.19.0: `documents` with its defaults (null = the default folders).
+		// 0.19.0: `documents` with its defaults (null = the default folders). 0.20.0: `datev` (nothing set) and `webhooks` (none).
 		const documents = { invoices: null, quotes: null, per_year: true, chain_mail: null }
-		const defaults = { backup_required: false, entries_since: null, invoicing: true, documents }
+		const datev = { consultant: null, client: null, fiscal_year_start: null, account_length: null, debtor_account: null, revenue_domestic: null, revenue_eu: null, revenue_export: null, bu_domestic: null, bu_eu: null, bu_export: null }
+		const webhooks = []
+		const defaults = { backup_required: false, entries_since: null, invoicing: true, documents, datev, webhooks }
 		check('settings: default values on creation', JSON.stringify(made.data?.settings) === JSON.stringify(defaults), made.data?.settings)
 		const who = { user: first, pass: `Test-2026-${first}!` }
 		check('member\'s /me: default values', JSON.stringify((await ocs(who, 'GET', '/me')).data?.settings) === JSON.stringify(defaults))
 		const req = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { backup_required: true } })
-		check('set only backup_required, entries_since stays', JSON.stringify(req.data?.settings) === JSON.stringify({ backup_required: true, entries_since: null, invoicing: true, documents }), req.text)
+		check('set only backup_required, entries_since stays', JSON.stringify(req.data?.settings) === JSON.stringify({ backup_required: true, entries_since: null, invoicing: true, documents, datev, webhooks }), req.text)
 		expect('leads_see_calendars is gone (0.17.0): unknown key', await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { leads_see_calendars: false } }), 422, 'invalid')
 		const same = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, base)
-		const want = { backup_required: true, entries_since: null, invoicing: true, documents }
+		const want = { backup_required: true, entries_since: null, invoicing: true, documents, datev, webhooks }
 		check('PUT without settings: unchanged', JSON.stringify(same.data?.settings) === JSON.stringify(want), same.text)
 		check('/me, /team and /admin/teams read them', JSON.stringify((await ocs(who, 'GET', '/me')).data?.settings) === JSON.stringify(want)
 			&& JSON.stringify((await ocs(who, 'GET', '/team')).data?.settings) === JSON.stringify(want)
@@ -322,7 +324,9 @@ async function testteam() {
 		check('entries_since through /admin/teams (0.17.0)', since.data?.settings?.entries_since === '2024-01-01' && since.data?.settings?.backup_required === true, since.text)
 		const off = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { invoicing: false } })
 		check('invoicing off through /admin/teams (0.18.0)', off.data?.settings?.invoicing === false && off.data?.settings?.backup_required === true, off.text)
-		const madeWith = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { backup_required: false, entries_since: null, invoicing: true } })
+		const withDatev = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { datev: { debtor_account: '10000' }, webhooks: [{ url: 'https://hooks.example.org/ts', events: ['paid'], secret: 's' }] } })
+		check('datev and webhooks through /admin/teams (0.20.0)', withDatev.data?.settings?.datev?.debtor_account === '10000' && withDatev.data?.settings?.webhooks?.[0]?.secret_set === true && withDatev.data?.settings?.webhooks?.[0]?.secret === undefined, withDatev.text)
+		const madeWith = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { backup_required: false, entries_since: null, invoicing: true, datev: {}, webhooks: null } })
 		check('all back to default', JSON.stringify(madeWith.data?.settings) === JSON.stringify(defaults), madeWith.text)
 	} finally {
 		if (id) {

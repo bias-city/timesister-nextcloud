@@ -35,6 +35,19 @@ final class InvInvoiceMapper extends QBMapper {
 		}
 	}
 
+	/** The row with this id in the team, or null. */
+	public function findById(int $tenantId, int $id): ?InvInvoice {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')->from($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
+		try {
+			return $this->findEntity($qb);
+		} catch (DoesNotExistException) {
+			return null;
+		}
+	}
+
 	public function findByNumber(int $tenantId, string $number): ?InvInvoice {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
@@ -57,6 +70,26 @@ final class InvInvoiceMapper extends QBMapper {
 		$qb->select('*')->from($this->getTableName())
 			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
 			->orderBy('number');
+		return $this->findEntities($qb);
+	}
+
+	/**
+	 * The frozen invoices issued in a period (0.20.0, exports): bounds
+	 * inclusive, null unbounded; by issue date, then number.
+	 *
+	 * @return list<InvInvoice>
+	 */
+	public function findIssuedBetween(int $tenantId, ?string $from, ?string $to): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')->from($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)));
+		if ($from !== null) {
+			$qb->andWhere($qb->expr()->gte('issued_on', $qb->createNamedParameter($from)));
+		}
+		if ($to !== null) {
+			$qb->andWhere($qb->expr()->lte('issued_on', $qb->createNamedParameter($to)));
+		}
+		$qb->orderBy('issued_on', 'ASC')->addOrderBy('number', 'ASC');
 		return $this->findEntities($qb);
 	}
 

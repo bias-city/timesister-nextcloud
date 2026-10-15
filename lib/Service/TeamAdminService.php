@@ -116,7 +116,7 @@ final class TeamAdminService {
 		if ($ownerGiven) {
 			$this->checkOwner($owner, $v['groups']['team']);
 		}
-		$settings = TeamRules::settings($in, $t->getDocumentsJson());
+		$settings = TeamRules::settings($in, $t->getDocumentsJson(), $t->getWebhooksJson());
 		if (array_key_exists(DocumentRules::FIELD, $settings)) {
 			$this->documents->requireFolders($ownerGiven ? $owner : $this->tenantService->backupOwner($t), $settings[DocumentRules::FIELD], $v['name']);
 		}
@@ -249,6 +249,12 @@ final class TeamAdminService {
 		}
 		if (is_array($settings[DocumentRules::FIELD] ?? null)) {
 			$t->setDocumentsJson(DocumentRules::encode($settings[DocumentRules::FIELD]));
+		}
+		if (is_array($settings[ExportRules::FIELD] ?? null)) {
+			$t->setDatevJson(ExportRules::encodeDatev($settings[ExportRules::FIELD]));
+		}
+		if (is_array($settings[WebhookRules::FIELD] ?? null)) {
+			$t->setWebhooksJson(WebhookRules::encode($settings[WebhookRules::FIELD]));
 		}
 	}
 

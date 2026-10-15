@@ -1,0 +1,69 @@
+<?php
+
+declare(strict_types=1);
+
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+namespace OCA\TimeSister\Controller;
+
+use OCA\TimeSister\Service\ExportService;
+use OCA\TimeSister\Service\Json;
+use OCA\TimeSister\Service\TenantService;
+use OCA\TimeSister\Service\WebhookService;
+use OCP\AppFramework\Http\Attribute\ApiRoute;
+use OCP\AppFramework\Http\Attribute\BruteForceProtection;
+use OCP\AppFramework\Http\Attribute\NoAdminRequired;
+use OCP\AppFramework\Http\Attribute\UserRateLimit;
+use OCP\AppFramework\Http\DataDownloadResponse;
+use OCP\AppFramework\Http\DataResponse;
+use OCP\AppFramework\Http\Response;
+use OCP\IL10N;
+use OCP\IRequest;
+
+/**
+ * Exports and hand-overs (0.20.0): the invoices of a period as CSV, DATEV
+ * Buchungsstapel or the ledger, the hand-over to an accounting system and
+ * the webhook status. Team Admins; 404 when the team setting `invoicing`
+ * is off.
+ */
+final class InvoiceExportController extends BaseController {
+	private const MAX_BODY = 16 * 1024;
+
+	public function __construct(
+		IRequest $request,
+		TenantService $tenants,
+		IL10N $l,
+		private ExportService $exports,
+		private WebhookService $webhooks,
+	) {
+		parent::__construct($request, $tenants, $l);
+	}
+
+	/** GET /invoices/export?kind=csv|datev|ledger&from=&to= – a CSV download (UTF-8 with BOM, semicolons). */
+	#[ApiRoute(verb: 'GET', url: '/api/v1/invoices/export')]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 30, period: 60)]
+	public function export(): Response {
+		return $this->respond(function (): Response {
+			$r = $this->exports->export($this->tenants->current(), $this->request->getParam('kind'), $this->request->getParam('from'), $this->request->getParam('to'));
+			return new DataDownloadResponse($r['content'], $r['name'], 'text/csv; charset=utf-8');
+		});
+	}
+
+	/** POST /invoices/{key}/external {"system", "id", "url"?} – records the hand-over to an accounting system. */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/invoices/{key}/external')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function external(string $key): DataResponse {
+		// `id` here is the accounting system's id, not a record id: the body is read without the path-field check.
+		return $this->run(fn () => $this->exports->external($this->tenants->current(), $key, Json::body(Json::readInput(self::MAX_BODY), self::MAX_BODY)));
+	}
+
+	/** GET /invoices/webhooks/status – per hook: waiting, delivered, failed, the last error. */
+	#[ApiRoute(verb: 'GET', url: '/api/v1/invoices/webhooks/status')]
+	#[NoAdminRequired]
+	public function webhookStatus(): DataResponse {
+		return $this->run(fn () => $this->webhooks->status($this->tenants->current()));
+	}
+}

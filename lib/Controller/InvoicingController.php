@@ -104,13 +104,13 @@ final class InvoicingController extends BaseController {
 		});
 	}
 
-	/** GET /invoices/{key}/document?kind=pdf – the stored document as a download; 404 while it is not rendered. */
+	/** GET /invoices/{key}/document?kind=pdf|xml – the stored document as a download; 404 while it is not rendered. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/invoices/{key}/document')]
 	#[NoAdminRequired]
 	public function document(string $key): Response {
 		return $this->respond(function () use ($key): Response {
 			$r = $this->documents->document($this->tenants->current(), $key, $this->request->getParam('kind'));
-			return new DataDownloadResponse($r['content'], $r['name'], 'application/pdf');
+			return new DataDownloadResponse($r['content'], $r['name'], $r['type']);
 		});
 	}
 

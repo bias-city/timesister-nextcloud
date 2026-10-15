@@ -68,12 +68,20 @@ The app only deletes files in people's home storage when they are listed in
 documents and chain head files (0.19.0) are written, never deleted.
 
 Runtime libraries (since 0.19.0, `composer.json` `require`):
-`tecnickcom/tcpdf` (LGPL-3.0-or-later, the PDF) and `sprain/swiss-qr-bill`
-(MIT, the Swiss QR bill) with what they need (`endroid/qr-code`,
-`bacon/bacon-qr-code`, `symfony/validator`, `symfony/intl`, MIT). They
+`tecnickcom/tcpdf` (LGPL-3.0-or-later, the PDF), `sprain/swiss-qr-bill`
+(MIT, the Swiss QR bill) and, since 0.20.0, `horstoeko/zugferd` (MIT, the
+EN 16931 XML, ZUGFeRD PDF/A-3 and XRechnung) with what they need
+(`endroid/qr-code`, `bacon/bacon-qr-code`, `symfony/validator`,
+`symfony/intl`, `symfony/yaml`, `jms/serializer`, `setasign/fpdi`,
+`setasign/fpdf`, `doctrine/lexer`, `doctrine/instantiator`, all MIT). They
 ship in `vendor/` of the release archive (`composer install --no-dev` in
 the release workflow); `.nextcloudignore` leaves out their tests, docs,
-examples, unused fonts and unused Intl data. Psalm does not check them.
+examples, unused fonts, unused Intl data and the validation files of the
+ZUGFeRD library (XSD, Schematron, XSLT – the app builds, it never
+validates at runtime; the unit tests validate against the XSD of the dev
+install). Psalm does not check them. The library loads its XMP template
+with `simplexml_load_file()`, which Nextcloud's entity loader blocks;
+`EInvoiceXml::embed()` allows that one file while embedding.
 
 ## Translations
 

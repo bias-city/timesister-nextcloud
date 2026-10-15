@@ -7,7 +7,8 @@
 // backups (with consent, visible copy and weekly job), heartbeat,
 // concurrency, the time entries (named calendars, job, roles), invoicing
 // on the server (issue, reverse, paid, ledger and chain) and the invoice
-// documents (folders, preview, stored PDF, ledger hash, chain head).
+// documents (folders, preview, stored PDF, ledger hash, chain head) and the
+// e-invoices and exports (tax case, ZUGFeRD, XRechnung, QRR, exports, webhooks).
 //
 //   NC_URL=http://localhost:8081 node tests/integration/integration.mjs
 //
@@ -27,6 +28,7 @@ import { wochen } from './teil-wochen.mjs'
 import { eintraege } from './teil-eintraege.mjs'
 import { faktura } from './teil-faktura.mjs'
 import { dokumente } from './teil-dokumente.mjs'
+import { erechnung } from './teil-erechnung.mjs'
 import { summary } from './harness.mjs'
 
 await teams()
@@ -42,6 +44,7 @@ await wochen()
 await eintraege()
 await faktura()
 await dokumente()
+await erechnung()
 await rest()
 await sicherungen()
 process.exit(summary())

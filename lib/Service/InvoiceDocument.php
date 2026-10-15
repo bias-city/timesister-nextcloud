@@ -48,6 +48,15 @@ final class InvoiceDocument {
 	public string $chainLine = '';
 	/** The issuer's IBAN in the invoice's currency when a QR bill is wanted; null: no payment part. */
 	public ?string $iban = null;
+	/** 0.20.0: the issuer's account in the currency for the e-invoice (regardless of `issuer.qr`). */
+	public ?string $accountIban = null;
+	public ?string $accountBic = null;
+	/** 0.20.0: the frozen tax case, the QR reference of a QR-IBAN, the customer's key and Leitweg-ID, whether an XRechnung is wanted. */
+	public string $taxCase = TaxRules::DOMESTIC;
+	public ?string $qrReference = null;
+	public ?string $customerKey = null;
+	public ?string $leitwegId = null;
+	public bool $eInvoice = false;
 
 	/** @return array<string,string> the labels in the document's language */
 	public function texts(): array {
@@ -60,6 +69,21 @@ final class InvoiceDocument {
 			return $t['invoice'] . ' ' . $t['not_issued'];
 		}
 		return DocumentRules::title($t, $this->number, $this->reverses, $this->credits, $this->originalNumber);
+	}
+
+	/** The VAT rate shown: the invoice's at home, 0 for reverse charge and export. */
+	public function vatRate(): float {
+		return TaxRules::rate($this->taxCase, $this->vat);
+	}
+
+	/** The note under the sums for reverse charge and export; null at home. */
+	public function taxNote(): ?string {
+		return TaxRules::note($this->taxCase, $this->lang);
+	}
+
+	/** An XRechnung file is written when the customer asks for e-invoices or has a Leitweg-ID. */
+	public function wantsXRechnung(): bool {
+		return $this->eInvoice || ($this->leitwegId !== null && $this->leitwegId !== '');
 	}
 
 	/** A QR bill is drawn for a positive amount in CHF or EUR with an IBAN. */

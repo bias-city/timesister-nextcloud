@@ -24,6 +24,7 @@ use OCA\TimeSister\Db\RoleGroupMapper;
 use OCA\TimeSister\Db\Tenant;
 use OCA\TimeSister\Db\TenantMapper;
 use OCA\TimeSister\Db\TimeCalendarMapper;
+use OCA\TimeSister\Db\WebhookQueueMapper;
 use OCP\IDBConnection;
 use Psr\Log\LoggerInterface;
 
@@ -58,6 +59,7 @@ class TeamDeleteService {
 		private InvInvoiceMapper $invoices,
 		private InvHourMapper $invoiceHours,
 		private InvLedgerMapper $ledger,
+		private WebhookQueueMapper $webhooks,
 		private ProtectedStore $store,
 		private InvoiceTemplateStore $templates,
 		private TeamExportService $export,
@@ -134,6 +136,8 @@ class TeamDeleteService {
 				'invoices' => $this->invoices->deleteByTenant($id),
 				'invoice_hours' => $this->invoiceHours->deleteByTenant($id),
 				'ledger' => $this->ledger->wipeTeam($id),
+				// 0.20.0: the webhook queue.
+				'webhooks' => $this->webhooks->deleteByTenant($id),
 			];
 			$this->tenants->delete($t);
 			$this->db->commit();
