@@ -33,7 +33,12 @@
 	<issueHandlers>
 		<!-- Deprecated counts as an error: whatever Nextcloud marks as
 		     deprecated is removed with one of the next major versions. -->
-		<DeprecatedClass errorLevel="error" />
+		<DeprecatedClass errorLevel="error">
+			<!-- TCPDF 6 calls itself a legacy engine; the app keeps it on purpose (README). -->
+			<errorLevel type="suppress">
+				<file name="lib/Service/InvoicePage.php" />
+			</errorLevel>
+		</DeprecatedClass>
 		<DeprecatedConstant errorLevel="error" />
 		<DeprecatedFunction errorLevel="error" />
 		<DeprecatedInterface errorLevel="error" />
@@ -48,6 +53,8 @@
 		<PropertyNotSetInConstructor>
 			<errorLevel type="suppress">
 				<directory name="lib/Db" />
+				<!-- TCPDF's own properties. -->
+				<file name="lib/Service/InvoicePage.php" />
 			</errorLevel>
 		</PropertyNotSetInConstructor>
 		<!-- nextcloud/ocp doesn't ship Doctrine; up to Nextcloud 34,
@@ -70,10 +77,11 @@
 			</errorLevel>
 		</UndefinedClass>
 		<!-- IRootFolder inherits OC\Hooks\Emitter, which nextcloud/ocp doesn't ship.
-		     The app calls nothing from it. Only the file that uses IRootFolder. -->
+		     The app calls nothing from it. Only the files that use IRootFolder. -->
 		<MissingDependency>
 			<errorLevel type="suppress">
 				<file name="lib/Service/VisibleCopy.php" />
+				<file name="lib/Service/DocumentFolder.php" />
 			</errorLevel>
 		</MissingDependency>
 	</issueHandlers>

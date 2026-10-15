@@ -196,7 +196,7 @@ final class TenantService {
 		return $out;
 	}
 
-	/** @return array{id:int,name:string,slug:string,groups:array{team:?string},backup_owner:?string,settings:array{backup_required:bool,entries_since:?string,invoicing:bool}} */
+	/** @return array{id:int,name:string,slug:string,groups:array{team:?string},backup_owner:?string,settings:array{backup_required:bool,entries_since:?string,invoicing:bool,documents:array{invoices:?string,quotes:?string,per_year:bool,chain_mail:?string}}} */
 	public function presentTeam(Tenant $t): array {
 		return [
 			'id' => $t->getId(),
@@ -208,7 +208,7 @@ final class TenantService {
 		];
 	}
 
-	/** @return array{backup_required:bool,entries_since:?string,invoicing:bool} */
+	/** @return array{backup_required:bool,entries_since:?string,invoicing:bool,documents:array{invoices:?string,quotes:?string,per_year:bool,chain_mail:?string}} */
 	public static function settingsOf(Tenant $t): array {
 		return [
 			'backup_required' => $t->getBackupRequired() === 1,
@@ -216,6 +216,8 @@ final class TenantService {
 			'entries_since' => $t->getEntriesSince(),
 			// Issuing on the server (0.18.0).
 			'invoicing' => $t->invoicingOn(),
+			// The document folders (0.19.0); null means the default.
+			'documents' => DocumentRules::settings($t->getDocumentsJson()),
 		];
 	}
 }

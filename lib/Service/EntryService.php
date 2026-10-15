@@ -38,6 +38,7 @@ final class EntryService {
 		private IManager $calendarManager,
 		private IDBConnection $db,
 		private ITimeFactory $time,
+		private DocumentService $documents,
 	) {
 	}
 
@@ -251,22 +252,28 @@ final class EntryService {
 
 	/**
 	 * `PUT /team/settings` (Team Admins): `entries_since` (a change marks
-	 * every source for a full read) and, since 0.18.0, `invoicing`.
+	 * every source for a full read), since 0.18.0 `invoicing`, since
+	 * 0.19.0 `documents` (the folders are checked with the backup owner).
 	 *
 	 * @return array<string,mixed> the settings as in GET /team
 	 */
 	public function setSince(Membership $m, \stdClass $body): array {
 		$this->requireAdmin($m);
-		$settings = TeamRules::settings(['settings' => get_object_vars($body)]);
+		$t = $this->team->tenant($m->tenantId);
+		$settings = TeamRules::settings(['settings' => get_object_vars($body)], $t->getDocumentsJson());
 		if (array_key_exists('backup_required', $settings)) {
 			throw ApiException::invalid(Message::of('Unknown team setting “{key}”.', ['key' => 'backup_required']));
 		}
 		if ($settings === []) {
 			throw ApiException::missing('entries_since');
 		}
-		$t = $this->team->tenant($m->tenantId);
 		if (array_key_exists('invoicing', $settings)) {
 			$t->setInvoicing($settings['invoicing'] === true ? 1 : 0);
+			$this->tenants->update($t);
+		}
+		if (is_array($settings[DocumentRules::FIELD] ?? null)) {
+			$this->documents->requireFolders($this->team->backupOwner($t), $settings[DocumentRules::FIELD], $t->getName());
+			$t->setDocumentsJson(DocumentRules::encode($settings[DocumentRules::FIELD]));
 			$this->tenants->update($t);
 		}
 		if (array_key_exists('entries_since', $settings)) {

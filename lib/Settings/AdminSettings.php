@@ -165,6 +165,10 @@ final class AdminSettings implements ISettings {
 			'zip_source' => $l->t('Backup of “{name}” ({slug}) from {date}: {n} records, {p} people'),
 			'zip_group_hint' => $l->t('Choose the team group here; name and short name come from the backup and can be changed.'),
 			'from_zip_ok' => $l->t('Team “{name}” created and the backup imported.'),
+			// Document folders (0.19.0).
+			'invoices_folder' => $l->t('Invoices folder'),
+			'quotes_folder' => $l->t('Quotes folder'),
+			'check_failed' => $l->t('The folders could not be checked: {message}'),
 		];
 	}
 

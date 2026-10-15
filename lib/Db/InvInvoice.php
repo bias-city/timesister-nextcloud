@@ -84,6 +84,14 @@ use OCP\DB\Types;
  * @method void setXmlFileId(?int $xmlFileId)
  * @method string getDocumentState()
  * @method void setDocumentState(string $documentState)
+ * @method string|null getDocumentError()
+ * @method void setDocumentError(?string $documentError)
+ * @method string|null getDocumentPath()
+ * @method void setDocumentPath(?string $documentPath)
+ * @method string|null getDocumentSha256()
+ * @method void setDocumentSha256(?string $documentSha256)
+ * @method int getDocumentTries()
+ * @method void setDocumentTries(int $documentTries)
  * @method int getCreatedAt()
  * @method void setCreatedAt(int $createdAt)
  * @method int getModifiedAt()
@@ -94,6 +102,8 @@ final class InvInvoice extends Entity {
 	public const PAID = 'paid';
 	public const CANCELLED = 'cancelled';
 	public const DOCUMENT_PENDING = 'pending';
+	public const DOCUMENT_DONE = 'done';
+	public const DOCUMENT_FAILED = 'failed';
 
 	protected int $tenantId = 0;
 	protected string $rkey = '';
@@ -131,6 +141,11 @@ final class InvInvoice extends Entity {
 	protected ?int $pdfFileId = null;
 	protected ?int $xmlFileId = null;
 	protected string $documentState = '';
+	// Documents (0.19.0): the last error, the stored file's path and hash, the tries.
+	protected ?string $documentError = null;
+	protected ?string $documentPath = null;
+	protected ?string $documentSha256 = null;
+	protected int $documentTries = 0;
 	protected int $createdAt = 0;
 	protected int $modifiedAt = 0;
 
@@ -170,6 +185,10 @@ final class InvInvoice extends Entity {
 		$this->addType('pdfFileId', Types::INTEGER);
 		$this->addType('xmlFileId', Types::INTEGER);
 		$this->addType('documentState', Types::STRING);
+		$this->addType('documentError', Types::STRING);
+		$this->addType('documentPath', Types::STRING);
+		$this->addType('documentSha256', Types::STRING);
+		$this->addType('documentTries', Types::SMALLINT);
 		$this->addType('createdAt', Types::INTEGER);
 		$this->addType('modifiedAt', Types::INTEGER);
 	}

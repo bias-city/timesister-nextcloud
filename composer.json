@@ -14,7 +14,9 @@
 		}
 	},
 	"require": {
-		"php": ">=8.2"
+		"php": ">=8.2",
+		"sprain/swiss-qr-bill": "^5.3",
+		"tecnickcom/tcpdf": "^6.10"
 	},
 	"require-dev": {
 		"nextcloud/ocp": "dev-stable35",

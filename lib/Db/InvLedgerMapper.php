@@ -49,6 +49,17 @@ final class InvLedgerMapper extends QBMapper {
 		}
 	}
 
+	/** How many entries the team's ledger has. */
+	public function count(int $tenantId): int {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select($qb->func()->count('id', 'n'))->from($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)));
+		$result = $qb->executeQuery();
+		$n = $result->fetchOne();
+		$result->closeCursor();
+		return is_numeric($n) ? (int)$n : 0;
+	}
+
 	/**
 	 * Entries with `seq > $since` in order, at most `$limit`.
 	 *

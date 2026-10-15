@@ -1,5 +1,45 @@
 # Changes
 
+## 0.19.0 – 2026-10-15 (beta)
+
+API unchanged in form (`api: 2`); new capability `invoice_documents: 1`.
+Plan: `PLAN-FAKTURA.md` (F2), contract: `API.md` «Invoice documents,
+0.19.0». First version with runtime libraries: `tecnickcom/tcpdf`
+(LGPL-3.0-or-later) and `sprain/swiss-qr-bill` (MIT) in `vendor/`.
+
+- **The server renders the PDF of an issued invoice** (A4 portrait: issuer,
+  customer, title, facts, greeting, positions, net/VAT/gross, body, the
+  hours appendix without notes, the footer with the chain line on every
+  page, the Swiss QR bill as the last page when the issuer has an IBAN in
+  the invoice's currency) after `issue` and `reverse`, stores it as
+  `<number>.pdf` in the team's invoices folder (`/<year>/` when
+  `per_year`) in the backup owner's files, writes the ledger action
+  `document` with path, size and SHA-256, and keeps `document_state`
+  (`done`/`failed`, with `document_error`, `document_path`,
+  `document_sha256` in `fixed`). The job `DocumentRetry` (15 min) renders
+  `pending`/`failed` documents again, up to ten tries.
+- **Preview:** `GET /invoices/{key}/preview` – the draft as it would be
+  issued, as `application/pdf` (inline) with the watermark VORABZUG/DRAFT
+  across every page; never stored, never in the ledger. `GET
+  /invoices/{key}/document?kind=pdf` downloads the stored file, `POST
+  /invoices/{key}/render` renders again, `GET /invoices/chain/head` gives
+  the chain head.
+- **Team setting `documents`** (`invoices`, `quotes`, `per_year`,
+  `chain_mail`; `PUT /team/settings`, `/admin/teams`, shown in `/me` and
+  `/team`): the folders are checked on writing (backup owner set, folder
+  there or creatable, writable – `422 invalid` otherwise). The admin page
+  shows them per team with a check button
+  (`POST /admin/teams/{id}/documents/check`), the per-year switch, the
+  chain mail address and the backup owner.
+- **Chain head file:** the daily job `ChainHead` writes
+  `chain-<YYYY-MM-DD>.txt` (team, date, entries, head seq, head hash) into
+  the invoices folder and mails it to `documents.chain_mail` when set.
+- Tables: `ts_inv_invoices` + `document_error`, `document_path`,
+  `document_sha256`, `document_tries`; `ts_tenants` + `documents_json`
+  (additive). The release workflow runs `composer install --no-dev`;
+  `.nextcloudignore` keeps tests, docs, examples, unused fonts and unused
+  Intl data of the libraries out of the archive (about 3.3 MB).
+
 ## 0.18.0 – 2026-10-15 (beta)
 
 API unchanged in form (`api: 2`); new capability `invoicing: 1`. Plan:

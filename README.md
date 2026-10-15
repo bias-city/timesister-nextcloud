@@ -64,7 +64,16 @@ Likewise, `OCP\Files\IRootFolder` inherits the not-included
 `lib/Service/VisibleCopy.php`.
 
 The app only deletes files in people's home storage when they are listed in
-`ts_backup_files` and the file ID still points to the same path.
+`ts_backup_files` and the file ID still points to the same path. Invoice
+documents and chain head files (0.19.0) are written, never deleted.
+
+Runtime libraries (since 0.19.0, `composer.json` `require`):
+`tecnickcom/tcpdf` (LGPL-3.0-or-later, the PDF) and `sprain/swiss-qr-bill`
+(MIT, the Swiss QR bill) with what they need (`endroid/qr-code`,
+`bacon/bacon-qr-code`, `symfony/validator`, `symfony/intl`, MIT). They
+ship in `vendor/` of the release archive (`composer install --no-dev` in
+the release workflow); `.nextcloudignore` leaves out their tests, docs,
+examples, unused fonts and unused Intl data. Psalm does not check them.
 
 ## Translations
 

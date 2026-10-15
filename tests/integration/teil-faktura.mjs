@@ -182,16 +182,18 @@ export async function faktura() {
 		}
 
 		head('Invoicing: paid and unpaid')
+		let unpaidSeq = seq
 		{
 			expect('paid without a date', await ocs(A, 'POST', `${ipath(K1)}/paid`, {}), 422, 'invalid')
 			const p = await ocs(A, 'POST', `${ipath(K1)}/paid`, { paid_on: `${Y}-04-01`, note: 'bank' })
 			expect('Team Admin marks it paid', p, 200)
-			check('… record paid with the day, ledger entry', p.data?.data?.status === 'paid' && p.data?.data?.paid_on === `${Y}-04-01` && p.data?.ledger?.seq === seq + 1 && HEX64.test(p.data?.ledger?.hash ?? ''), p.data)
+			check('… record paid with the day, ledger entry', p.data?.data?.status === 'paid' && p.data?.data?.paid_on === `${Y}-04-01` && p.data?.ledger?.seq > seq && HEX64.test(p.data?.ledger?.hash ?? ''), p.data)
 			check('… fixed shows paid_on and paid_by', (await ocs(A, 'GET', `${ipath(K1)}/fixed`)).data?.paid_by === 'pbadmin')
 			expect('paid again', await ocs(A, 'POST', `${ipath(K1)}/paid`, { paid_on: `${Y}-04-02` }), 422, 'invalid')
 			const u = await ocs(A, 'POST', `${ipath(K1)}/unpaid`, {})
 			expect('… unpaid again', u, 200)
-			check('… record issued, no paid_on', u.data?.data?.status === 'issued' && u.data?.data?.paid_on === null && u.data?.ledger?.seq === seq + 2, u.data)
+			unpaidSeq = u.data?.ledger?.seq ?? seq
+			check('… record issued, no paid_on', u.data?.data?.status === 'issued' && u.data?.data?.paid_on === null && u.data?.ledger?.seq > seq + 1, u.data)
 			expect('unpaid on an issued one', await ocs(A, 'POST', `${ipath(K1)}/unpaid`, {}), 422, 'invalid')
 			expect('paid on a draft', await ocs(A, 'POST', `${ipath(K2)}/paid`, { paid_on: `${Y}-04-01` }), 422, 'invalid')
 		}
@@ -218,8 +220,10 @@ export async function faktura() {
 			check('fixed of the original: cancelled, reversed_by, positions kept', f.data?.status === 'cancelled' && f.data?.reversed_by === rev && f.data?.positions?.length === 4 && f.data?.hours?.length === 1, f.data)
 			const g = await ocs(A, 'GET', `${ipath(rev)}/fixed`)
 			check('fixed of the reversal: reverses, no hours, issuer and customer copied', g.data?.reverses === K1 && g.data?.hours?.length === 0 && g.data?.customer?.name === `Kunde ${RUN}` && g.data?.net === -200, g.data)
-			const lg = await ocs(A, 'GET', `/invoices/ledger?since=${seq + 2}`)
-			check('ledger: reversal, then cancelled', lg.data?.entries?.map((e) => e.action).join() === 'reversal,cancelled' && lg.data?.entries?.[1]?.number === number, lg.data?.entries?.map((e) => [e.seq, e.action, e.number]))
+			// 0.19.0 appends `document` after each issue; the sequence is read without those entries.
+			const lg = await ocs(A, 'GET', `/invoices/ledger?since=${unpaidSeq}`)
+			const seqNoDoc = (lg.data?.entries || []).filter((e) => e.action !== 'document')
+			check('ledger: reversal, then cancelled', seqNoDoc.map((e) => e.action).join() === 'reversal,cancelled' && seqNoDoc[1]?.number === number, lg.data?.entries?.map((e) => [e.seq, e.action, e.number]))
 			expect('reversing it again', await ocs(A, 'POST', `${ipath(K1)}/reverse`, { kind: 'reversal' }), 422, 'invalid')
 			expect('crediting a cancelled one', await ocs(A, 'POST', `${ipath(K1)}/reverse`, { kind: 'credit' }), 422, 'invalid')
 			expect('reversing the reversal', await ocs(A, 'POST', `${ipath(rev)}/reverse`, { kind: 'reversal' }), 200)
@@ -244,7 +248,7 @@ export async function faktura() {
 			check('the original stays issued, with its mark', c.data?.original?.data?.status === 'issued' && (await ocs(A, 'GET', `/records/billing/${billingKey('pbuser1', EV1)}`)).status === 200, c.data?.original)
 			expect('a second credit note', await ocs(A, 'POST', `${ipath(K2)}/reverse`, { kind: 'credit' }), 200)
 			const l = await ocs(A, 'GET', '/invoices/ledger?limit=2000')
-			const actions = (l.data?.entries || []).filter((e) => e.seq >= seq).map((e) => e.action)
+			const actions = (l.data?.entries || []).filter((e) => e.seq >= seq && e.action !== 'document').map((e) => e.action)
 			check('ledger so far', actions.join() === 'issued,paid,unpaid,reversal,cancelled,reversal,cancelled,issued,credit,credit', actions)
 			check('every entry recomputes', (l.data?.entries || []).every((e) => entryHash(e) === e.hash && sha256(e.payload) === e.payload_hash))
 			const v = await ocs(A, 'GET', '/invoices/chain/verify')

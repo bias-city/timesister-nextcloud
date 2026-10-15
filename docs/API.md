@@ -34,7 +34,9 @@ Nextcloud's capabilities (`/ocs/v1.php/cloud/capabilities`) contain:
 "timesister": { "api": 1, "version": "0.1.0" }
 ```
 
-If the entry is missing, the app is not installed or is disabled.
+If the entry is missing, the app is not installed or is disabled. Later
+versions add flags (`jobs`, `billing`, …); the current set is listed under
+“Visibility per role, 0.14.0”.
 
 ## Teams and roles
 
@@ -105,6 +107,10 @@ increases with every write in the team.
 
 Unreadable items do not appear in lists; direct access gives `403 forbidden`.
 A person's `cost_rates` (0.16.0) are read only by subadmin and admin – not even on the own person; see Cost rates on the person.
+
+> Since 0.14.0 this table is superseded by the one under “Visibility per
+> role, 0.14.0” (Leads: name cards of others, only the customers of their
+> projects, booking reports and billable marks).
 
 ## Endpoints
 
@@ -247,7 +253,7 @@ For the admin page and the setup scripts, under the same base path:
 | GET | `/admin/teams` | – → list as in `GET /team`, without `members`, with `counts` per role, plus `counts.accounts` (members of the accounts group), if set |
 | POST | `/admin/teams` | `{ "name", "slug", "groups": { "user", "lead", "subadmin", "admin", "accounts"? } }` |
 | PUT | `/admin/teams/{id}` | as POST; if `accounts` is missing or empty, the accounts group is removed |
-| DELETE | `/admin/teams/{id}` | only without records, otherwise `409` |
+| DELETE | `/admin/teams/{id}` | `{ "confirm": "<team name>" }`; since 0.10.1 also with content, a ZIP is stored first (see below) |
 
 The groups must exist (`422 invalid`) and may not belong to any other team
 (`409 conflict`). `slug`: `^[a-z0-9-]{2,32}$`, unique.
@@ -630,7 +636,10 @@ only their own data." Tightens the "budgets inherit permissions" addendum:
   **this** project.
 - **Everyone else** (user; lead for other projects) gets only the
   **booking catalog**: `data` contains only `schema`, `id`, `name`,
-  `codes`, `subprojects`, `start`, `end`, `status`, `mapping`. Missing are
+  `codes`, `subprojects`, `start`, `end`, `status`, `mapping`, (since
+  0.13.0) `never_billable` and (since 0.14.0) `led: true` when the project
+  has at least one Lead - the client reports its bookings on such projects
+  (`booking-report`) without learning who leads them. Missing are
   `description`, `cost_center`, `customer`, `quote`, `leads`, `budget`,
   `milestones`, `budgets`. Reason: without codes, subprojects and mapping
   rules the Mac app cannot book appointments.
@@ -750,7 +759,10 @@ Rows: who sees (`viewer`); columns: whose time calendar (`owner`); only
 active members of the own team; no diagonal. Levels `none`, `view` (read),
 `edit` (write).
 
-- **Defaults:** rows of Team Admins `edit`, everything else `none`. Only
+- **Defaults:** rows of Team Admins `edit`, everything else `none` (0.12.0
+  to 0.13.0 also a Lead's row `edit` for the people on their projects;
+  since 0.14.0 a row of a Lead or User is always `none`, see “Visibility
+  per role, 0.14.0”). Only
   set fields are stored (`ts_access`), by source: `admin` (a Team Admin) or
   `self` (the owner).
 - **Precedence:** the owner's own entry wins while `may_override` is on;
@@ -871,9 +883,10 @@ assignee reads `counters` with only their own counter-proposal; of the
 others only those still waiting, as `{ "other": true }` (no person, no
 values, no note). The `log` leaves out the others' `counter`,
 `accept_counter` and `reject_counter`, and `lapsed` names only the caller.
-Since 0.14.1 also `recipients`, `declined_by` and the offer's `to` trimmed
-to the caller, `names` only for the caller and the sender; a Job offered to
-several carries `market: true` instead.
+Since 0.14.1 also `recipients` and `declined_by` trimmed to the caller,
+`names` only for the caller and the sender, and the offer entry in the
+`log` only `to` the caller - a Member learns neither who else was offered
+the Job nor who declined.
 The same in the delta, `GET /records/job/{key}`, the answers of `/jobs`
 and the `current` of a `409`.
 
@@ -1015,7 +1028,7 @@ cannot check that step.
   planned }` – and `other` with the rest merged the same way (`null` if
   nothing). Reports stored before 0.7.4 give `booked_nb: 0`. Leads read whom the shares matrix lets them
   at least view (the matrix level, not whether it is applied yet); anyone
-  else `403`.
+  else `403`. **Since 0.14.0 Leads read only their own numbers.**
 - **Capacity check** on `accept-counter`: the counter-proposal's hours are
   spread over the person's working days from its start (at the earliest
   today) to its end. A week from the current one on, in which it takes
@@ -1077,6 +1090,9 @@ be read off a tombstone.
 | write (`PUT`, `DELETE`, batch, restore) | – | persons they may at least **view** in the shares matrix (members and externals) | all |
 | read (delta, `GET`, history) | own person | the same as write | all |
 
+Since 0.14.0 Leads view no time calendars: billing marks are written by
+Team Admins only and read by them and the person.
+
 A Lead's `POST /records/batch` is accepted when every write is a billing
 mark; otherwise `403 forbidden` as before. Marks of the own person are
 readable so the client can lock the events.
@@ -1099,82 +1115,598 @@ external column, everyone else the own row.
 ### Feed only for those who may
 
 `person.data.feed` is delivered to Team Admins, the person themselves and
-Leads with at least `view` on that person; everyone else gets the record
+(until 0.13.0) Leads with at least `view` on that person; everyone else gets the record
 **without** `feed` – in the delta, `GET /records/person/{key}` and the
 history. Setting an external's field gives their person record a new
 `revision` (the `version` stays), so every client receives it again with
 the next delta. A client whose copy lost the address drops the feed
 calendar.
 
-## The shared vacation calendar, 0.9.0 (2026-10-04)
+## Team backup as ZIP, 0.10.0 (2026-10-05)
 
-Still `api: 2`; only additions. The capability says `absences: 1`. Plan:
-`PLAN-ABSENZEN.md`, section 4 (Mac app).
+Still `api: 2`; only additions. The capability says `team_backup: 1`.
+Plan and decisions: `PLAN-SICHERUNG.md`. Only Nextcloud admins, under the
+admin prefix; the write routes carry `#[BruteForceProtection]`.
 
-### The calendar
+| Method | Path | Body / answer |
+|---|---|---|
+| GET | `/admin/teams/{id}/export` | the ZIP as a download (`application/zip`, `timesister-<slug>-<YYYY-MM-DD_HHMM>.zip`) |
+| POST | `/admin/teams/{id}/import/preview` | multipart field `file` (the ZIP) → preview with `token` |
+| POST | `/admin/teams/{id}/import` | `{ "token", "mapping": { "<old uid>": "<new uid>" \| null }, "mode": "merge" \| "replace" }` → result |
 
-A Team Admin creates «TimeSister – Vacation» (URI `timesister-ferien`) in
-their own Nextcloud account from the Mac app and shares it: the team group
-**read-only**, every Team Admin **with write access** (the owner's Mac keeps
-the shares current). The settings record names it:
+### The ZIP
+
+- `manifest.json`: `{ format: 1, app_version, api, team: {id, name, slug,
+  group}, taken_at, contains_secrets: true, files: { "<path>": { sha256,
+  size, uid?, missing? } } }`. Every other entry is listed with its SHA-256;
+  an entry the manifest does not list, a wrong size or checksum, a path
+  with `..`, an absolute path or a backslash refuse the whole ZIP (`422`).
+- `team.json`: the team as in `GET /admin/teams` plus `revision`,
+  `members` (uid, display name, role, `left_at`, `may_override`), `access`
+  (every set field of the shares matrix), `consents`.
+- `records/<kind>/<key>.json`: the record as in `GET /records/{kind}/{key}`
+  plus `accounts`, `account_deleted_at` and `history` (every version, as
+  in `GET …/history`). Tombstones are included. Jobs are records
+  (`records/job/…`); the weekly numbers live in `status.json`.
+- `status.json`: uid → `{ seen_at, app_version, last_sync, calendar_url,
+  calendar_shared, job_weeks, job_weeks_at }`.
+- `absences.json`: uid → `[{ source_uid, kind, start, end }]`.
+- `calendars/<uid>.ics`: the time calendar of every active member, exported
+  when the ZIP is made (same way as the weekly backup). Not exportable:
+  no file, manifest entry `missing: true`. The weekly backups stay on the
+  server and are not in the ZIP.
+- `templates/invoice.docx`, `templates/invoice.json` (since 0.16.0): the
+  team's invoice template, if it has one – see “Invoice template, 0.16.0”.
+- Limits: 200 MB per ZIP, 50 MB per entry, 600 MB unpacked, 20 000 entries.
+
+### Preview
+
+`{ token, format, app_version, taken_at, team, records: { <kind>: n },
+persons: [{ uid, display_name, role, left_at, may_override, exists, member }],
+calendars: [{ uid, path, size, missing }], absences: n, target: { id, name,
+empty }, accounts: [{ uid, display_name }] }` – `exists`: an account with
+this identifier exists here; `member`: it is already in the target team;
+`accounts`: up to 500 accounts of this Nextcloud for the mapping. The
+upload stays in the app's data folder (`import/<token>.zip`) until it is
+imported, at most a day.
+
+### Import
+
+- `mapping`: only accounts of the backup; a target may appear once; it
+  must exist here (`422`). Unmapped accounts keep their name. `null`
+  means **without account**: the person record stays with its key, the
+  identifier leaves `accounts`, and there is no membership, share,
+  consent, absence or status for it.
+- Which fields are rewritten: `login`, `accounts`, `leads`, `sender`,
+  `recipients`, `declined_by`, `assignee`, `by`, `person`, `owner`, `uid`,
+  `names`, `log[].to`, `modified_by`, `vacation_calendar.url`; the key of
+  a person and the person part of a billing key.
+- **Before writing** into a team that already has content (records, roles,
+  shares, consents or absences) the server stores a ZIP of it: protected
+  in the app data (`exports/t<id>/<name>.zip`) and visible with the backup
+  owner under `TimeSister Backups/_team/<name>.zip`. If the protected copy
+  fails: `409 conflict`, nothing changed.
+- `merge`: records missing here are inserted with their versions; a record
+  that exists here is written as a new version only when the backup's is
+  younger and differs; rows (members, shares, consents, absences, status)
+  only where none exist. `replace`: a record that differs is written as a
+  new version; records not in the backup become tombstones (new version,
+  restorable); rows are replaced. Both in one transaction.
+- Accounts are never removed from the team group or demoted; mapped
+  members are added to the group, Team Admins become group admins.
+- Calendars become backups per person: `ts_backups` with
+  `source: "import"`, `taken_on` = the day of `taken_at`; a backup of
+  another source on that day is kept (`kept_existing: true`). People fetch
+  them in the Mac app under “Old events” (`GET /backups/{id}`).
+- Answer: `{ team, mode, source: {name, taken_at}, pre_backup: {protected,
+  visible} | null, records: {inserted, updated, tombstoned, versions,
+  by_kind}, members: {rows, added_to_group, group_admins}, access: {rows},
+  consents: {rows}, absences: {rows}, status: {rows}, without_account: [uid],
+  calendars: [{ uid, stored, kept_existing?, backup?, reason? }] }`.
+
+## Delete team with content, 0.10.1 (2026-10-05)
+
+Still `api: 2`. `DELETE /admin/teams/{id}` deletes any team, also one with
+content; only Nextcloud admins, `#[BruteForceProtection]`.
+
+- Body `{ "confirm": "<team name>" }`. The typed name is compared trimmed
+  and without regard to case; missing or different → `422 confirm`.
+  Also for an empty team.
+- A team with content (records including tombstones, server backups or,
+  since 0.16.0, an invoice template) is stored first, the same way as before an import: the ZIP protected in
+  the app data under `exports/t<id>/<name>.zip` and visible with the backup
+  owner under `TimeSister Backups/_team/<name>.zip`. Without a backup
+  owner only the protected copy exists (`visible: null`). If the protected
+  copy cannot be written: `409 conflict`, nothing deleted.
+- Then, in one transaction: records (`ts_records`) with their history
+  (`ts_history`), status, absences, members, shares, consents, the group
+  mapping and the server backups (`ts_backups`, `ts_backup_files` rows),
+  last the team itself. After the commit the protected calendar backups in
+  the app data (`t<id>/`) and (since 0.16.0) the invoice template
+  (`templates/t<id>/`) are removed; `exports/` stays.
+- What stays: the Nextcloud group, the accounts, their time calendars and
+  the visible `.ics` files in the backup owner's folder.
+- Answer: `{ "id", "deleted": true, "backup": { "protected":
+  "exports/t<id>/<name>.zip", "visible": "<path with the owner>" | null }
+  | null, "counts": { records, versions, status, absences, members, access,
+  consents, groups, backups, backup_files, counters } }` (`counters` since
+  0.16.0). `backup` is `null` for an empty team.
+
+## Privacy notice and team from ZIP, 0.10.2 (2026-10-05)
+
+Still `api: 2`, only additions; the capability gains `privacy_notice: 1`.
+
+### The record `setting/privacy`
+
+A third setting beside `targethours` and `settings`; Team Admins write it
+like any record (`PUT /records/setting/privacy`), everyone in the team
+reads it. Fields, all optional:
 
 ```json
-{ "vacation_calendar": { "url": "https://…/remote.php/dav/calendars/atadmin/timesister-ferien/", "owner": "atadmin" },
-  "absence_calendar_kinds": ["vacation", "sickness"] }
+{ "controller": { "name": "…", "address": "…", "contact": "…" },
+  "privacy_contact": "…",
+  "hosting": { "provider": "…", "location": "…" },
+  "retention": { "time_years": 5, "billing_years": 10, "note": "…" },
+  "law": "both",
+  "authority": "…" }
 ```
 
-Since 0.9.1 the server accepts `vacation_calendar` only when `owner` is a
-Team Admin of the team and `url` is a calendar of that owner
-(`…/remote.php/dav/calendars/<owner>/<calendar>/`), otherwise `422 invalid`;
-the background job skips a team whose owner has left or whose URL no longer
-matches, with a warning in the log.
+Texts at most 500 characters (no control characters), `time_years` and
+`billing_years` integers 0–30, `law` one of `ch`, `eu`, `both` (the notice
+takes `both` when missing), unknown fields `422 invalid`. `schema` (integer)
+is allowed.
 
-`absence_calendar_kinds` lists the categories that appear – `vacation`,
-`sickness`, `parental`, `civil_service`, `unpaid`; missing means
-`["vacation"]`, an empty list means none. Unknown names are ignored.
+### The notice
 
-### `PUT /me/absences`
+- `GET /team/privacy?format=html|md` – every member, for their own team,
+  in the language of the account. `format` missing means `html`; anything
+  else `400`.
+- `GET /admin/teams/{id}/privacy?format=html|md` – Nextcloud admins, any
+  team.
+- Both answer with a download: `Content-Disposition: attachment;
+  filename="timesister-privacy-<slug>-<YYYY-MM-DD>.html|md"`, Content-Type
+  `text/html; charset=utf-8` or `text/markdown; charset=utf-8`. The HTML
+  is self-contained (styles inline, nothing from outside, everything
+  foreign escaped); the Markdown has one table row per line.
+- Content, live from the team, in nine numbered sections: 1 controller
+  and contact (the record plus team, date, app version), 2 purpose (with
+  the modules switched on: `settings.modules` or, unset, whether records
+  of the module exist), 3 which data, which categories (table: category,
+  examples, source, location; the absence categories and whether a
+  vacation calendar is set; externals as a count only), 4 where the data
+  is stored, 5 who has access (Nextcloud admins, Team Admins by name,
+  Leads with their projects from `project.leads`, Users, externals; table
+  person · role · sees the time calendar of · edits the time calendar of,
+  from the shares matrix as `GET /team/access` computes it), 6 backups
+  (owner by name, consents given/not given, team ZIP, thinning), 7
+  retention and deletion (legal references by `law` as a template: ArG
+  Art. 46 with ArGV 1 Art. 73, OR Art. 958f, DSG Art. 6/19/25/32; GDPR Art.
+  5(1)(e), 6(1)(b)(c), 13, 15, 17(3)(b), 30, 32; the team's periods; what
+  can be deleted and how; what stays while the period runs), 8 rights of
+  the persons (access, rectification, erasure, objection to backups,
+  complaint to `authority` – without one the FDPIC is named for `ch`), 9
+  the note: template from the team's settings, no legal advice.
+- Empty fields read `[to be completed]` / `[auszufüllen]`.
 
-Every member, own account only. Body: the **complete** state of the own
-absences for this and next year.
+### Admin: the record and the notice
+
+- `PUT /admin/teams/{id}/privacy` with `{ "data": { … } }` – Nextcloud
+  admins write `setting/privacy` with the rights of a Team Admin, always
+  against the record's current version (no `version` in the body). Answer:
+  the record as `PUT /records` answers. The admin page shows the fields
+  under “Edit team › Privacy” and offers both downloads.
+
+### New team from a team ZIP
+
+- `POST /admin/teams/import/preview` – multipart `file`, like the preview
+  for an existing team but without one: the same answer, `target` is
+  `null`. The upload is kept under `token` for a day.
+- `POST /admin/teams/from-zip` with `{ token, name, slug, group, mapping }`
+  – creates the team as `POST /admin/teams` does (`groups: { team: group }`,
+  no backup owner, default settings) and imports the kept upload into it
+  with `mode: merge` and the `mapping` (old account → new account or
+  `null`). A taken short name or group is `409` before anything exists.
+  Fails the import, the new team is deleted again (as `DELETE
+  /admin/teams/{id}`) and the error carries the import's status and message,
+  prefixed with “The import failed and the new team was removed again”;
+  an unexpected failure is `409 conflict` without details.
+- Answer: `{ "team": <as GET /admin/teams>, "import": <as POST
+  /admin/teams/{id}/import> }`.
+
+## Derived Lead role and customers for leads, 0.11.0 (2026-10-06)
+
+Still `api: 2`; the capability gains `derived_lead: 1`. User's decision
+(PLAN-BEREICHE, 06.10.2026): “Lead” meant two things – the set team role
+and the lead of a project. Now there is one truth: the role follows from
+the projects.
+
+### The rule
+
+- Set roles are only `user` and `admin`. `admin` stays the group admin of
+  the team group in Nextcloud.
+- A member's `role` is derived, in one place (`MembershipResolver::roleOf`,
+  fed by `LeadResolver` through `TenantService::leadsOf`): `admin` if
+  the account manages the team group; otherwise `lead` if the account is
+  in `leads` of at least one **active** project; otherwise `user`.
+- A project is active when it is live (not a tombstone) and its `status`
+  is none of `completed`, `archived`, `abgeschlossen`, `archiviert` (case
+  does not matter; a missing status counts as active). Project ended or
+  lead removed → the rights fall away with the next request.
+- A lead key names a person record (its key, or an account in its
+  `accounts`) or an account directly. A person record without an account
+  leads nothing: nobody logs in as them.
+- Read once per request and team; no new table. The column
+  `ts_members.role` stays but is empty and no longer read.
+
+### Endpoints
+
+- `GET /me`: `role` is the derived role; new `lead_of`:
+  `[{ "kind": "project", "key", "code", "name" }]`, the active projects
+  the caller leads, sorted by name (`code` = first of `codes`, else
+  `null`; `name` falls back to the key). `leads` (for clients before
+  0.5.0) names the derived Leads.
+- `GET /team`, `GET /admin/teams` members and the answer of `PUT
+  …/members/{uid}` carry `lead_of` (count) and `lead_projects` (names).
+  `counts.lead` counts the derived Leads.
+- `PUT /team/members/{uid}` and `PUT /admin/teams/{id}/members/{uid}`
+  take `role` only as `admin` or `user`; `lead` (and `subadmin`) is
+  `422 invalid` with “Lead follows from the project leads and cannot be
+  set.” Everything else (`left`, `may_override`, the last-Team-Admin
+  `409`) is unchanged.
+- `GET /team/access`, `GET /status`, `GET /team/privacy`, Jobs, billing
+  marks and weekly numbers use the same derived role; nothing else
+  changes in their shape.
+
+### Leads read customers
+
+Since 0.14.0 only the customers of their projects (see “Visibility per
+role, 0.14.0”). Unchanged in the rights matrix, now meant: a Lead reads `customer`
+(list, delta, single record – contact persons included), writing stays
+Team Admin (`403 forbidden`). The customers' address book (CardDAV, a
+copy the Mac app writes, `core/src/kundenbuch.rs`) is shared by the Mac
+app itself: write for Team Admins, read for the accounts in `/me.leads`
+– since 0.11.0 the derived Leads, so the book follows the projects too.
+
+### Migration and compatibility
+
+- Migration `Version1008Date20261006090000` empties every stored `lead`
+  (or old `subadmin`) in `ts_members` and logs the count per team. The
+  rights stay through the derivation as long as the person leads an
+  active project; a set Lead without a project becomes User.
+- Clients that still send `role: "lead"` get `422`. The Mac app 0.5.x
+  reads `role` from `/me` and shows the derived role correctly; its
+  roles page (`core/src/web/verwaltung.rs`, `nutzer_rolle` →
+  `serverapp::mitglied_setzen` → `PUT /team/members/{uid}`) still offers
+  Lead and will see the `422` message until the Mac app of the areas
+  plan (0.6.0) hides it.
+- Team ZIPs keep `role` per member as information; an import no longer
+  stores it.
+
+## Leads reach the people on their projects, 0.12.0 (2026-10-06)
+
+> **Replaced in 0.14.0:** Leads see no time calendars of others; the
+> capability no longer names `lead_reach`. See “Visibility per role,
+> 0.14.0”.
+
+Still `api: 2`; the capability gains `lead_reach: 1`. User's decision
+(06.10.2026): “The leads see the full calendars of the users who
+contribute to the project. Leads are like small admins.”
+
+### `POST /status`: `projects`
 
 ```json
-{ "items": [ { "source_uid": "7f3a-…@example.test", "kind": "vacation", "start": "2026-07-06", "end": "2026-07-11" } ] }
+{ "app_version": "0.6.0", "projects": ["JB1", "TK1"] }
 ```
 
-- `source_uid`: the source event's UID (1–255 characters; a recurrence
-  instance as `<uid>/<recurrence-id>`); the same source twice: the last one
-  counts. `kind` one of the categories (missing: `vacation`). `start` and
-  `end` are days, `end` exclusive and after `start`.
-- At most 400 items (`413 too_large`); invalid items `422 invalid`; control
-  characters in a field `400 invalid` (0.9.1).
-- The server replaces the person's rows (table `ts_absences`). Answer:
-  `{ "stored": 3, "opted_out": false }`.
-- Opt-out: a person record with `vacation_calendar_optout: true` (set by the
-  person in the Mac app) is stored nowhere; what was there is deleted, the
-  answer says `"opted_out": true`.
+- `projects`: the project keys the person booked on in the last 12
+  months. A list of at most 500 strings, each 1–64 bytes without control
+  characters; otherwise `400 invalid`. Duplicates are removed, the list
+  is sorted and stored with the time (`ts_client_status.projects`,
+  `projects_at`).
+- Missing keeps the last report; `null` clears it. Not shown in `GET
+  /status`.
 
-### Written by the server
+### The rule
 
-A background job (every 15 minutes) goes through every team with a
-`vacation_calendar`, finds the owner's calendar by URI
-(`getCalendarsForPrincipal`) and writes one all-day event per row whose
-category is in `absence_calendar_kinds` and whose person has not opted out:
+- A person **contributes** to a project when their client reports it in
+  `projects`, or when they are a recipient (not in `declined_by`) or the
+  `assignee` of a live Job in it.
+- A Lead **reaches** every active member who contributes to an active
+  project the Lead leads (`/me.lead_of`, see 0.11.0). Ended projects
+  (`completed`, `archived`, …) give no reach; members who left are not in
+  it; nobody reaches themselves.
+- Default in the shares matrix: Team Admins `edit`; a Lead's row `edit`
+  for the people they reach; everything else `none`. A Team Admin's entry
+  replaces the default (also `none`), the owner's own entry wins while
+  `may_override` is on – as before.
+- Read once per request (`LeadReach`), no new table. `/me.share_targets`
+  therefore names the Lead with `write`, and whatever reads the matrix
+  follows: withdrawal reminders, billing marks and weekly numbers (a Lead
+  with at least `view` on the person), feed of externals unchanged.
+  Records and bookings are still read through the rights matrix
+  (`AccessPolicy`), unchanged.
 
+### `GET /team/access`
+
+Every member field carries `reason`: `"contributes"` when `admin_level`
+is this default, then also `projects` (the shared project keys, sorted);
+otherwise `null` (external columns: always `null`). `reason` explains
+`admin_level`; the owner's own entry may still change `level`.
+
+```json
+{ "viewer": "pblead", "owner": "pbuser1", "level": "edit",
+  "admin_level": "edit", "self_level": null, "overridden": null,
+  "resting": false, "applied": "none", "effective": false, "pending": true,
+  "changed_at": null, "changed_by": null,
+  "reason": "contributes", "projects": ["JB1"] }
 ```
-UID:ferien-<24 hex of sha256(lowercase uid + "\n" + source_uid + "\n" + kind)>@timesister
-DTSTART;VALUE=DATE / DTEND;VALUE=DATE (exclusive)
-SUMMARY:<Category> · <Initials Name>        – from the person record (initials, first_name, last_name), in the server's language
-X-TIMESISTER-QUELLE:<source_uid>  X-TIMESISTER-PERSON:<uid>  X-TIMESISTER-ART:<kind>
+
+### Privacy notice
+
+The Leads' line under “Who has access” says that they see and edit the
+time calendars of the people who book on their projects, unless the
+shares matrix says otherwise.
+
+### Migration
+
+`Version1009Date20261006120000` adds `projects` (TEXT, null) and
+`projects_at` (BIGINT, null) to `ts_client_status`. Additive only;
+until a client reports, only Jobs give reach.
+
+### One project, one code (0.12.0)
+
+`PUT /records/project/{key}` (and batch, restore) refuses a record whose `codes` holds more than one non-empty entry: `422 invalid`, «A project has exactly one code; parts go into “subprojects”.». Parts are `subprojects` with codes like `D200.1`. Older records with several codes stay readable; the next write from a client carries only the one code. Since 0.16.0 a quote (`status` `draft`, `quoted`, `declined`) may have no code yet; from `active` on – also with no status – a missing code is `422 invalid`, «An active project needs a code.» (see Quotes).
+
+### Addendum to version 2: never billable (2026-10-07)
+
+A project record may carry `never_billable: true` (boolean; missing means
+`false`). Bookings on such a project never count as open for billing –
+for vacation, absences and internal work. The Mac app sets it when the
+project number is created or in the project sheet and books accordingly;
+the server stores it like any other field. Since 0.13.0 it is part of the
+booking catalog, so every member's client knows it.
+
+
+## Visibility per role, 0.14.0 (2026-10-07)
+
+Still `api: 2`; only additions and narrower rights. Plan: `PLAN-ROLLEN.md`,
+part B. Replaces the 0.12.0 rule “Leads are like small Team Admins”.
+
+### The rule
+
+**Members (`user`) see only themselves. Leads see themselves and the data
+of the projects they lead. Team Admins see everything.** The server
+enforces it in what it hands out – lists, deltas, single records, history,
+weekly numbers – not only the clients' menus. “The projects they lead”:
+for booking reports and billable marks the active projects in
+`/me.lead_of` (0.11.0); for full project records and customers every live
+project whose `leads` name the caller (as before for projects).
+
+### Permissions
+
+| | user | lead | admin |
+|---|---|---|---|
+| `setting`, `region` | read | read | read, write |
+| `project` | booking catalog | their projects full (write, not create), others booking catalog | read, write |
+| `person`, own | read | read | read, write |
+| `person`, others' | – | **name card** | read, write |
+| `customer` | – | **those of their projects**, read | read, write |
+| `job` | as before (0.6.0) | as before | as before |
+| `billing` (billed marks) | own, read | – | read, write |
+| `booking-report` | own, read and write | **of their active projects**, read | read |
+| `billable` (marks) | own, read | **of their active projects**, read and write | read, write |
+| History | own person; own booking reports and marks | same as reading `booking-report`/`billable`; own person; their projects | all |
+| Time calendars of others (CalDAV shares) | – | – | by the shares matrix |
+| Weekly numbers (`GET /jobs/weeks`) | own | **own** | all |
+| Capacity (`GET /jobs/{key}/capacity`, `422 capacity`) | – | their projects, **weeks without hours** | with hours |
+| `POST /jobs/fits` | – | team members, **true/false/null** | team members |
+| Status reports of others, team, backups of others | – | – | yes |
+
+Unreadable records do not appear in lists or deltas; a single read of a
+key the caller may not read gives `403 forbidden` – also when no such
+record exists, so existence is not revealed.
+
+### Shares matrix
+
+- A row whose viewer is not a Team Admin is `none`, whatever is stored
+  (members and externals as columns). `PUT /team/access` with `view` or
+  `edit` in such a row: `422 invalid`, “Only Team Admins see the time
+  calendars of others; this row stays “none”.”. `none` and `default` stay
+  allowed. A Lead or User row reads `admin_level: "none"`.
+- The owner's own entry (`self`, with `may_override`) may only **lower**
+  a Team Admin's row: a level above the Team Admin level or default is
+  `422 invalid`, “You can only restrict a Team Admin’s access to your time
+  calendar, not extend it.”. When the Team Admin level drops later, the
+  lower of the two applies. `overridden` is `restricted` or `null`, never
+  `granted`.
+- `reason` stays in every field of `GET /team/access`, always `null`;
+  `projects` is gone.
+- `/me.share_targets` therefore names Team Admins only. The owners'
+  clients withdraw every other share at their next sync; the withdrawal
+  reminder goes out as before.
+- External columns (feeds): only Team Admins; a Lead or User row is
+  `none`.
+
+### Persons and customers
+
+- A Lead gets person records of others as a **name card**: only `schema`,
+  `login`, `first_name`, `last_name`, `initials`, `accounts` – in the delta
+  and `GET /records/person/{key}`. Workload, regions, vacation, entry and
+  exit, corrections, calendars, `aliases` (mail addresses) and `feed` stay
+  with Team Admins and the person. Users read only their own person, as
+  before. Since 0.16.0 `cost_rates` stay with Team Admins alone – also
+  on the own person (see Cost rates on the person).
+- A Lead reads a `customer` only when a project they lead names it in
+  `customer` (older records: `kunde`). Everything else `403`.
+
+### Booking reports (`booking-report`)
+
+One record per account, project and month. The person's client writes it
+whenever a booking on a project **with Leads** changes; the Leads' clients
+read it instead of a time calendar.
+
+- **Key:** `{uid}+{project}+{YYYY-MM}`, e.g. `mia+JB1+2026-10`. `uid` is
+  the Nextcloud account (contains no `+`), `project` the project record's
+  key, the month `YYYY-MM` (01–12). The first `+` ends the account, the
+  last one starts the month; a project key may contain `+`. The whole key
+  follows the record key pattern (at most 128 characters from
+  `A–Z a–z 0–9 @ . _ + -`); otherwise `400`/`422`.
+- **Data** – only these fields (anything else `422 invalid`, ““x” is not
+  a field of this record.”):
+
+```json
+{ "schema": 1, "person": "mia", "project": "JB1", "month": "2026-10",
+  "at": "2026-10-07T12:00:00Z",
+  "bookings": [
+    { "id": "7f3a-1@example.test", "date": "2026-10-07",
+      "start": "08:15", "end": "10:00", "minutes": 105, "code": "JB1",
+      "title": "Site visit", "notes": "First line\nSecond line",
+      "billable": true, "billed": false } ] }
 ```
 
-Object name `<UID>.ics`, written with `createFromString` (PUT semantics:
-the same name overwrites). Our events that are no longer wanted (row gone,
-category switched off, opt-out) are written again with `STATUS:CANCELLED`;
-the public API cannot delete. A Team Admin's Mac deletes cancelled marked
-events in this calendar when it syncs; every Mac hides them. Events without
-the `X-TIMESISTER-*` marks are never touched. An account deletion drops the
-person's rows; the next run cancels their events.
+| Field | Rule |
+|---|---|
+| `schema` | optional integer 1–1000 |
+| `person`, `project`, `month` | must equal the parts of the key |
+| `at` | when the client built the report, ISO 8601 with time zone |
+| `bookings` | a list, at most **2000** |
+| `id` | required, 1–1024 bytes, no control characters, unique in the report; the booking's identifier as the client defines it (the event UID; for an occurrence of a series the UID plus its start). The billable mark uses the same value. |
+| `date` | required, `YYYY-MM-DD`, a real day **within the month of the key** |
+| `start`, `end` | `HH:MM` (00:00–23:59, `end` also `24:00`) or `null` (all day) |
+| `minutes` | required integer 0–44640 |
+| `code` | `null` or text up to 64 characters |
+| `title` | `null` or text up to 500 characters, no control characters |
+| `notes` | `null` or text up to 4000 characters; tab and line breaks allowed, other control characters not |
+| `billable`, `billed` | `true`, `false` or `null` (as the person's event says) |
+
+  A report may be at most **768 KB** (other kinds 256 KB); larger:
+  `413 too_large`. An error inside a booking names it: “Booking 2: “minutes”
+  is invalid.”.
+- **Write** (`PUT`, `DELETE`, batch, restore): only the account in the key
+  (`403 forbidden` for everyone else, Team Admins included: “Only the
+  person themselves reports their bookings.”). Versions as for every record
+  (`version: 0` creates, `409` on a conflict). A month without bookings any
+  more: `bookings: []` or `DELETE`.
+- **Read** (list, delta, `GET`, history): the account, Team Admins, and the
+  current Leads of the project – Leads by `/me.lead_of`, i.e. only while
+  the project is active.
+
+### Billable marks (`billable`)
+
+A Lead cannot write into the person's calendar; the mark goes as a record,
+and the person's client applies it to its event.
+
+- **Key:** `{uid}+{project}+{hash}`, where `hash` is the first 32 hex digits
+  (lower case) of the SHA-256 of the booking `id` (UTF-8), as in the
+  booking report. Example: `mia+JB1+3f9c…` (32 digits).
+- **Data** – only these fields:
+
+```json
+{ "schema": 1, "person": "mia", "project": "JB1", "uid": "7f3a-1@example.test", "billable": false }
+```
+
+  `person` and `project` must equal the key's parts, `uid` is the booking
+  `id` (1–1024 bytes, no control characters) and must give the key's hash,
+  `billable` is `true` or `false` (required). Otherwise `422 invalid`.
+- **Write:** Team Admins and the current Leads of the project in the key
+  (`/me.lead_of`); not the person, not Leads of other projects (`403`,
+  “Only Team Admins and the project’s Leads mark a booking as billable.”).
+  `DELETE` takes the mark back: the person's own setting applies again.
+- **Read:** the same, and the person in the key.
+- **The person's client** applies a mark whose `project` equals the event's
+  current project (otherwise it ignores it) by setting the event's billable
+  flag to `billable` – once per `version` of the mark, so the person may
+  still change the event afterwards; its next booking report carries the
+  result. `modified_by`/`modified_at` of the record say who marked when.
+
+### Batch
+
+`POST /records/batch` of someone who is not a Team Admin is accepted when
+every write is of kind `billing`, `booking-report` or `billable`; each
+write is checked on its own (all or none, as always). A Team Admin's batch
+is checked the same way for these kinds (a Team Admin cannot write
+another person's booking report).
+
+### Gaining and losing sight
+
+- A project write that changes `leads`, `customer` or whether the project
+  is active gives the customers it names (old and new) and every booking
+  report and billable mark of that project a new `revision` (the `version`
+  stays). Whoever may read them now gets them with the next delta.
+- Nothing is sent as deleted to someone who loses sight. A Lead's client
+  drops booking reports and billable marks of projects no longer in
+  `/me.lead_of`, and customers no project it leads names any more; a
+  client whose role became `user` drops all customers and the cards of
+  others. A full read (`since=0`) always gives exactly what may be read.
+
+### Weekly numbers and capacity
+
+- `GET /jobs/weeks`: Team Admins everyone, everyone else (Leads included)
+  only their own numbers; `?uid=` of someone else `403` (“Only your own
+  numbers; Team Admins read everyone’s.”).
+- `GET /jobs/{key}/capacity` and the `422` with `rule: "capacity"` on
+  `accept-counter`: for Team Admins as before; for Leads `weeks` carries
+  only `start`, `week` and, for a day, `day` – no `load`, `available`,
+  `over` – and the message names the weeks without hours.
+
+### `POST /jobs/fits`
+
+Would a Job fit each recipient? The same capacity check as when a sender
+accepts a counter-proposal (0.7.2/0.7.3: spread over the person's working
+days from `start`, at the earliest today, to `end`; every week from the
+current one at most `available`, every day at most a full day), without
+numbers in the answer.
+
+```json
+POST /jobs/fits
+{ "hours": 12, "start": "2026-10-12", "end": "2026-10-23",
+  "recipients": ["mia", "noah", "zoe"], "job": "j-17" }
+→ { "fits": { "mia": true, "noah": false, "zoe": null } }
+```
+
+- **Who:** Team Admins and Leads (role `lead`, any project); others `403`
+  (“Only Team Admins and Leads ask whether a Job fits.”).
+- `hours` above 0, `start`/`end` days with `end` ≥ `start` (at most ten
+  years), `recipients` 1–50 accounts (duplicates removed) – as for an
+  offer; otherwise `422 invalid`. Every recipient must be an active member
+  of the team (`422`, “mia is not in the team.”).
+- `job` (optional): the key of an existing Job being changed – its own
+  hours do not count twice. Only a Job the caller manages (Team Admin, its
+  project's Lead, its sender); otherwise `404`.
+- Per recipient `true` (fits), `false` (a week or day above), `null`
+  (their client never reported weekly numbers – then nothing would be
+  blocked). Keys in the order of `recipients`.
+
+### Privacy notice
+
+“Who has access” says: Leads see their projects, the bookings on these
+projects as the people report them (date, time, person, code, duration,
+title, notes, billable, billed), the customers of these projects, names
+and initials of the people – no time calendars, master data, balances or
+vacation of others. Users: only their own data. New data category
+“Booking reports”.
+
+### Migration
+
+`Version1010Date20261007120000` sets every stored level in `ts_access`
+whose viewer is not a group admin of the team group to `none` (UPDATE
+only, nothing deleted) and logs the count per team. A team whose group or
+Team Admins cannot be read is left as it is and logged; the server reads
+those rows as `none` anyway. No schema change: the new kinds live in
+`ts_records`/`ts_history` (kind ≤ 16 characters).
+
+### Capability
+
+```json
+"timesister": { "api": 2, "version": "0.14.0", "jobs": 4, "billing": 1,
+  "absences": 1, "team_backup": 1, "privacy_notice": 1, "derived_lead": 1,
+  "lead_scope": 1, "booking_reports": 1, "job_fits": 1 }
+```
+
+`lead_reach` is gone. `lead_scope: 1`: the rule above; `booking_reports:
+1`: the kinds `booking-report` and `billable`; `job_fits: 1`: `POST
+/jobs/fits`. `POST /status` still takes `projects` (0.12.0); no right
+follows from it any more.
 
 ## Reopen and self-assigned Jobs, 0.15.0 (2026-10-11)
 
@@ -1872,7 +2404,6 @@ ts_tenants         + entries_revision, entries_since
   – `left` (added 2026-10-15): the member left the team, always false
   for a feed.
 
-
 ### Reading the entries (clients)
 
 `GET /entries?since=<revision>&limit=<n>` (default and maximum 2000; a
@@ -1888,7 +2419,6 @@ the app runs) – every member, filtered by role:
 With `since=0` tombstones are left out, as for the records; from any
 later revision on they are delivered. A `since` beyond the current
 revision is not an error: `entries` is empty, `more` false.
-
 
 Answer `{ "revision": <current>, "entries": [ … ], "more": bool }`, entries
 in `revision` order, each
@@ -1941,7 +2471,6 @@ and import as before.
 ```json
 "timesister": { … , "entries": 1 }
 ```
-
 
 ## Shares removed, 0.17.0 (2026-10-15)
 
@@ -2233,3 +2762,184 @@ can rely on it:
   and `invoices.json` `{ "invoices": [ … as fixed ] }`; the import reads
   past them. Deleting a team reports `invoices`, `invoice_hours`, `ledger`
   in `counts`.
+
+## Invoice documents, 0.19.0 (2026-10-15) – PDF, QR bill, preview, folder
+
+Second step of `PLAN-FAKTURA.md`: the server renders the documents of an
+issued invoice, stores them in Nextcloud Files in a folder the Nextcloud
+admin chooses per team, writes their hashes into the ledger and serves a
+watermarked preview of a draft. Capability `invoice_documents: 1`.
+ZUGFeRD/XRechnung follow in 0.20.0 (F3); 0.19.0 renders the PDF with the
+Swiss QR bill when the issuer has a CHF or EUR account with a (QR-)IBAN,
+and a plain PDF otherwise.
+
+### Folder per team (Nextcloud admin page)
+
+Team setting `documents` in `settings` of `GET /team`, `GET /admin/teams`
+and `/me`:
+
+```json
+"documents": { "invoices": "TimeSister Invoices/Planungsbüro", "quotes": "TimeSister Quotes/Planungsbüro", "per_year": true }
+```
+
+- `invoices`, `quotes`: a folder path in the files of the team's **backup
+  owner** (`backup_owner`; a group folder lies at the root there, e.g.
+  `Buchhaltung/Rechnungen`). `null` means the default
+  `TimeSister Invoices/<team name>` and `TimeSister Quotes/<team name>`.
+  1–255 characters, no `..`, no leading `/`; `422 invalid` otherwise.
+- `per_year`: boolean, default `true` – a subfolder `<year>` of the
+  issue date (invoices) or the quote date (quotes).
+- Set by Nextcloud admins through `POST`/`PUT /admin/teams` (`settings`)
+  and by Team Admins through `PUT /team/settings` (`documents`). On
+  writing, the server checks that the backup owner is set and that the
+  folder exists or can be created and is writable; otherwise `422 invalid`
+  “The folder ‘…’ is not writable for the backup owner.”
+- The admin page of the app shows the two paths with a check button
+  (“Folder found, writable”), the per-year switch, and the backup owner;
+  no file picker (the page uses no `OC.*`), the admin types the path as it
+  appears in the owner's Files.
+- The Mac app shows the setting under Accounting › Settings read-only and
+  writes quote PDFs (WebDAV, as today) into `quotes` (+ `<year>` when
+  `per_year`), file name `<quote number>.pdf`.
+
+### Rendering
+
+- After `issue` (and `reverse`), the server renders `<number>.pdf` and
+  stores it under `invoices[/<year>]/<number>.pdf` in the backup owner's
+  files, then appends the ledger action `document` with `payload`
+  `{ key, number, kind: "pdf", path, size, sha256 }`; `document_state`
+  becomes `done`. On failure: `failed` with the error in
+  `document_error`; the job `DocumentRetry` (every 15 minutes) retries
+  `pending`/`failed` documents up to 10 times.
+- Layout (A4 portrait): issuer block (name, address, VAT id, email, phone),
+  customer block, title “Invoice <number>” (German/English by the team's
+  language, `settings.language` if present, else the server's default
+  language), date, due date, period, project and budget name, `greeting`,
+  the positions table (text, hours, rate, amount; flat, discount and text
+  lines as sent), net, VAT (rate and amount), gross, `body`, the hours
+  appendix (one table: date, person, code, title, hours – no notes;
+  Decision 2026-10-14), `footer`, and the **chain line** on every page's
+  footer: `Beleg <number> · Kette <seq> <hash[0:12]> ← <prev_hash[0:12]>`.
+- **Swiss QR bill** on the last page (Swiss Payment Standards, 210 × 105
+  mm at the bottom): when the issuer has an account in the invoice's
+  currency (`issuer.accounts[].currency` = `CHF` or `EUR`) and
+  `issuer.qr` is not `false`; creditor = issuer, debtor = customer, amount
+  = gross, reference: none (QR-IBAN → QRR reference derived from the
+  number is a later option). Library `sprain/swiss-qr-bill`.
+- PDF library: `tecnickcom/tcpdf` (LGPL) – the vendor directory ships
+  with the app; `.nextcloudignore` keeps tests and docs of the libraries
+  out of the archive. Fonts: DejaVu (ships with TCPDF).
+- Reversal and credit note render like an invoice with the title
+  “Reversal of <number>” / “Credit note”.
+
+### Endpoints
+
+| Method | Path | Who | Answer |
+|---|---|---|---|
+| GET | `/invoices/{key}/preview` | Team Admins, the project's Leads | `application/pdf` of the **draft** as it would be issued, with the watermark **VORABZUG** (German) / **DRAFT** (English) diagonally across every page, light grey, in the PDF itself; number shown as “(not yet issued)”; never stored, never in the ledger. `409 issued` for an issued invoice (use `document`). `422` when the draft could not be issued as it is (same checks as `issue`, except the number). |
+| GET | `/invoices/{key}/document?kind=pdf` | Team Admins, the project's Leads | the stored file; `404` while `document_state` is not `done` |
+| POST | `/invoices/{key}/render` | Team Admins | render again now (after a failure); answer `{ document_state, document_error }` |
+| GET | `/invoices/chain/head` | Team Admins | `{ seq, hash, at, entries }` – the chain head |
+
+`fixed` adds `document_state`, `document_error`, `document_path`,
+`document_sha256`.
+
+### Chain head file
+
+Daily job `ChainHead` (TIME_INSENSITIVE): for every team with at least one
+ledger entry, writes `invoices/chain-<YYYY-MM-DD>.txt` in the backup
+owner's files with `team, date, entries, head seq, head hash` and, when
+`settings.documents.chain_mail` (an address, optional) is set, sends the
+same text by Nextcloud mail. The file is the external anchor of the
+chain; the previous days' files stay.
+
+### Capability
+
+```json
+"timesister": { …, "invoice_documents": 1 }
+```
+
+### As built, 0.19.0 (2026-10-15)
+
+What the server does beyond or beside the lines above, so the Mac app can
+rely on it:
+
+- **Streams:** `preview` answers `200` with `Content-Type: application/pdf`
+  and `Content-Disposition: inline; filename="preview-<key>.pdf"`;
+  `document` answers `200` with `application/pdf` and
+  `Content-Disposition: attachment; filename="<number>.pdf"`. Both are
+  plain bodies, not the OCS JSON envelope; errors (403, 404, 409, 422)
+  come as the usual OCS JSON. `document` takes `kind=pdf` or no `kind`;
+  another kind: `422 invalid` (“Only “pdf” documents exist so far.”).
+  `404 not_found` while `document_state` is not `done`, and also when the
+  file is gone from the owner's files (“The document is missing in the
+  files; render it again.”).
+- **`issue` and `reverse` answer before the document exists:** the
+  rendering runs right after the transaction, in the same request;
+  `issue.document_state` in the answer is still `pending`. Read `fixed`
+  afterwards: `document_state` is `done` (or `failed` with
+  `document_error`) a moment later. A reversal renders its own document
+  (title “Storno zu <original number> – <number>” / “Reversal of …”); the
+  original's document stays as issued.
+- **`render`** answers `{ document_state, document_error }`; on a `done`
+  document whose file is still there it renders nothing and appends no
+  second ledger entry; when the file is gone it renders and appends again.
+  A draft: `404 not_found`.
+- **`chain/head`:** `{ seq, hash, at, entries }`, with `seq` 0 and
+  `hash`/`at` null for an empty ledger; `entries` counts the entries.
+- **Ledger entry `document`:** `actor` is the issuer (right after
+  `issue`/`reverse`), the Team Admin who called `render`, or `system` (the
+  retry job); `payload` is the canonical JSON of
+  `{ key, number, kind: "pdf", path, size, sha256 }`, `path` relative to
+  the backup owner's files (e.g. `TimeSister Invoices/Planungsbüro/2026/RE-2026-0007.pdf`).
+  Verify: a stored document's SHA-256 equals `sha256` and `document_sha256`.
+- **`fixed`** adds `document_error`, `document_path`, `document_sha256`
+  (null until `done`).
+- **The document's language:** `setting/settings.language` (`de…` or
+  `en…`, case-insensitive) decides, else the server's `default_language`;
+  anything else renders English. Labels, the watermark (VORABZUG/DRAFT),
+  dates (`15.10.2026` / `2026-10-15`) and amounts (`1’234.50` / `1,234.50`)
+  follow it. The chain line is always `Beleg <number> · Kette <seq> <hash[0:12]> ← <prev_hash[0:12]>`
+  (`← –` for the first entry); a preview carries
+  `VORABZUG – (noch nicht gestellt)` / `DRAFT – (not yet issued)` instead
+  and shows the title “Rechnung (noch nicht gestellt)”.
+- **Metadata:** the PDF's Subject is the chain line, Keywords the
+  watermark (`TimeSister` when none), Title the document's title – all in
+  the uncompressed XMP, so a client can grep them.
+- **Layout:** the team's `footer` text sits in the page footer of every
+  page (up to three lines, small) above the chain line and “Seite n von N”;
+  the hours appendix starts on its own page (date, person's display name,
+  code, the booking's title from the book, hours; total). The QR bill is
+  its own last page with the heading “Zahlteil – …”; its footer moves above
+  the payment part.
+- **QR bill only when the standard accepts the data:** issuer with name,
+  postcode, city, country and an account in the invoice's currency (`CHF`
+  or `EUR`), `issuer.qr` not `false`, gross > 0; the debtor only when the
+  customer has name, postcode, city and country. A **QR-IBAN** (IID
+  30000–31999) needs a QRR reference, which 0.19.0 does not generate: the
+  document is rendered **without** payment part (plain PDF). The issuer's
+  `street` is split into street and house number at the last token.
+- **Team setting `documents`:** a missing key keeps the stored value;
+  `null` or `""` means the default again; a trailing slash is trimmed;
+  `chain_mail` must look like an address (≤ 254). On `POST /admin/teams`
+  without `backup_owner`, `documents` is refused with `422` (no owner to
+  check against yet) – set the owner first, then the folders. The check
+  never creates anything: “Folder found, writable.” or “The folder will be
+  created: “…”.”; the folders come into being with the first document.
+- **Admin check:** `POST /admin/teams/{id}/documents/check` takes
+  `{ invoices?, quotes? }` (null: the default) and answers
+  `{ invoices: { ok, message }, quotes: { ok, message } }` in the admin's
+  language; a malformed path: `422 invalid`.
+- **Rights:** `preview` and `document` like `fixed` (Team Admins, the
+  project's Leads); `render` and `chain/head` Team Admins. All answer
+  `404` when `invoicing` is off.
+- **Chain head file:** written once per run of the daily job (a second run
+  on the same day overwrites the day's file); `team: <name>`, `date`,
+  `entries`, `head seq`, `head hash`, one per line. The mail's subject is
+  `TimeSister – chain head <team> <date>`, plain text, through Nextcloud's
+  mailer (no mail when the server has none configured; logged).
+- **Stored** (`Version1014Date20261015180000`, additive):
+  `ts_inv_invoices.document_error` TEXT, `document_path` STRING(512),
+  `document_sha256` STRING(64), `document_tries` SMALLINT;
+  `ts_tenants.documents_json` TEXT. Nothing in Files is ever deleted by the
+  app.

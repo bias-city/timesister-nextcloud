@@ -4,7 +4,7 @@
 // copy at the backup account and in the person's own folder, permissions,
 // weekly job and thinning (both with TS_OCC), backup account per team.
 import { ADMIN, NC, dav, occ, ocs, sql } from './lib.mjs'
-import { A, AA, L, RUN, U1, U2, V, ISO, check, expect, head, sha256 } from './harness.mjs'
+import { A, AA, L, RUN, U1, U2, V, ISO, check, expect, head, isObj, sha256 } from './harness.mjs'
 
 const REFUSED = 'The person has not agreed to backups with the Team Admin.'
 const REFUSED_DE = 'Die Person hat die Sicherung beim Team Admin nicht freigegeben.'
@@ -271,9 +271,9 @@ async function testteam() {
 	head('Team settings in /me (Planungsbüro, read only)')
 	{
 		const me = (await ocs(U1, 'GET', '/me')).data
-		// 0.17.0: `entries_since` (date or null) next to `backup_required`; `leads_see_calendars` is gone with the shares matrix. 0.18.0: `invoicing`.
-		check('/me names settings with backup_required, entries_since and invoicing', typeof me?.settings?.backup_required === 'boolean'
-			&& 'entries_since' in (me?.settings || {}) && typeof me?.settings?.invoicing === 'boolean' && Object.keys(me.settings).length === 3, me?.settings)
+		// 0.17.0: `entries_since` (date or null) next to `backup_required`; `leads_see_calendars` is gone with the shares matrix. 0.18.0: `invoicing`. 0.19.0: `documents`.
+		check('/me names settings with backup_required, entries_since, invoicing and documents', typeof me?.settings?.backup_required === 'boolean'
+			&& 'entries_since' in (me?.settings || {}) && typeof me?.settings?.invoicing === 'boolean' && isObj(me?.settings?.documents) && Object.keys(me.settings).length === 4, me?.settings)
 		const team = (await ocs(A, 'GET', '/team')).data
 		check('/team names the same settings', JSON.stringify(team?.settings) === JSON.stringify(me?.settings), team?.settings)
 	}
@@ -300,15 +300,17 @@ async function testteam() {
 		const auto = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, backup_owner: null })
 		check('backup_owner null: automatic again', auto.data?.backup_owner === first, auto.text)
 
-		const defaults = { backup_required: false, entries_since: null, invoicing: true }
+		// 0.19.0: `documents` with its defaults (null = the default folders).
+		const documents = { invoices: null, quotes: null, per_year: true, chain_mail: null }
+		const defaults = { backup_required: false, entries_since: null, invoicing: true, documents }
 		check('settings: default values on creation', JSON.stringify(made.data?.settings) === JSON.stringify(defaults), made.data?.settings)
 		const who = { user: first, pass: `Test-2026-${first}!` }
 		check('member\'s /me: default values', JSON.stringify((await ocs(who, 'GET', '/me')).data?.settings) === JSON.stringify(defaults))
 		const req = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { backup_required: true } })
-		check('set only backup_required, entries_since stays', JSON.stringify(req.data?.settings) === JSON.stringify({ backup_required: true, entries_since: null, invoicing: true }), req.text)
+		check('set only backup_required, entries_since stays', JSON.stringify(req.data?.settings) === JSON.stringify({ backup_required: true, entries_since: null, invoicing: true, documents }), req.text)
 		expect('leads_see_calendars is gone (0.17.0): unknown key', await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { leads_see_calendars: false } }), 422, 'invalid')
 		const same = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, base)
-		const want = { backup_required: true, entries_since: null, invoicing: true }
+		const want = { backup_required: true, entries_since: null, invoicing: true, documents }
 		check('PUT without settings: unchanged', JSON.stringify(same.data?.settings) === JSON.stringify(want), same.text)
 		check('/me, /team and /admin/teams read them', JSON.stringify((await ocs(who, 'GET', '/me')).data?.settings) === JSON.stringify(want)
 			&& JSON.stringify((await ocs(who, 'GET', '/team')).data?.settings) === JSON.stringify(want)

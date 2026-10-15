@@ -45,6 +45,27 @@
 		</div>
 		<h4><?php p($l->t('Members')); ?></h4>
 		<div id="ts-members"></div>
+		<div id="ts-documents" hidden>
+			<h4><?php p($l->t('Documents')); ?></h4>
+			<p class="ts-hint ts-muted"><?php p($l->t('Where the server stores the PDFs of issued invoices and where the Mac app stores quote PDFs: folders in the files of the backup owner, e.g. a group folder like “Accounting/Invoices”. Type the path as it appears in that account’s Files. Empty: “TimeSister Invoices/<team>” and “TimeSister Quotes/<team>”.')); ?></p>
+			<div class="ts-grid">
+				<span class="ts-label"><?php p($l->t('Backup owner')); ?></span>
+				<span id="ts-doc-owner"></span>
+				<label for="ts-doc-invoices"><?php p($l->t('Invoices folder')); ?></label>
+				<input id="ts-doc-invoices" type="text" maxlength="255" autocomplete="off" spellcheck="false">
+				<label for="ts-doc-quotes"><?php p($l->t('Quotes folder')); ?></label>
+				<input id="ts-doc-quotes" type="text" maxlength="255" autocomplete="off" spellcheck="false">
+				<label for="ts-doc-per-year"><?php p($l->t('Subfolder per year')); ?></label>
+				<input id="ts-doc-per-year" type="checkbox">
+				<label for="ts-doc-mail"><?php p($l->t('Chain head by e-mail to')); ?></label>
+				<input id="ts-doc-mail" type="email" maxlength="254" autocomplete="off" aria-describedby="ts-doc-mail-hint">
+				<p id="ts-doc-mail-hint" class="ts-hint ts-muted"><?php p($l->t('Optional. Every day the app writes the ledger’s chain head (last entry and hash) as chain-<date>.txt into the invoices folder and sends the same text to this address, e.g. the accountant.')); ?></p>
+			</div>
+			<div class="ts-buttons">
+				<button type="button" id="ts-doc-check" class="button"><?php p($l->t('Check')); ?></button>
+			</div>
+			<div id="ts-doc-result" aria-live="polite"></div>
+		</div>
 		<div id="ts-privacy" hidden>
 			<h4><?php p($l->t('Privacy')); ?></h4>
 			<p class="ts-hint ts-muted"><?php p($l->t('For the privacy notice every member can download (GET /team/privacy): controller, contact, hosting, retention periods and legal basis. Members, roles and backups are read live from the team. Team Admins can keep these entries from the Mac app as the record setting/privacy. The notice is a template, not legal advice.')); ?></p>

@@ -32,6 +32,8 @@ use OCP\DB\Types;
  * @method void setEntriesSince(?string $entriesSince)
  * @method int getInvoicing()
  * @method void setInvoicing(int $invoicing)
+ * @method string|null getDocumentsJson()
+ * @method void setDocumentsJson(?string $documentsJson)
  */
 final class Tenant extends Entity {
 	protected string $name = '';
@@ -50,6 +52,8 @@ final class Tenant extends Entity {
 	protected ?string $entriesSince = null;
 	/** Team setting `invoicing` (0.18.0), 0 or 1: issuing on the server. */
 	protected int $invoicing = 1;
+	/** Team setting `documents` (0.19.0) as JSON: folders, per year, chain mail; null: defaults. */
+	protected ?string $documentsJson = null;
 
 	public function __construct() {
 		$this->addType('name', Types::STRING);
@@ -63,6 +67,7 @@ final class Tenant extends Entity {
 		$this->addType('entriesRevision', Types::INTEGER);
 		$this->addType('entriesSince', Types::STRING);
 		$this->addType('invoicing', Types::SMALLINT);
+		$this->addType('documentsJson', Types::STRING);
 	}
 
 	/** Issuing on the server (0.18.0) is on for this team. */
