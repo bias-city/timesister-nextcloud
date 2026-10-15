@@ -260,7 +260,7 @@ final class EntryService {
 	public function setSince(Membership $m, \stdClass $body): array {
 		$this->requireAdmin($m);
 		$t = $this->team->tenant($m->tenantId);
-		$settings = TeamRules::settings(['settings' => get_object_vars($body)], $t->getDocumentsJson());
+		$settings = TeamRules::settings(['settings' => get_object_vars($body)], $t->getDocumentsJson(), $t->getWebhooksJson());
 		if (array_key_exists('backup_required', $settings)) {
 			throw ApiException::invalid(Message::of('Unknown team setting “{key}”.', ['key' => 'backup_required']));
 		}
@@ -274,6 +274,14 @@ final class EntryService {
 		if (is_array($settings[DocumentRules::FIELD] ?? null)) {
 			$this->documents->requireFolders($this->team->backupOwner($t), $settings[DocumentRules::FIELD], $t->getName());
 			$t->setDocumentsJson(DocumentRules::encode($settings[DocumentRules::FIELD]));
+			$this->tenants->update($t);
+		}
+		if (is_array($settings[ExportRules::FIELD] ?? null)) {
+			$t->setDatevJson(ExportRules::encodeDatev($settings[ExportRules::FIELD]));
+			$this->tenants->update($t);
+		}
+		if (array_key_exists(WebhookRules::FIELD, $settings) && is_array($settings[WebhookRules::FIELD])) {
+			$t->setWebhooksJson(WebhookRules::encode($settings[WebhookRules::FIELD]));
 			$this->tenants->update($t);
 		}
 		if (array_key_exists('entries_since', $settings)) {

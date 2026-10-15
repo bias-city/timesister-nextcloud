@@ -1,5 +1,45 @@
 # Changes
 
+## 0.20.0 – 2026-10-15 (beta)
+
+API unchanged in form (`api: 2`); new capabilities `e_invoice: 1` and
+`invoice_export: 1`. Plan: `PLAN-FAKTURA.md` (F3, F4), contract: `API.md`
+«E-invoices and exports, 0.20.0». New runtime library `horstoeko/zugferd`
+(MIT) with `jms/serializer`, `setasign/fpdi`, `setasign/fpdf` (MIT).
+
+- **Tax case:** `domestic`, `eu_reverse` or `export` from the countries of
+  issuer and customer and the customer's VAT id (`TaxRules`); the draft
+  may override it with `tax_case`. Frozen into `customer_json.tax_case`;
+  abroad the invoice carries VAT 0 and the note (reverse charge, export)
+  under the sums. `fixed.tax_case`.
+- **ZUGFeRD:** the stored PDF is now PDF/A-3 with `factur-x.xml` (CII,
+  profile EN 16931) inside; the chain line stays the PDF's subject and is
+  a note in the XML. Ledger `document` entries carry `kind: "zugferd"`
+  (before: `pdf`). The preview stays a plain PDF.
+- **XRechnung:** customers with `e_invoice: true` or a `leitweg_id` get
+  `<number>.xml` (profile XRechnung 3.0, Leitweg-ID as buyer reference)
+  next to the PDF; `GET /invoices/{key}/document?kind=xml`; ledger
+  `document` `kind: "xrechnung"`; `fixed.xml_path`, `xml_sha256`. The
+  customer record takes `e_invoice`, `leitweg_id` and `datev_account`.
+- **QR reference:** with a QR-IBAN the bill carries the 27-digit QRR
+  (`issuer.besr_id` + counter + year + check digit); `fixed.qr_reference`
+  and `counter_no`; the reference is in the issue payload. A QR-IBAN
+  renders the payment part now (0.19.0 left it out).
+- **Exports** (Team Admins): `GET /invoices/export?kind=csv|datev|ledger&from&to`
+  – the invoices of a period as CSV (UTF-8 BOM, `;`), as DATEV
+  Buchungsstapel (EXTF 700, Buchungsstapel 12) with the team setting
+  `datev`, the ledger as CSV. `POST /invoices/{key}/external` records a
+  hand-over to Bexio, Lexware or another system (ledger `exported`,
+  `fixed.external`).
+- **Webhooks:** team setting `webhooks` (≤ 10, https, events, secret);
+  every ledger entry of a listed event queues a delivery
+  (`ts_inv_webhook_queue`); the job `WebhookDelivery` (5 min) posts with
+  `X-TimeSister-Signature`, up to ten tries; `GET /invoices/webhooks/status`.
+- Tables: `ts_inv_invoices` + `counter_no`, `qr_reference`, `xml_path`,
+  `xml_sha256`, `external_json`; `ts_tenants` + `datev_json`,
+  `webhooks_json`; new `ts_inv_webhook_queue` (additive). Release archive
+  about 3.9 MB.
+
 ## 0.19.0 – 2026-10-15 (beta)
 
 API unchanged in form (`api: 2`); new capability `invoice_documents: 1`.

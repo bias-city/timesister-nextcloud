@@ -20,9 +20,11 @@ use OCP\Mail\IMailer;
 use Psr\Log\LoggerInterface;
 
 /**
- * Invoice documents (0.19.0): renders the PDF of an issued invoice, stores
- * it in the team's folder in the backup owner's files, appends the ledger
- * action `document` with the file's hash and keeps `document_state`;
+ * Invoice documents (0.19.0): renders the PDF of an issued invoice – since
+ * 0.20.0 as PDF/A-3 with the EN 16931 XML inside (ZUGFeRD), plus an
+ * XRechnung file when the customer wants one –, stores it in the team's
+ * folder in the backup owner's files, appends the ledger action `document`
+ * with the file's hash and keeps `document_state`;
  * serves the watermarked preview of a draft (never stored) and the stored
  * document; renders again on request and through the retry job; writes
  * the daily chain head file and mails it; checks the folders of the team
@@ -44,6 +46,7 @@ final class DocumentService {
 		private LedgerAppender $appender,
 		private InvoiceFixed $fixed,
 		private InvoicePdf $pdf,
+		private EInvoiceXml $einvoice,
 		private DocumentFolder $folders,
 		private IConfig $config,
 		private IMailer $mailer,
@@ -97,23 +100,36 @@ final class DocumentService {
 		try {
 			$owner = $this->team->backupOwner($t) ?? throw new \RuntimeException('The team has no backup owner; documents need one.');
 			$doc = $this->fromRow($t, $row);
-			$content = $this->pdf->render($doc);
+			// 0.20.0: the PDF becomes PDF/A-3 with the EN 16931 XML inside (ZUGFeRD); an XRechnung file beside it when wanted.
+			$content = $this->einvoice->embed($doc, $this->pdf->render($doc));
+			$xml = $doc->wantsXRechnung() ? $this->einvoice->xrechnung($doc) : null;
 			$settings = DocumentRules::settings($t->getDocumentsJson());
 			$folder = DocumentRules::invoiceFolder($settings, $t->getName(), $row->getIssuedOn());
 			$name = DocumentRules::fileName($row->getNumber());
 			$written = $this->folders->write($owner, $folder, $name, $content);
 			$sha = hash('sha256', $content);
+			$writtenXml = $xml === null ? null : $this->folders->write($owner, $folder, DocumentRules::fileName($row->getNumber(), DocumentRules::KIND_XML), $xml);
+			$shaXml = $xml === null ? null : hash('sha256', $xml);
 			$this->db->beginTransaction();
 			try {
 				$this->appender->append($t->getId(), $actor, DocumentRules::ACTION, $row->getId(), $row->getNumber(), LedgerRules::canonical([
-					'key' => $row->getRkey(), 'number' => $row->getNumber(), 'kind' => DocumentRules::KIND_PDF,
+					'key' => $row->getRkey(), 'number' => $row->getNumber(), 'kind' => DocumentRules::KIND_ZUGFERD,
 					'path' => $written['path'], 'size' => $written['size'], 'sha256' => $sha,
 				]), $now);
+				if ($writtenXml !== null) {
+					$this->appender->append($t->getId(), $actor, DocumentRules::ACTION, $row->getId(), $row->getNumber(), LedgerRules::canonical([
+						'key' => $row->getRkey(), 'number' => $row->getNumber(), 'kind' => DocumentRules::KIND_XRECHNUNG,
+						'path' => $writtenXml['path'], 'size' => $writtenXml['size'], 'sha256' => $shaXml,
+					]), $now);
+				}
 				$row->setDocumentState(InvInvoice::DOCUMENT_DONE);
 				$row->setDocumentError(null);
 				$row->setDocumentPath($written['path']);
 				$row->setDocumentSha256($sha);
 				$row->setPdfFileId($written['file_id']);
+				$row->setXmlPath($writtenXml['path'] ?? null);
+				$row->setXmlSha256($shaXml);
+				$row->setXmlFileId($writtenXml['file_id'] ?? null);
 				$row->setModifiedAt($now);
 				$this->invoices->update($row);
 				$this->db->commit();
@@ -193,6 +209,7 @@ final class DocumentService {
 			'net' => $r['sums']['net'], 'vat_amount' => $r['sums']['vat_amount'], 'gross' => $r['sums']['gross'],
 			'hours' => $r['hours'], 'hours_total' => IssueRules::totalHours($r['hours']),
 			'chain' => ['seq' => null, 'prev_hash' => null, 'hash' => null],
+			'customer_key' => $r['customerKey'], 'qr_reference' => null,
 		];
 		$doc = $this->build($t, $f, $r['settings']);
 		$doc->watermark = DocumentRules::watermark($doc->lang);
@@ -200,24 +217,29 @@ final class DocumentService {
 		return ['content' => $this->pdf->render($doc), 'name' => DocumentRules::fileName('preview-' . $key)];
 	}
 
-	/** `GET /invoices/{key}/document?kind=pdf` – the stored file. @return array{content:string,name:string} */
+	/** `GET /invoices/{key}/document?kind=pdf|xml` – the stored file. @return array{content:string,name:string,type:string} */
 	public function document(Membership $m, string $key, mixed $kind): array {
 		$t = $this->requireOn($m);
 		$this->requireReader($m, $key);
-		if ($kind !== null && $kind !== '' && $kind !== DocumentRules::KIND_PDF) {
-			throw ApiException::invalid('Only “pdf” documents exist so far.');
+		if ($kind === null || $kind === '') {
+			$kind = DocumentRules::KIND_PDF;
+		}
+		if ($kind !== DocumentRules::KIND_PDF && $kind !== DocumentRules::KIND_XML) {
+			throw ApiException::invalid('“kind” must be “pdf” or “xml”.');
 		}
 		$row = $this->invoices->findByKey($m->tenantId, $key) ?? throw ApiException::notFound('Nothing is fixed yet: this invoice is a draft.');
-		$path = $row->getDocumentPath();
+		$path = $kind === DocumentRules::KIND_XML ? $row->getXmlPath() : $row->getDocumentPath();
 		if ($row->getDocumentState() !== InvInvoice::DOCUMENT_DONE || $path === null) {
-			throw ApiException::notFound('The document is not rendered yet.');
+			throw $kind === DocumentRules::KIND_XML && $row->getDocumentState() === InvInvoice::DOCUMENT_DONE
+				? ApiException::notFound('This invoice has no XRechnung file (the customer asks for none).')
+				: ApiException::notFound('The document is not rendered yet.');
 		}
 		$owner = $this->team->backupOwner($t);
 		$file = $owner === null ? null : $this->folders->read($owner, $path);
 		if ($file === null) {
 			throw ApiException::notFound('The document is missing in the files; render it again.');
 		}
-		return ['content' => $file->getContent(), 'name' => DocumentRules::fileName($row->getNumber())];
+		return ['content' => $file->getContent(), 'name' => DocumentRules::fileName($row->getNumber(), $kind), 'type' => $kind === DocumentRules::KIND_XML ? 'application/xml' : 'application/pdf'];
 	}
 
 	/** `GET /invoices/chain/head` – Team Admins. @return array{seq:int,hash:?string,at:?string,entries:int} */
@@ -365,6 +387,16 @@ final class DocumentService {
 			];
 		}
 		$doc->iban = self::ibanFor($doc->issuer, $doc->currency);
+		// 0.20.0: the e-invoice's account, the tax case and the QR reference, the customer's key and Leitweg-ID.
+		$issuerObject = json_decode(json_encode($doc->issuer, Json::FLAGS), false);
+		$account = $issuerObject instanceof \stdClass ? IssueRules::accountOf($issuerObject, $doc->currency) : null;
+		$doc->accountIban = $account[0] ?? null;
+		$doc->accountBic = $account[1] ?? null;
+		$doc->taxCase = TaxRules::ofBlock($doc->customer);
+		$doc->qrReference = self::nullable($f['qr_reference'] ?? null);
+		$doc->customerKey = self::nullable($f['customer_key'] ?? null);
+		$doc->leitwegId = self::nullable($doc->customer['leitweg_id'] ?? null);
+		$doc->eInvoice = ($doc->customer['e_invoice'] ?? null) === true;
 		return $doc;
 	}
 

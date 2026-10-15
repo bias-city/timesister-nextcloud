@@ -162,7 +162,11 @@ final class IssueService {
 
 		// The team lock first: one issue at a time, the revision for the marks and the record.
 		$top = $this->tenants->bumpRevision($tid, 1 + count($bookings));
-		$number = $this->takeNumber($tid, $settings, $issuedOn, $projectKey, $customerKey, $now);
+		[$number, $counterNo] = $this->takeNumber($tid, $settings, $issuedOn, $projectKey, $customerKey, $now);
+		// 0.20.0: a QR-IBAN in the currency gets the QR reference from the BESR id, the counter and the year.
+		$account = IssueRules::accountOf($issuer, $currency);
+		$besr = $issuer->besr_id ?? null;
+		$qrReference = $account !== null && QrReferenceRules::isQrIban($account[0]) ? QrReferenceRules::reference(is_string($besr) ? $besr : null, $counterNo, $issuedOn) : null;
 
 		$row = new InvInvoice();
 		$row->setTenantId($tid);
@@ -190,6 +194,8 @@ final class IssueService {
 		$row->setIssuedOn($issuedOn);
 		$row->setIssuedBy($m->uid);
 		$row->setDueOn($dueOn);
+		$row->setCounterNo($counterNo);
+		$row->setQrReference($qrReference);
 		$row->setCreatedAt($now);
 		$row->setModifiedAt($now);
 		$row = $this->invoices->insert($row);
@@ -197,7 +203,7 @@ final class IssueService {
 			$this->insertHour($tid, $row->getId(), $h);
 		}
 
-		$payload = IssueRules::payload($key, $number, $issuedOn, $m->uid, $dueOn, $projectKey, (string)$d->budget, $customerKey, (string)$d->from, (string)$d->to, $currency, $vat, $sums, $issuer, $customerBlock, $positions, $hours, $row->getGreeting(), $row->getBody(), $row->getFooter(), null, null);
+		$payload = IssueRules::payload($key, $number, $issuedOn, $m->uid, $dueOn, $projectKey, (string)$d->budget, $customerKey, (string)$d->from, (string)$d->to, $currency, $vat, $sums, $issuer, $customerBlock, $positions, $hours, $row->getGreeting(), $row->getBody(), $row->getFooter(), null, null, $qrReference);
 		$entry = $this->append($tid, $m->uid, LedgerRules::ISSUED, $row->getId(), $number, LedgerRules::canonical($payload), $now);
 		$this->chain($row, $entry, $now);
 
@@ -222,8 +228,8 @@ final class IssueService {
 		return $record;
 	}
 
-	/** The next number of the team's counter, filled into its pattern; unique per team. */
-	private function takeNumber(int $tenantId, ?\stdClass $settings, string $issuedOn, string $project, ?string $customer, int $now): string {
+	/** The next number of the team's counter, filled into its pattern; unique per team. @return array{0:string,1:int} the number and the counter value */
+	private function takeNumber(int $tenantId, ?\stdClass $settings, string $issuedOn, string $project, ?string $customer, int $now): array {
 		$n = InvoiceNumbering::of($settings);
 		$year = (int)substr($issuedOn, 0, 4);
 		$no = $this->counters->takeWithin($tenantId, InvoiceNumbering::counter($n['per_year'], $year), $n['start'], $now);
@@ -231,7 +237,7 @@ final class IssueService {
 		if ($this->invoices->findByNumber($tenantId, $number) !== null) {
 			throw ApiException::conflict(Message::of('The number {number} is already taken; check the invoice number pattern.', ['number' => $number]));
 		}
-		return $number;
+		return [$number, $no];
 	}
 
 	/** @param array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string} $h */
@@ -370,7 +376,7 @@ final class IssueService {
 			}
 		}
 		$top = $this->tenants->bumpRevision($tid, 1 + ($kind === IssueRules::REVERSAL ? 1 + count($release) : 0));
-		$number = $this->takeNumber($tid, $settings, $issuedOn, $orig->getProject(), $orig->getCustomer(), $now);
+		[$number, $counterNo] = $this->takeNumber($tid, $settings, $issuedOn, $orig->getProject(), $orig->getCustomer(), $now);
 
 		$row = new InvInvoice();
 		$row->setTenantId($tid);
@@ -397,6 +403,8 @@ final class IssueService {
 		$row->setIssuedOn($issuedOn);
 		$row->setIssuedBy($m->uid);
 		$row->setDueOn($dueOn);
+		// No bill on a reversal or credit note: no QR reference.
+		$row->setCounterNo($counterNo);
 		if ($kind === IssueRules::REVERSAL) {
 			$row->setReverses($key);
 		} else {

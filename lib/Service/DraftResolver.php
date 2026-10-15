@@ -60,10 +60,13 @@ final class DraftResolver {
 		$customer = $this->live($tenantId, 'customer', $customerKey) ?? throw ApiException::invalid('The project’s customer does not exist.');
 		$settings = $this->live($tenantId, 'setting', 'settings');
 		$issuer = IssueRules::issuerOf($settings) ?? throw ApiException::invalid('The team has no invoice issuer; set “issuer” in the settings first.');
-		$vat = IssueRules::vatOf($d, $settings);
 		$bookings = IssueRules::bookingsOf($d);
 		$this->requireBillable($tenantId, $bookings);
 		$positions = IssueRules::positionsOf($d);
+		// 0.20.0: the tax case is frozen with the customer; abroad the document carries no VAT.
+		$issuerCountry = $issuer->country ?? null;
+		$customerBlock = IssueRules::customerBlock($customer, $d, is_string($issuerCountry) ? $issuerCountry : null);
+		$vat = TaxRules::rate((string)$customerBlock->{TaxRules::FIELD}, IssueRules::vatOf($d, $settings));
 		return [
 			'record' => $cur,
 			'd' => $d,
@@ -73,7 +76,7 @@ final class DraftResolver {
 			'currency' => $currency,
 			'customerKey' => $customerKey,
 			'customer' => $customer,
-			'customerBlock' => IssueRules::customerBlock($customer, $d),
+			'customerBlock' => $customerBlock,
 			'settings' => $settings,
 			'issuer' => $issuer,
 			'vat' => $vat,

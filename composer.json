@@ -15,7 +15,13 @@
 	},
 	"require": {
 		"php": ">=8.2",
+		"horstoeko/zugferd": "^1.0",
 		"sprain/swiss-qr-bill": "^5.3",
+		"symfony/finder": "^7.3",
+		"symfony/intl": "^7.3",
+		"symfony/process": "^7.3",
+		"symfony/validator": "^7.3",
+		"symfony/yaml": "^7.3",
 		"tecnickcom/tcpdf": "^6.10"
 	},
 	"require-dev": {

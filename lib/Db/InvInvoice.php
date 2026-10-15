@@ -92,6 +92,16 @@ use OCP\DB\Types;
  * @method void setDocumentSha256(?string $documentSha256)
  * @method int getDocumentTries()
  * @method void setDocumentTries(int $documentTries)
+ * @method int|null getCounterNo()
+ * @method void setCounterNo(?int $counterNo)
+ * @method string|null getQrReference()
+ * @method void setQrReference(?string $qrReference)
+ * @method string|null getXmlPath()
+ * @method void setXmlPath(?string $xmlPath)
+ * @method string|null getXmlSha256()
+ * @method void setXmlSha256(?string $xmlSha256)
+ * @method string|null getExternalJson()
+ * @method void setExternalJson(?string $externalJson)
  * @method int getCreatedAt()
  * @method void setCreatedAt(int $createdAt)
  * @method int getModifiedAt()
@@ -146,6 +156,12 @@ final class InvInvoice extends Entity {
 	protected ?string $documentPath = null;
 	protected ?string $documentSha256 = null;
 	protected int $documentTries = 0;
+	// 0.20.0: the counter number taken at issue, the QR reference, the XRechnung file, the hand-over to an accounting system.
+	protected ?int $counterNo = null;
+	protected ?string $qrReference = null;
+	protected ?string $xmlPath = null;
+	protected ?string $xmlSha256 = null;
+	protected ?string $externalJson = null;
 	protected int $createdAt = 0;
 	protected int $modifiedAt = 0;
 
@@ -189,6 +205,11 @@ final class InvInvoice extends Entity {
 		$this->addType('documentPath', Types::STRING);
 		$this->addType('documentSha256', Types::STRING);
 		$this->addType('documentTries', Types::SMALLINT);
+		$this->addType('counterNo', Types::INTEGER);
+		$this->addType('qrReference', Types::STRING);
+		$this->addType('xmlPath', Types::STRING);
+		$this->addType('xmlSha256', Types::STRING);
+		$this->addType('externalJson', Types::STRING);
 		$this->addType('createdAt', Types::INTEGER);
 		$this->addType('modifiedAt', Types::INTEGER);
 	}

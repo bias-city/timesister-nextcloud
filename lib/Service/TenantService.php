@@ -196,7 +196,7 @@ final class TenantService {
 		return $out;
 	}
 
-	/** @return array{id:int,name:string,slug:string,groups:array{team:?string},backup_owner:?string,settings:array{backup_required:bool,entries_since:?string,invoicing:bool,documents:array{invoices:?string,quotes:?string,per_year:bool,chain_mail:?string}}} */
+	/** @return array{id:int,name:string,slug:string,groups:array{team:?string},backup_owner:?string,settings:array{backup_required:bool,entries_since:?string,invoicing:bool,documents:array{invoices:?string,quotes:?string,per_year:bool,chain_mail:?string},datev:array<string,string|int|null>,webhooks:list<array{url:string,events:list<string>,secret_set:bool}>}} */
 	public function presentTeam(Tenant $t): array {
 		return [
 			'id' => $t->getId(),
@@ -208,7 +208,7 @@ final class TenantService {
 		];
 	}
 
-	/** @return array{backup_required:bool,entries_since:?string,invoicing:bool,documents:array{invoices:?string,quotes:?string,per_year:bool,chain_mail:?string}} */
+	/** @return array{backup_required:bool,entries_since:?string,invoicing:bool,documents:array{invoices:?string,quotes:?string,per_year:bool,chain_mail:?string},datev:array<string,string|int|null>,webhooks:list<array{url:string,events:list<string>,secret_set:bool}>} */
 	public static function settingsOf(Tenant $t): array {
 		return [
 			'backup_required' => $t->getBackupRequired() === 1,
@@ -218,6 +218,9 @@ final class TenantService {
 			'invoicing' => $t->invoicingOn(),
 			// The document folders (0.19.0); null means the default.
 			'documents' => DocumentRules::settings($t->getDocumentsJson()),
+			// The DATEV accounts and the webhooks (0.20.0); a secret is never shown.
+			'datev' => ExportRules::datev($t->getDatevJson()),
+			'webhooks' => WebhookRules::present(WebhookRules::hooks($t->getWebhooksJson())),
 		];
 	}
 }

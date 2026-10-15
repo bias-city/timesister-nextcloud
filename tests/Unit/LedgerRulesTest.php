@@ -158,7 +158,8 @@ class LedgerRulesTest extends TestCase {
 
 		$customer = (object)['id' => 'kanton', 'name' => 'Kanton', 'street' => 'Platz 1', 'city' => 'Basel', 'country' => 'CH', 'vat_id' => 'CHE-1', 'note' => 'secret', 'contacts' => [(object)['id' => 'c1', 'name' => 'Lea']]];
 		$block = IssueRules::customerBlock($customer, (object)['contact' => 'c1']);
-		$this->assertSame(['id', 'name', 'street', 'city', 'country', 'vat_id', 'contact'], array_keys(get_object_vars($block)), 'address fields, no note');
+		$this->assertSame(['id', 'name', 'street', 'city', 'country', 'vat_id', 'tax_case', 'contact'], array_keys(get_object_vars($block)), 'address fields and the tax case, no note');
+		$this->assertSame('domestic', $block->tax_case, 'no issuer country: domestic');
 		$this->assertSame('Lea', $block->contact->name, 'the contact the draft names');
 		$this->assertSame('Herr X', IssueRules::customerBlock($customer, (object)['contact' => 'Herr X'])->contact, 'free text when no contact matches');
 		$this->assertFalse(property_exists(IssueRules::customerBlock($customer, (object)[]), 'contact'));

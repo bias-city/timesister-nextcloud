@@ -13,4 +13,8 @@
 			<directory>tests/Unit</directory>
 		</testsuite>
 	</testsuites>
+	<php>
+		<!-- The e-invoice tests (0.20.0) keep the serializer's metadata; the backup size test allocates 28 MB on top. -->
+		<ini name="memory_limit" value="512M"/>
+	</php>
 </phpunit>

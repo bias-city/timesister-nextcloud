@@ -72,12 +72,13 @@ final class TeamRules {
 	 * Team settings from the body. If `settings` or a key is missing, the
 	 * value stays. Unknown keys, a non-boolean value or a malformed date:
 	 * 422. `documents` (0.19.0) is an object, checked by DocumentRules and
-	 * merged over the stored one.
+	 * merged over the stored one; `datev` and `webhooks` (0.20.0) likewise
+	 * by ExportRules and WebhookRules.
 	 *
 	 * @param array<string,mixed> $in
 	 * @return array<string,mixed>
 	 */
-	public static function settings(array $in, ?string $documentsJson = null): array {
+	public static function settings(array $in, ?string $documentsJson = null, ?string $webhooksJson = null): array {
 		$s = $in['settings'] ?? null;
 		if ($s === null) {
 			return [];
@@ -93,6 +94,15 @@ final class TeamRules {
 			}
 			if ($key === DocumentRules::FIELD) {
 				$out[$key] = DocumentRules::validate($value, DocumentRules::settings($documentsJson));
+				continue;
+			}
+			// 0.20.0: the DATEV accounts (the object replaces the stored one) and the webhooks (the list replaces it, secrets kept per address).
+			if ($key === ExportRules::FIELD) {
+				$out[$key] = ExportRules::validateDatev($value);
+				continue;
+			}
+			if ($key === WebhookRules::FIELD) {
+				$out[$key] = WebhookRules::validate($value, WebhookRules::hooks($webhooksJson));
 				continue;
 			}
 			if (!is_string($key) || !array_key_exists($key, self::SETTINGS)) {

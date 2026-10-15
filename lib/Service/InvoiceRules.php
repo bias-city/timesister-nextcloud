@@ -111,6 +111,8 @@ final class InvoiceRules {
 		if (($d->positions ?? null) !== null) {
 			self::checkPositions($d->positions);
 		}
+		// 0.20.0: the draft may override the tax case.
+		TaxRules::checkOverride($d->{TaxRules::FIELD} ?? null);
 		self::bookings($d->bookings ?? null);
 	}
 

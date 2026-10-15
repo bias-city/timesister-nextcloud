@@ -13,7 +13,8 @@ use OCA\TimeSister\Db\InvInvoice;
 /**
  * The frozen content of an issued invoice as `GET /invoices/{key}/fixed`
  * hands it out and the team ZIP stores it; since 0.19.0 with the
- * document's state, error, path and hash.
+ * document's state, error, path and hash; since 0.20.0 with the tax case,
+ * the QR reference, the XRechnung file and the hand-over.
  */
 final class InvoiceFixed {
 	public function __construct(
@@ -24,6 +25,8 @@ final class InvoiceFixed {
 	/** @return array<string,mixed> */
 	public function of(InvInvoice $row): array {
 		$positions = json_decode((string)$row->getPositionsJson(), false);
+		$customer = InvoiceRules::decode($row->getCustomerJson());
+		$external = $row->getExternalJson() === null ? null : InvoiceRules::decode($row->getExternalJson());
 		return [
 			'key' => $row->getRkey(),
 			'number' => $row->getNumber(),
@@ -44,7 +47,7 @@ final class InvoiceFixed {
 			'gross' => (float)$row->getGross(),
 			'hours_total' => (float)$row->getHours(),
 			'issuer' => InvoiceRules::decode($row->getIssuerJson()),
-			'customer' => InvoiceRules::decode($row->getCustomerJson()),
+			'customer' => $customer,
 			'positions' => is_array($positions) ? $positions : [],
 			'hours' => array_map(static fn (InvHour $h): array => $h->present(), $this->hours->findByInvoice($row->getTenantId(), $row->getId())),
 			'greeting' => $row->getGreeting(),
@@ -58,6 +61,13 @@ final class InvoiceFixed {
 			'document_error' => $row->getDocumentError(),
 			'document_path' => $row->getDocumentPath(),
 			'document_sha256' => $row->getDocumentSha256(),
+			// 0.20.0: the tax case, the QR reference, the counter, the XRechnung file, the hand-over.
+			'tax_case' => TaxRules::ofBlock($customer === null ? [] : get_object_vars($customer)),
+			'qr_reference' => $row->getQrReference(),
+			'counter_no' => $row->getCounterNo(),
+			'xml_path' => $row->getXmlPath(),
+			'xml_sha256' => $row->getXmlSha256(),
+			'external' => $external,
 		];
 	}
 }

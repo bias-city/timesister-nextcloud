@@ -11,13 +11,14 @@ use OCA\TimeSister\Db\InvLedgerMapper;
 
 /**
  * Appends to a team's invoice ledger: the next `seq`, the previous entry's
- * hash and the entry hash (LedgerRules). Shared by issuing (0.18.0) and
- * the documents (0.19.0); the callers hold the transaction and the team
- * lock.
+ * hash and the entry hash (LedgerRules), then queues the webhooks
+ * (0.20.0). Shared by issuing (0.18.0), the documents (0.19.0) and the
+ * exports; the callers hold the transaction and the team lock.
  */
 final class LedgerAppender {
 	public function __construct(
 		private InvLedgerMapper $ledger,
+		private WebhookService $webhooks,
 	) {
 	}
 
@@ -39,6 +40,9 @@ final class LedgerAppender {
 		$e->setPayloadHash($payloadHash);
 		$e->setPrevHash($prev);
 		$e->setHash(LedgerRules::entryHash($seq, $at, $actor, $action, $number, $payloadHash, $prev));
-		return $this->ledger->insert($e);
+		$e = $this->ledger->insert($e);
+		// 0.20.0: the webhooks listening to this event get a queue row (never throws).
+		$this->webhooks->enqueue($tenantId, $e, $now);
+		return $e;
 	}
 }

@@ -28,6 +28,8 @@ class IssuerRulesTest extends TestCase {
 			. '"accounts":[{"currency":"CHF","iban":"CH9300762011623852957","bic":""},{"currency":"EUR","iban":"DE89370400440532013000","bic":"COBADEFFXXX"}]}'));
 		$this->assertSame('422 “issuer” must be an object.', self::check('"x"'));
 		$this->assertSame('422 “issuer.qr” must be true or false.', self::check('{"qr":"ja"}'));
+		$this->assertSame('ok', self::check('{"besr_id":"123456"}'), 'the BESR id of a QR-IBAN (0.20.0)');
+		$this->assertSame('422 “issuer.besr_id” must be 6 digits.', self::check('{"besr_id":"12345"}'));
 		$this->assertSame('422 “issuer.country” must be text of at most 2 characters.', self::check('{"country":"Schweiz"}'));
 		$this->assertSame('422 “issuer.foreign_note” must be text of at most 500 characters.', self::check('{"foreign_note":"' . str_repeat('x', 501) . '"}'));
 		$this->assertSame('422 One account per currency.', self::check('{"accounts":[{"currency":"CHF","iban":"CH9300762011623852957"},{"currency":"chf","iban":"CH9300762011623852957"}]}'));

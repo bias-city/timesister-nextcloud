@@ -46,7 +46,12 @@ use OCP\Capabilities\ICapability;
  * `invoicing`. `invoice_documents: 1` since 0.19.0: the server renders the
  * PDF with the Swiss QR bill, stores it in the team's folder (team setting
  * `documents`), hashes it into the ledger, serves a watermarked preview
- * and writes the daily chain head file.
+ * and writes the daily chain head file. `e_invoice: 1` since 0.20.0: the
+ * stored PDF is PDF/A-3 with the EN 16931 XML inside (ZUGFeRD), an
+ * XRechnung file for customers who ask for it, the tax case, the QR
+ * reference with a QR-IBAN. `invoice_export: 1` since 0.20.0: CSV, DATEV
+ * Buchungsstapel and ledger exports, the hand-over to an accounting
+ * system and webhooks.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -54,7 +59,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int}} */
+	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -76,6 +81,8 @@ final class Capabilities implements ICapability {
 				'entries' => 1,
 				'invoicing' => 1,
 				'invoice_documents' => 1,
+				'e_invoice' => 1,
+				'invoice_export' => 1,
 			],
 		];
 	}

@@ -213,11 +213,17 @@ final class InvoicePdf {
 		$pdf->SetFont(InvoicePage::FONT, '', 9);
 		$pdf->Cell($label, self::LINE, $t['net'], 'T', 0, 'R');
 		$pdf->Cell(self::COLS[3], self::LINE, DocumentRules::money($d->net, $d->lang), 'T', 1, 'R');
-		$pdf->Cell($label, self::LINE, $t['vat'] . ' ' . rtrim(rtrim(number_format($d->vat, 2, '.', ''), '0'), '.') . ' %', 0, 0, 'R');
+		$pdf->Cell($label, self::LINE, $t['vat'] . ' ' . rtrim(rtrim(number_format($d->vatRate(), 2, '.', ''), '0'), '.') . ' %', 0, 0, 'R');
 		$pdf->Cell(self::COLS[3], self::LINE, DocumentRules::money($d->vatAmount, $d->lang), 0, 1, 'R');
 		$pdf->SetFont(InvoicePage::FONT, 'B', 10);
 		$pdf->Cell($label, 6, $t['gross'] . ' ' . $d->currency, 'T', 0, 'R');
 		$pdf->Cell(self::COLS[3], 6, DocumentRules::money($d->gross, $d->lang), 'T', 1, 'R');
+		// Reverse charge and export (0.20.0): the note under the sums.
+		$note = $d->taxNote();
+		if ($note !== null) {
+			$pdf->SetFont(InvoicePage::FONT, '', 8);
+			$pdf->Cell(0, self::SMALL, $note, 0, 1, 'R');
+		}
 		$pdf->SetFont(InvoicePage::FONT, '', 10);
 	}
 
@@ -261,7 +267,7 @@ final class InvoicePdf {
 	/**
 	 * The Swiss QR bill on the last page (Swiss Payment Standards):
 	 * creditor = issuer, debtor = customer when the address is complete,
-	 * amount = gross, no reference. When the data fails the standard's
+	 * amount = gross, the QR reference with a QR-IBAN. When the data fails the standard's
 	 * checks (e.g. a QR-IBAN without reference), the page is left out.
 	 *
 	 * @param array<string,string> $t
@@ -296,7 +302,10 @@ final class InvoicePdf {
 				$bill->setUltimateDebtor($debtor);
 			}
 			$bill->setPaymentAmountInformation(PaymentAmountInformation::create($d->currency, round($d->gross, 2)));
-			$bill->setPaymentReference(PaymentReference::create(PaymentReference::TYPE_NON));
+			// A QR-IBAN carries the QR reference (0.20.0); a plain IBAN none.
+			$bill->setPaymentReference($d->qrReference !== null && QrReferenceRules::isQrIban($d->iban)
+				? PaymentReference::create(PaymentReference::TYPE_QR, $d->qrReference)
+				: PaymentReference::create(PaymentReference::TYPE_NON));
 			$bill->setAdditionalInformation(AdditionalInformation::create(mb_substr($d->title(), 0, 140)));
 			return $bill->getViolations()->count() === 0 ? $bill : null;
 		} catch (\Throwable) {

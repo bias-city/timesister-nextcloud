@@ -90,6 +90,10 @@ final class RecordValidator {
 			if ($kind === 'project') {
 				ProjectRules::validate($data);
 			}
+			// E-invoice and DATEV fields of a customer (0.20.0).
+			if ($kind === 'customer') {
+				CustomerRules::validate($data);
+			}
 		} elseif ($kind === self::BILLING) {
 			BillingRules::validate($key, $data);
 		} elseif (BookingRules::isKind($kind)) {

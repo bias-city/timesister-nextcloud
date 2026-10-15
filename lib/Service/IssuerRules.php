@@ -9,9 +9,9 @@ namespace OCA\TimeSister\Service;
 /**
  * The invoice issuer (0.16.0): `issuer` in `setting/settings` - who issues
  * the team's invoices: name, address, contact, VAT ID, the note on invoices
- * abroad (VAT-free), one account per currency and whether invoices carry a
- * QR code (the client picks Swiss QR for CHF and the EPC GiroCode for EUR).
- * Pure: the shape only.
+ * abroad (VAT-free), one account per currency, whether invoices carry a
+ * QR code (the client picks Swiss QR for CHF and the EPC GiroCode for EUR)
+ * and, since 0.20.0, the BESR id for the QR reference. Pure: the shape only.
  */
 final class IssuerRules {
 	public const FIELD = 'issuer';
@@ -37,6 +37,8 @@ final class IssuerRules {
 		if ($qr !== null && !is_bool($qr)) {
 			throw ApiException::notBool(self::FIELD . '.qr');
 		}
+		// The BESR id of a QR-IBAN (0.20.0): the first six digits of the QR reference.
+		QrReferenceRules::checkBesrId($v->besr_id ?? null);
 		$accounts = $v->accounts ?? null;
 		if ($accounts === null) {
 			return;

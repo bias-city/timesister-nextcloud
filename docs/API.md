@@ -2943,3 +2943,227 @@ rely on it:
   `document_sha256` STRING(64), `document_tries` SMALLINT;
   `ts_tenants.documents_json` TEXT. Nothing in Files is ever deleted by the
   app.
+
+## E-invoices and exports, 0.20.0 (2026-10-15) – ZUGFeRD, XRechnung, QRR, DATEV, webhooks
+
+Third and fourth step of `PLAN-FAKTURA.md`. Capabilities `e_invoice: 1`
+and `invoice_export: 1`.
+
+### Tax case
+
+Frozen at issue into `customer_json.tax_case` and used by every document:
+
+| `tax_case` | When | VAT on the document | Code (EN 16931) |
+|---|---|---|---|
+| `domestic` | issuer and customer in the same country | the invoice's `vat` | `S` (or `Z` when `vat` = 0) |
+| `eu_reverse` | both in the EU, different countries, customer has a `vat_id` | 0, note “Reverse charge” | `AE` |
+| `export` | customer outside the issuer's country and not EU-reverse | 0, note “Export, not subject to VAT” | `G` (outside EU) / `E` |
+
+Countries: `issuer.country` and `customer.country` (ISO 3166-1 alpha-2);
+missing customer country counts as domestic. The draft may override with
+`tax_case` (one of the three) for the odd case; `422` otherwise.
+`fixed` returns `tax_case`.
+
+### Documents
+
+- **ZUGFeRD**: the stored PDF becomes **PDF/A-3** with the embedded
+  `factur-x.xml` (profile EN 16931) through `horstoeko/zugferd`
+  (`ZugferdDocumentPdfBuilder` on the TCPDF output). The chain line stays
+  in the footer and in the XML as a note (`IncludedNote`, subject code
+  `ACY`? – use a plain note “Beleg … Kette …”). Issued invoices get it
+  always; the preview stays a plain PDF with the watermark.
+- **XRechnung**: `<number>.xml` (CII, profile XRechnung 3.0) stored next
+  to the PDF when the customer has `e_invoice: true` or a `leitweg_id`
+  (German public customers; `customer_json.leitweg_id` → `BuyerReference`).
+  `GET /invoices/{key}/document?kind=xml` serves it; `404` when none.
+  Both files get their own ledger `document` entries (`kind: "zugferd"`,
+  `kind: "xrechnung"`); `document_state` covers both.
+- **Validation**: the integration test runs the KoSIT validator when
+  `java` and `TS_KOSIT=<path to validationtool jar + scenarios>` are
+  present; otherwise it checks structure (root element, profile id,
+  totals) and says it skipped KoSIT. The app itself never calls anything
+  outside.
+- **QRR reference**: with a QR-IBAN (IID 30000–31999) the QR bill now
+  carries a 27-digit QR reference: team setting `issuer.besr_id`
+  (6 digits, optional) + the invoice's counter number zero-padded + the
+  year, padded to 26 digits, plus the modulo-10 recursive check digit;
+  the reference is frozen in `fixed.qr_reference` and printed on the
+  bill. Without `besr_id` the invoice counter and year alone form the
+  reference. Reversal and credit note: no bill (as before).
+
+### Exports
+
+| Method | Path | Who | Answer |
+|---|---|---|---|
+| GET | `/invoices/export?kind=csv&from=YYYY-MM-DD&to=YYYY-MM-DD` | Team Admins | `text/csv; charset=utf-8` with BOM, `;` separated: one row per issued/cancelled/paid invoice in the period (by `issued_on`): number, status, issued_on, due_on, paid_on, customer name, customer vat_id, project, budget, currency, net, vat rate, vat amount, gross, tax_case, reverses, document sha256, chain seq, chain hash |
+| GET | `/invoices/export?kind=datev&from&to` | Team Admins | DATEV **Buchungsstapel** (EXTF, format version 700, UTF-8 with BOM, `;`): header lines per DATEV spec, then one row per invoice: Umsatz (gross), Soll/Haben (`S` for invoices, `H` for reversals and credits), Konto = debtor account (`customer.datev_account`, else team setting `datev.debtor_account`), Gegenkonto = revenue account by tax case (`datev.revenue_domestic`, `datev.revenue_eu`, `datev.revenue_export`), BU-Schlüssel from the tax case, Belegdatum (DDMM), Belegfeld 1 = number, Buchungstext = customer name + project; `422` when the team's `datev` setting lacks the accounts |
+| GET | `/invoices/export?kind=ledger&from&to` | Team Admins | the ledger as CSV (seq, at, actor, action, number, payload_hash, prev_hash, hash) |
+| POST | `/invoices/{key}/external` | Team Admins | `{ "system": "bexio"\|"lexware"\|"other", "id": ≤128, "url"?: https }` – records a hand-over to an accounting system: ledger `exported`, `fixed.external` |
+
+Team setting `datev` (`PUT /team/settings`, `/admin/teams`):
+`{ "consultant": digits ≤ 7, "client": digits ≤ 5, "fiscal_year_start": "MM-DD", "account_length": 4–8, "debtor_account": digits, "revenue_domestic": digits, "revenue_eu": digits, "revenue_export": digits }`.
+Customer record: optional `datev_account` (digits), `e_invoice` (bool),
+`leitweg_id` (≤ 46).
+
+### Webhooks
+
+Team setting `webhooks`: a list of at most 10
+`{ "url": "https://…", "events": ["issued","paid","reversed","document","exported"], "secret": ≤ 128 }`.
+Only `https`. After each ledger entry of a listed event the job
+`WebhookDelivery` (every 5 minutes, and at once after the entry when
+possible) sends `POST url` with JSON
+`{ "team", "event", "at", "invoice": { key, number, status, gross, currency }, "ledger": { seq, hash } }`
+and header `X-TimeSister-Signature: sha256=<HMAC-SHA256(secret, body)>`;
+retries up to 10 times with growing delay; failures in
+`GET /invoices/webhooks/status` (Team Admins). Delivery never blocks
+issuing.
+
+### Capabilities
+
+```json
+"timesister": { …, "e_invoice": 1, "invoice_export": 1 }
+```
+
+### As built, 0.20.0 (2026-10-15)
+
+What the server does beyond or beside the lines above, so the Mac app can
+rely on it:
+
+- **Tax case:** `TaxRules::of(issuer.country, customer.country, customer.vat_id, draft.tax_case)`.
+  No issuer country, no customer country or the same country: `domestic`.
+  Both in the EU, different, and a non-blank `vat_id`: `eu_reverse`. Else
+  `export`. The draft's `tax_case` (checked on every record write, `422`
+  otherwise) wins. Frozen at issue into `customer_json.tax_case`; the
+  frozen `vat` is then **0** for `eu_reverse` and `export` (and so are
+  `vat_amount` and the ledger payload's `vat`), the invoice's own rate at
+  home. The customer block also freezes `leitweg_id`, `datev_account` and
+  `e_invoice` (only when true). `fixed` adds `tax_case`, `qr_reference`,
+  `counter_no`, `xml_path`, `xml_sha256`, `external`. The PDF prints the
+  rate of the case (0 % abroad) and, for `eu_reverse`/`export`, a note
+  under the sums (`Steuerschuldnerschaft des Leistungsempfängers (Reverse
+  Charge).` / `Export, nicht der Mehrwertsteuer unterstellt.`; English
+  likewise). Category codes: `S` (`Z` at 0 %), `AE` (exemption code
+  `VATEX-EU-AE`), `G` outside the EU (`VATEX-EU-G`), `E` for an EU customer
+  without reverse charge. Invoices from before 0.20.0 count as `domestic`.
+- **ZUGFeRD:** every stored PDF (issue, reversal, credit note, render
+  again) is PDF/A-3 with `factur-x.xml` (CII, `urn:cen.eu:en16931:2017`)
+  attached through `horstoeko/zugferd` (FPDI rewrites the TCPDF output; the
+  XMP keeps the chain line as subject, the title as title, keywords
+  `TimeSister, FacturX/ZUGFeRD`). The XML: type `380`, a reversal or credit
+  note `384` with the original's number as `InvoiceReferencedDocument` and
+  the frozen (negative) amounts; seller with VAT id, contact (name, phone,
+  e-mail) and electronic address `EM` when the issuer has an e-mail;
+  buyer with `id`, VAT id, e-mail and contact; the billing period; one
+  line per position – hours as quantity `HUR` × rate, everything else one
+  piece `C62` at the amount, a negative amount as a negative quantity
+  (prices are never negative), a text line at 0; one tax breakdown; a
+  credit transfer to the issuer's account in the currency (SEPA `58`,
+  remittance = QR reference or number), else payment means `30`; the due
+  date as the payment term; the chain line as a document note. Totals:
+  line total = tax basis = `net`, tax = `vat_amount`, grand = due =
+  `gross`. Ledger `document` entries carry `kind: "zugferd"` (0.19.0 wrote
+  `pdf`); `document_sha256` is the hash of the final file. The library
+  validates nothing at runtime; a failure of the XML (odd data) leaves the
+  document `failed` with the error, like a PDF failure. The preview stays
+  a plain PDF with the watermark and no XML.
+- **XRechnung:** when the frozen customer has `e_invoice: true` or a
+  `leitweg_id`, `<number>.xml` (profile
+  `urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0`)
+  is written beside the PDF in the same folder and gets its own ledger
+  `document` entry (`kind: "xrechnung"`, path, size, sha256) in the same
+  transaction. `BuyerReference` = `leitweg_id`, else the customer's key.
+  `GET /invoices/{key}/document?kind=xml` answers `application/xml` with
+  `Content-Disposition: attachment; filename="<number>.xml"`; `404` when
+  the customer wants none (“This invoice has no XRechnung file”), while
+  the document is not `done`, or when the file is gone. `kind` other than
+  `pdf`/`xml`: `422`. The app never calls the KoSIT validator; the
+  integration test does when `java` and `TS_KOSIT` are present and says
+  so when it skips. Not built: the buyer's electronic address is the
+  customer's `email` (XRechnung wants one; without an e-mail the file is
+  written anyway and a validator will flag BR-DE-… rules).
+- **QR reference:** only with a QR-IBAN (CH/LI, IID 30000–31999) in the
+  invoice's currency: `<besr_id or nothing><counter zero-padded><year>`
+  on 26 digits – the year is the issue year, the counter is the team's
+  invoice counter value taken at issue (`counter_no`, also stored for
+  reversals and credit notes) – plus the modulo 10 recursive check digit.
+  Example: BESR id `123456`, counter 7, 2026 →
+  `12345600000000000000072026` + check digit. `issuer.besr_id` (6 digits)
+  is checked when the settings record is written. The reference is in the
+  issue payload (`qr_reference`, null without QR-IBAN; reversal and credit
+  note: null) and in the XML's remittance information; the bill shows it
+  in blocks of five from the right. The payment part follows the standard's
+  checks as in 0.19.0 (complete issuer address, positive gross).
+- **Exports:** `kind` is required (`422` otherwise); `from`/`to` are
+  optional days (missing: unbounded), `422` when malformed. Rows are
+  every frozen invoice with `issued_on` in the period (reversals and
+  credit notes are rows too, with their own number), by issue date and
+  number. Files: `invoices-<from|start>-<to|end>.csv`,
+  `datev-…csv`, `ledger-…csv`, `text/csv; charset=utf-8`, UTF-8 BOM, `;`,
+  CRLF, fields quoted only when needed, amounts with a point and two
+  decimals (`1972.83`), `vat_rate` likewise (`8.10`), `reverses` = the
+  number of the reversed invoice. The ledger CSV filters by the entry's
+  `at` day. **DATEV:** header `EXTF;700;21;Buchungsstapel;12;<created
+  YYYYMMDDHHMMSS000>;;TS;<uid>;;<consultant>;<client>;<fiscal year
+  start YYYYMMDD>;<account_length or 4>;<from>;<to>;TimeSister
+  Rechnungen;;1;0;0;<currency of the first row>;…` (31 fields; the
+  fiscal year start is the one at or before `from`), then the column line
+  `Umsatz (ohne Soll/Haben-Kz);Soll/Haben-Kennzeichen;WKZ Umsatz;Kurs;Basis-Umsatz;WKZ Basis-Umsatz;Konto;Gegenkonto (ohne BU-Schlüssel);BU-Schlüssel;Belegdatum;Belegfeld 1;Belegfeld 2;Skonto;Buchungstext`
+  (the first 14 fields of the format; DATEV takes the rest as empty), then
+  one row per invoice: `|gross|` with a decimal comma, `S` for an invoice
+  and `H` for a reversal, a credit note or a negative gross, the
+  currency, Konto = `customer.datev_account` (digits) else
+  `datev.debtor_account`, Gegenkonto = `revenue_domestic`/`revenue_eu`/
+  `revenue_export` by tax case, BU-Schlüssel = `datev.bu_domestic`/
+  `bu_eu`/`bu_export` (optional, empty by default – automatic accounts
+  take none), Belegdatum `DDMM`, Belegfeld 1 = the number (36 characters
+  of `A–Z a–z 0–9 $ & % * + - /`, others become `-`), Buchungstext =
+  customer name and project name (60 characters). `422` names the missing
+  account. The team setting `datev` is an object that replaces the stored
+  one (`null` or a missing key clears a field): `consultant` ≤ 7 digits,
+  `client` ≤ 5, `fiscal_year_start` `MM-DD`, `account_length` 4–8,
+  `debtor_account`, `revenue_*` ≤ 9 digits, `bu_*` ≤ 4 digits; shown in
+  `settings.datev` of `/me`, `/team`, `/admin/teams`, writable by Team
+  Admins (`PUT /team/settings`) and Nextcloud admins (`/admin/teams`).
+  **External:** `POST /invoices/{key}/external` takes
+  `{ system: bexio|lexware|other, id: text ≤ 128 (a number is taken as
+  text), url?: https ≤ 512 }`, appends ledger `exported` with payload
+  `{ key, number, system, id, url }`, stores
+  `external: { system, id, url, at, by }` (the latest hand-over) and
+  answers `fixed` plus `ledger: { seq, prev_hash, hash }`; `404` for a
+  draft, `403` for a Lead. Every endpoint of this section answers `404`
+  when `invoicing` is off.
+- **Webhooks:** the setting is a list that replaces the stored one (`null`
+  or `[]` clears it); a hook sent without `secret` keeps the stored
+  secret of the same address; the API shows hooks as
+  `{ url, events, secret_set }` – a secret is never returned. Ledger
+  action → event: `issued`, `reversal`, `credit` → `issued`; `cancelled`
+  → `reversed`; `paid`, `unpaid` → `paid`; `document` → `document`;
+  `exported` → `exported`. The queue row is written inside the ledger's
+  transaction (a failure there is logged, never thrown); the body is
+  `{ team: <slug>, event, at, invoice: { key, number, status, gross, currency }, ledger: { seq, hash, action } }`
+  and is sent as stored. Delivery runs **only in the job**
+  `WebhookDelivery` (every 5 minutes, up to 100 rows per run; nothing is
+  posted inside the request – a 10-second timeout per hook would hold the
+  issue): `POST` with `Content-Type: application/json`, `User-Agent:
+  TimeSister` and `X-TimeSister-Signature: sha256=<hex HMAC-SHA256>` when
+  the hook has a secret (no header without one); 2xx = delivered; otherwise
+  `tries` + 1, `last_error` (`HTTP <status>` or the client's message) and
+  the next try after 1, 2, 4, 8 … minutes (at most a day), ten tries in
+  all; a hook removed from the setting meanwhile fails at once. Nextcloud's
+  HTTP client applies (no local addresses, proxy settings).
+  `GET /invoices/webhooks/status` answers
+  `{ hooks: [ { url, events, secret_set, pending, delivered, failed, last_error, last_delivered_at, last_at } ] }`
+  over the last 2000 queue rows of the team (also for addresses no longer
+  configured). Deleting a team removes its queue (`counts.webhooks`).
+- **Stored** (`Version1015Date20261015210000`, additive):
+  `ts_inv_invoices` + `counter_no` INT, `qr_reference` STRING(27),
+  `xml_path` STRING(512), `xml_sha256` STRING(64), `external_json` TEXT;
+  `ts_tenants` + `datev_json`, `webhooks_json` TEXT; new
+  `ts_inv_webhook_queue` (tenant_id, ledger_seq, url, event, body, tries,
+  next_at, last_error, delivered_at, created_at). `xml_file_id` (0.18.0)
+  is filled now.
+- **Not built / open:** no inline delivery of webhooks; the PDF/A-3 file
+  embeds the DejaVu subset but the QR bill's labels use TCPDF's core font
+  Helvetica (not embedded) – strict PDF/A validators flag that; several
+  VAT rates per invoice stay one rate; KoSIT not run in this repository's
+  CI.

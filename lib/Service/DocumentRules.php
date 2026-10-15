@@ -24,6 +24,10 @@ final class DocumentRules {
 	/** Ledger action of a stored document. */
 	public const ACTION = 'document';
 	public const KIND_PDF = 'pdf';
+	public const KIND_XML = 'xml';
+	/** Ledger `kind` of the stored files (0.20.0): the PDF/A-3 with the XML inside, the XRechnung file. */
+	public const KIND_ZUGFERD = 'zugferd';
+	public const KIND_XRECHNUNG = 'xrechnung';
 	public const DE = 'de';
 	public const EN = 'en';
 	/** The settings with their defaults. */
