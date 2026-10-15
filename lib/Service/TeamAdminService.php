@@ -43,6 +43,7 @@ final class TeamAdminService {
 		private WeekMarks $marks,
 		private ITimeFactory $time,
 		private TimeCalendarMapper $timeCalendars,
+		private DocumentService $documents,
 	) {
 	}
 
@@ -76,6 +77,10 @@ final class TeamAdminService {
 		[, $owner] = TeamRules::backupOwner($in);
 		$this->checkOwner($owner, $v['groups']['team']);
 		$settings = TeamRules::settings($in) + TeamRules::SETTINGS;
+		if (array_key_exists(DocumentRules::FIELD, $settings)) {
+			// A new team: the folders are checked with the chosen owner (none chosen: no owner yet).
+			$this->documents->requireFolders($owner, $settings[DocumentRules::FIELD], $v['name']);
+		}
 		if ($this->tenants->findBySlug($v['slug']) !== null) {
 			throw ApiException::conflict('Another team already has this short name.');
 		}
@@ -111,7 +116,10 @@ final class TeamAdminService {
 		if ($ownerGiven) {
 			$this->checkOwner($owner, $v['groups']['team']);
 		}
-		$settings = TeamRules::settings($in);
+		$settings = TeamRules::settings($in, $t->getDocumentsJson());
+		if (array_key_exists(DocumentRules::FIELD, $settings)) {
+			$this->documents->requireFolders($ownerGiven ? $owner : $this->tenantService->backupOwner($t), $settings[DocumentRules::FIELD], $v['name']);
+		}
 		$other = $this->tenants->findBySlug($v['slug']);
 		if ($other !== null && $other->getId() !== $id) {
 			throw ApiException::conflict('Another team already has this short name.');
@@ -227,7 +235,7 @@ final class TeamAdminService {
 		return $out;
 	}
 
-	/** @param array<string,bool|string|null> $settings */
+	/** @param array<string,mixed> $settings */
 	private static function applySettings(Tenant $t, array $settings): void {
 		if (array_key_exists('backup_required', $settings)) {
 			$t->setBackupRequired($settings['backup_required'] === true ? 1 : 0);
@@ -239,6 +247,14 @@ final class TeamAdminService {
 		if (array_key_exists('invoicing', $settings)) {
 			$t->setInvoicing($settings['invoicing'] === true ? 1 : 0);
 		}
+		if (is_array($settings[DocumentRules::FIELD] ?? null)) {
+			$t->setDocumentsJson(DocumentRules::encode($settings[DocumentRules::FIELD]));
+		}
+	}
+
+	/** `POST /admin/teams/{id}/documents/check` – the folders as typed. @return array{invoices:array{ok:bool,message:string},quotes:array{ok:bool,message:string}} */
+	public function checkDocumentFolders(int $id, mixed $invoices, mixed $quotes): array {
+		return $this->documents->checkFolders($this->find($id), $invoices, $quotes);
 	}
 
 	/** The backup owner must be an admin, i.e. a group admin of the team group (422). */

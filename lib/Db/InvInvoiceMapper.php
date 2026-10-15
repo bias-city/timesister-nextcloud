@@ -60,6 +60,22 @@ final class InvInvoiceMapper extends QBMapper {
 		return $this->findEntities($qb);
 	}
 
+	/**
+	 * Invoices whose document is still to render (0.19.0): `pending` or
+	 * `failed` with fewer than `$maxTries` tries, across all teams, oldest
+	 * first – for the retry job.
+	 *
+	 * @return list<InvInvoice>
+	 */
+	public function findToRender(int $maxTries, int $limit): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')->from($this->getTableName())
+			->where($qb->expr()->in('document_state', $qb->createNamedParameter([InvInvoice::DOCUMENT_PENDING, InvInvoice::DOCUMENT_FAILED], IQueryBuilder::PARAM_STR_ARRAY)))
+			->andWhere($qb->expr()->lt('document_tries', $qb->createNamedParameter($maxTries, IQueryBuilder::PARAM_INT)))
+			->orderBy('id', 'ASC')->setMaxResults($limit);
+		return $this->findEntities($qb);
+	}
+
 	/** Deleting a team: every row of it. @return int rows */
 	public function deleteByTenant(int $tenantId): int {
 		$qb = $this->db->getQueryBuilder();

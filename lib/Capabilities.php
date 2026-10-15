@@ -43,7 +43,10 @@ use OCP\Capabilities\ICapability;
  * shares matrix (/team/access, 0.5.0 to 0.16.x) is gone. `invoicing: 1`
  * since 0.18.0: invoices are issued on the server (POST /invoices/{key}/issue,
  * reverse, paid), frozen with a ledger and a SHA-256 chain; team setting
- * `invoicing`.
+ * `invoicing`. `invoice_documents: 1` since 0.19.0: the server renders the
+ * PDF with the Swiss QR bill, stores it in the team's folder (team setting
+ * `documents`), hashes it into the ledger, serves a watermarked preview
+ * and writes the daily chain head file.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -51,7 +54,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int}} */
+	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -72,6 +75,7 @@ final class Capabilities implements ICapability {
 				'invoice_template' => 1,
 				'entries' => 1,
 				'invoicing' => 1,
+				'invoice_documents' => 1,
 			],
 		];
 	}

@@ -70,12 +70,14 @@ final class TeamRules {
 
 	/**
 	 * Team settings from the body. If `settings` or a key is missing, the
-	 * value stays. Unknown keys, a non-boolean value or a malformed date: 422.
+	 * value stays. Unknown keys, a non-boolean value or a malformed date:
+	 * 422. `documents` (0.19.0) is an object, checked by DocumentRules and
+	 * merged over the stored one.
 	 *
 	 * @param array<string,mixed> $in
-	 * @return array<string,bool|string|null>
+	 * @return array<string,mixed>
 	 */
-	public static function settings(array $in): array {
+	public static function settings(array $in, ?string $documentsJson = null): array {
 		$s = $in['settings'] ?? null;
 		if ($s === null) {
 			return [];
@@ -87,6 +89,10 @@ final class TeamRules {
 		foreach ($s as $key => $value) {
 			if (is_string($key) && in_array($key, self::DATE_SETTINGS, true)) {
 				$out[$key] = EntryRules::parseSince($value);
+				continue;
+			}
+			if ($key === DocumentRules::FIELD) {
+				$out[$key] = DocumentRules::validate($value, DocumentRules::settings($documentsJson));
 				continue;
 			}
 			if (!is_string($key) || !array_key_exists($key, self::SETTINGS)) {

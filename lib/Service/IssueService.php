@@ -7,7 +7,6 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Service;
 
 use OCA\TimeSister\Db\CounterMapper;
-use OCA\TimeSister\Db\EntryMapper;
 use OCA\TimeSister\Db\InvHour;
 use OCA\TimeSister\Db\InvHourMapper;
 use OCA\TimeSister\Db\InvInvoice;
@@ -21,6 +20,7 @@ use OCA\TimeSister\Db\TenantMapper;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\DB\Exception as DbException;
 use OCP\IDBConnection;
+use Psr\Log\LoggerInterface;
 
 /**
  * Issuing on the server (0.18.0): one transaction takes the number, freezes
@@ -28,7 +28,8 @@ use OCP\IDBConnection;
  * (as a batch of records, under the team lock) and appends the ledger
  * entry. Reversal, credit note, paid and unpaid likewise. Team Admins;
  * `fixed` also for the project's Leads. Off (team setting `invoicing`):
- * 404 everywhere.
+ * 404 everywhere. After the transaction the document is rendered
+ * (0.19.0); a failure there never undoes the issue.
  */
 final class IssueService {
 	public const LIMIT_DEFAULT = 500;
@@ -42,18 +43,22 @@ final class IssueService {
 		private InvInvoiceMapper $invoices,
 		private InvHourMapper $hours,
 		private InvLedgerMapper $ledger,
-		private EntryMapper $entries,
 		private CounterMapper $counters,
 		private TenantService $team,
 		private RecordRights $rights,
 		private ITimeFactory $time,
+		private DraftResolver $drafts,
+		private LedgerAppender $appender,
+		private InvoiceFixed $fixed,
+		private DocumentService $documents,
+		private LoggerInterface $logger,
 	) {
 	}
 
 	// ------------------------------------------------------------- guards
 
 	/** 404 when the team issues on the Mac (setting off). */
-	private function requireOn(Membership $m): Tenant {
+	public function requireOn(Membership $m): Tenant {
 		$t = $this->team->tenant($m->tenantId);
 		if (!$t->invoicingOn()) {
 			throw ApiException::notFound('Invoicing on the server is off for this team.');
@@ -61,7 +66,7 @@ final class IssueService {
 		return $t;
 	}
 
-	private function requireAdmin(Membership $m): void {
+	public function requireAdmin(Membership $m): void {
 		if (!$m->manages()) {
 			throw ApiException::forbidden('Only Team Admins issue, reverse and settle invoices.');
 		}
@@ -69,18 +74,28 @@ final class IssueService {
 
 	/** A live record's data, or null. */
 	private function live(int $tenantId, string $kind, string $key): ?\stdClass {
-		$r = $this->records->findOne($tenantId, $kind, $key);
-		return $r === null || $r->isTombstone() ? null : InvoiceRules::decode($r->getData());
+		return $this->drafts->live($tenantId, $kind, $key);
 	}
 
-	/** The stored invoice record (live) and its data; 404 when there is none. */
+	/** The stored invoice record (live) and its data; 404 when there is none. @return array{0:Record,1:\stdClass} */
 	private function invoiceRecord(int $tenantId, string $key): array {
-		$r = $this->records->findOne($tenantId, InvoiceRules::KIND, $key);
-		$d = $r === null || $r->isTombstone() ? null : InvoiceRules::decode($r->getData());
-		if ($r === null || $d === null) {
-			throw ApiException::notFound('This invoice does not exist.');
+		return $this->drafts->invoiceRecord($tenantId, $key);
+	}
+
+	/**
+	 * After issuing, reversing or crediting: the document is rendered and
+	 * stored (0.19.0). Outside the transaction; an error is logged and
+	 * left to the retry job, the issue stands.
+	 */
+	private function renderAfter(Membership $m, string $key, int $now): void {
+		try {
+			$row = $this->invoices->findByKey($m->tenantId, $key);
+			if ($row !== null) {
+				$this->documents->render($this->team->tenant($m->tenantId), $row, $m->uid, $now);
+			}
+		} catch (\Throwable $e) {
+			$this->logger->warning('TimeSister: rendering the document of {key} failed: {message}', ['app' => 'timesister', 'key' => $key, 'message' => $e->getMessage()]);
 		}
-		return [$r, $d];
 	}
 
 	/** One transaction, retried on a deadlock like the record writes. @return array<string,mixed> */
@@ -118,31 +133,31 @@ final class IssueService {
 		$now = $this->time->getTime();
 		$issuedOn = IssueRules::issuedOn($body->issued_on ?? null, $now);
 		$dueDays = IssueRules::dueDays($body->due_days ?? null);
-		return $this->transaction(fn (): array => $this->issueWithin($m, $key, $issuedOn, $dueDays, $now));
+		$out = $this->transaction(fn (): array => $this->issueWithin($m, $key, $issuedOn, $dueDays, $now));
+		$this->renderAfter($m, $key, $now);
+		return $out;
 	}
 
 	/** @return array<string,mixed> */
 	private function issueWithin(Membership $m, string $key, string $issuedOn, int $dueDays, int $now): array {
 		$tid = $m->tenantId;
-		[$cur, $d] = $this->invoiceRecord($tid, $key);
 		if ($this->invoices->findByKey($tid, $key) !== null) {
 			throw ApiException::issued();
 		}
-		IssueRules::requireIssuable($d);
-		$projectKey = (string)$d->project;
-		$project = $this->live($tid, 'project', $projectKey) ?? throw ApiException::invalid('The invoice’s project does not exist.');
-		$budget = IssueRules::budgetOf($project, (string)$d->budget) ?? throw ApiException::invalid('The invoice’s budget is not in the project.');
-		$currency = IssueRules::currencyOf($budget, $d) ?? throw ApiException::invalid('The budget has no currency.');
-		$customerKey = IssueRules::customerKeyOf($project) ?? throw ApiException::invalid('The project names no customer.');
-		$customer = $this->live($tid, 'customer', $customerKey) ?? throw ApiException::invalid('The project’s customer does not exist.');
-		$settings = $this->live($tid, 'setting', 'settings');
-		$issuer = IssueRules::issuerOf($settings) ?? throw ApiException::invalid('The team has no invoice issuer; set “issuer” in the settings first.');
-		$vat = IssueRules::vatOf($d, $settings);
-		$bookings = IssueRules::bookingsOf($d);
-		$this->requireBillable($tid, $bookings);
-		$positions = IssueRules::positionsOf($d);
-		$sums = IssueRules::sums($positions, $vat);
-		$hours = IssueRules::hoursOf($bookings);
+		$r = $this->drafts->resolve($tid, $key);
+		$cur = $r['record'];
+		$d = $r['d'];
+		$projectKey = $r['projectKey'];
+		$currency = $r['currency'];
+		$customerKey = $r['customerKey'];
+		$settings = $r['settings'];
+		$issuer = $r['issuer'];
+		$vat = $r['vat'];
+		$bookings = $r['bookings'];
+		$positions = $r['positions'];
+		$sums = $r['sums'];
+		$hours = $r['hours'];
+		$customerBlock = $r['customerBlock'];
 		$dueOn = IssueRules::dueOn($issuedOn, $dueDays);
 
 		// The team lock first: one issue at a time, the revision for the marks and the record.
@@ -163,7 +178,6 @@ final class IssueService {
 		$row->setCurrency($currency);
 		$row->setVat(IssueRules::decimal($vat));
 		$row->setIssuerJson(Json::encode($issuer));
-		$customerBlock = IssueRules::customerBlock($customer, $d);
 		$row->setCustomerJson(Json::encode($customerBlock));
 		$row->setPositionsJson(json_encode($positions, Json::FLAGS));
 		$row->setGreeting(IssueRules::textOf($d, 'greeting'));
@@ -208,42 +222,6 @@ final class IssueService {
 		return $record;
 	}
 
-	/**
-	 * Every booking must be in the book and not billed by another live
-	 * invoice: per occurrence through the invoices' hours, and through a
-	 * billing mark of the person's event when no server invoice bills an
-	 * occurrence of it (a mark set by hand or by a client).
-	 *
-	 * @param list<\stdClass> $bookings
-	 */
-	private function requireBillable(int $tenantId, array $bookings): void {
-		foreach ($bookings as $i => $b) {
-			$person = (string)($b->person ?? '');
-			$uid = (string)($b->uid ?? '');
-			$start = (string)($b->start ?? '');
-			if ($this->entries->findByEvent($tenantId, $person, $uid) === null) {
-				throw ApiException::invalid(Message::of('Booking {n} is not in the book.', ['n' => $i + 1]));
-			}
-			$live = false;
-			foreach ($this->hours->billingsOf($tenantId, $person, $uid) as $h) {
-				if ($h['status'] !== InvInvoice::ISSUED && $h['status'] !== InvInvoice::PAID) {
-					continue;
-				}
-				if ($h['start'] === $start) {
-					throw ApiException::conflict(Message::of('Booking {n} is billed by invoice {number}.', ['n' => $i + 1, 'number' => $h['number']]));
-				}
-				$live = true;
-			}
-			if (!$live) {
-				$mark = $this->live($tenantId, BillingRules::KIND, BillingRules::key($person, $uid));
-				if ($mark !== null) {
-					$doc = $mark->document ?? null;
-					throw ApiException::conflict(Message::of('Booking {n} is billed by invoice {number}.', ['n' => $i + 1, 'number' => is_string($doc) && $doc !== '' ? $doc : '?']));
-				}
-			}
-		}
-	}
-
 	/** The next number of the team's counter, filled into its pattern; unique per team. */
 	private function takeNumber(int $tenantId, ?\stdClass $settings, string $issuedOn, string $project, ?string $customer, int $now): string {
 		$n = InvoiceNumbering::of($settings);
@@ -273,24 +251,7 @@ final class IssueService {
 
 	/** Appends the team's next ledger entry; the chain continues from the last one. */
 	private function append(int $tenantId, string $actor, string $action, int $invoiceId, string $number, string $canonical, int $now): InvLedger {
-		$last = $this->ledger->last($tenantId);
-		$seq = $last === null ? 1 : $last->getSeq() + 1;
-		$prev = $last === null ? '' : $last->getHash();
-		$at = LedgerRules::at($now);
-		$payloadHash = LedgerRules::payloadHash($canonical);
-		$e = new InvLedger();
-		$e->setTenantId($tenantId);
-		$e->setSeq($seq);
-		$e->setAt($at);
-		$e->setActor($actor);
-		$e->setAction($action);
-		$e->setInvoiceId($invoiceId);
-		$e->setNumber($number);
-		$e->setPayload($canonical);
-		$e->setPayloadHash($payloadHash);
-		$e->setPrevHash($prev);
-		$e->setHash(LedgerRules::entryHash($seq, $at, $actor, $action, $number, $payloadHash, $prev));
-		return $this->ledger->insert($e);
+		return $this->appender->append($tenantId, $actor, $action, $invoiceId, $number, $canonical, $now);
 	}
 
 	/** The invoice row carries its issue's chain fields. */
@@ -359,7 +320,12 @@ final class IssueService {
 			InvoiceRules::checkPositions($given);
 		}
 		$given = is_array($given) ? array_values(array_filter($given, static fn (mixed $x): bool => $x instanceof \stdClass)) : null;
-		return $this->transaction(fn (): array => $this->reverseWithin($m, $key, $kind, $reason, $issuedOn, $kind === IssueRules::CREDIT ? $given : null, $now));
+		$out = $this->transaction(fn (): array => $this->reverseWithin($m, $key, $kind, $reason, $issuedOn, $kind === IssueRules::CREDIT ? $given : null, $now));
+		$newKey = $out['record']['key'] ?? null;
+		if (is_string($newKey)) {
+			$this->renderAfter($m, $newKey, $now);
+		}
+		return $out;
 	}
 
 	/** @param ?list<\stdClass> $given @return array<string,mixed> */
@@ -534,6 +500,21 @@ final class IssueService {
 	/** `GET /invoices/{key}/fixed` – Team Admins and the project's Leads. @return array<string,mixed> */
 	public function fixed(Membership $m, string $key): array {
 		$this->requireOn($m);
+		$this->requireReader($m, $key);
+		$row = $this->invoices->findByKey($m->tenantId, $key);
+		if ($row === null) {
+			throw ApiException::notFound('Nothing is fixed yet: this invoice is a draft.');
+		}
+		return $this->fixedOf($row);
+	}
+
+	/** The frozen content of a row, as in `GET /invoices/{key}/fixed` and in the team ZIP. @return array<string,mixed> */
+	public function fixedOf(InvInvoice $row): array {
+		return $this->fixed->of($row);
+	}
+
+	/** The rights of `fixed`, `preview` and `document`: Team Admins and the project's Leads (0.19.0 shares it). */
+	public function requireReader(Membership $m, string $key): void {
 		RecordValidator::checkAddress(InvoiceRules::KIND, $key);
 		$r = $this->records->findOne($m->tenantId, InvoiceRules::KIND, $key);
 		if (!$m->manages()) {
@@ -545,48 +526,6 @@ final class IssueService {
 		if ($r === null || $r->isTombstone()) {
 			throw ApiException::notFound('This invoice does not exist.');
 		}
-		$row = $this->invoices->findByKey($m->tenantId, $key);
-		if ($row === null) {
-			throw ApiException::notFound('Nothing is fixed yet: this invoice is a draft.');
-		}
-		return $this->fixedOf($row);
-	}
-
-	/** The frozen content of a row, as in `GET /invoices/{key}/fixed` and in the team ZIP. @return array<string,mixed> */
-	public function fixedOf(InvInvoice $row): array {
-		$positions = json_decode((string)$row->getPositionsJson(), false);
-		return [
-			'key' => $row->getRkey(),
-			'number' => $row->getNumber(),
-			'status' => $row->getStatus(),
-			'project' => $row->getProject(),
-			'budget' => $row->getBudget(),
-			'customer_key' => $row->getCustomer(),
-			'period' => ['from' => $row->getPeriodFrom(), 'to' => $row->getPeriodTo()],
-			'issued_on' => $row->getIssuedOn(),
-			'issued_by' => $row->getIssuedBy(),
-			'due_on' => $row->getDueOn(),
-			'paid_on' => $row->getPaidOn(),
-			'paid_by' => $row->getPaidBy(),
-			'currency' => $row->getCurrency(),
-			'vat' => (float)$row->getVat(),
-			'net' => (float)$row->getNet(),
-			'vat_amount' => (float)$row->getVatAmount(),
-			'gross' => (float)$row->getGross(),
-			'hours_total' => (float)$row->getHours(),
-			'issuer' => InvoiceRules::decode($row->getIssuerJson()),
-			'customer' => InvoiceRules::decode($row->getCustomerJson()),
-			'positions' => is_array($positions) ? $positions : [],
-			'hours' => array_map(static fn (InvHour $h): array => $h->present(), $this->hours->findByInvoice($row->getTenantId(), $row->getId())),
-			'greeting' => $row->getGreeting(),
-			'body' => $row->getBody(),
-			'footer' => $row->getFooter(),
-			'chain' => ['seq' => $row->getSeq(), 'prev_hash' => $row->getPrevHash(), 'hash' => $row->getHash()],
-			'reverses' => $row->getReverses(),
-			'reversed_by' => $row->getReversedBy(),
-			'credits' => $row->getCredits(),
-			'document_state' => $row->getDocumentState(),
-		];
 	}
 
 	/** `GET /invoices/ledger?since=&limit=` – Team Admins. @return array{entries:list<array<string,mixed>>,more:bool} */

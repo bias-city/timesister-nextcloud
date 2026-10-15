@@ -312,6 +312,53 @@
 		sel.disabled = !st
 	}
 
+	/** The document folders (0.19.0): only when editing; the owner is shown, not chosen here. */
+	function fillDocuments(team) {
+		$('ts-documents').hidden = !team
+		$('ts-doc-result').textContent = ''
+		const d = (team && team.settings && team.settings.documents) || {}
+		$('ts-doc-invoices').value = d.invoices || ''
+		$('ts-doc-quotes').value = d.quotes || ''
+		$('ts-doc-per-year').checked = d.per_year !== false
+		$('ts-doc-mail').value = d.chain_mail || ''
+		const owner = $('ts-doc-owner')
+		owner.textContent = ''
+		owner.className = team && team.backup_owner ? '' : 'ts-bad'
+		owner.textContent = team && team.backup_owner ? adminLabel(stateOf(team.id), team.backup_owner) : tr('owner_none')
+	}
+
+	/** The `documents` setting as typed; empty paths mean the default. */
+	function documentsData() {
+		return {
+			invoices: $('ts-doc-invoices').value.trim() || null,
+			quotes: $('ts-doc-quotes').value.trim() || null,
+			per_year: $('ts-doc-per-year').checked,
+			chain_mail: $('ts-doc-mail').value.trim() || null,
+		}
+	}
+
+	/** Asks the server whether both folders are there (or can be created) and writable. */
+	async function checkDocuments() {
+		if (editing === null) {
+			return
+		}
+		const box = $('ts-doc-result')
+		box.textContent = ''
+		$('ts-doc-check').disabled = true
+		try {
+			const d = documentsData()
+			const r = await api('POST', '/admin/teams/' + editing + '/documents/check', { invoices: d.invoices, quotes: d.quotes })
+			for (const key of ['invoices', 'quotes']) {
+				const x = r[key] || {}
+				box.append(h('div', { class: x.ok ? 'ts-ok' : 'ts-bad', text: tr(key === 'invoices' ? 'invoices_folder' : 'quotes_folder') + ': ' + (x.message || '') }))
+			}
+		} catch (e) {
+			box.append(h('div', { class: 'ts-bad', text: tr('check_failed', { message: e.message }) }))
+		} finally {
+			$('ts-doc-check').disabled = false
+		}
+	}
+
 	/** Admins (read-only: they come from Nextcloud's user management). */
 	function fillAdmins(team) {
 		const st = team ? stateOf(team.id) : null
@@ -405,6 +452,7 @@
 		fillAdmins(team)
 		fillMembers(team)
 		fillOwner(team)
+		fillDocuments(team)
 		// New team: no backup requirement. Who sees which calendar is set in the Mac app.
 		const s = (team && team.settings) || {}
 		$('ts-backup-required').checked = s.backup_required === true
@@ -487,6 +535,7 @@
 		// Empty means automatic; a new team has no choice yet.
 		if (editing !== null) {
 			body.backup_owner = $('ts-backup-owner').value || null
+			body.settings.documents = documentsData()
 		}
 		$('ts-save').disabled = true
 		$('ts-error').textContent = ''
@@ -829,6 +878,7 @@
 		}
 		$('ts-new').addEventListener('click', () => openForm(null))
 		$('ts-cancel').addEventListener('click', closeForm)
+		$('ts-doc-check').addEventListener('click', checkDocuments)
 		$('ts-form').addEventListener('submit', save)
 		$('ts-name').addEventListener('input', suggestSlug)
 		$('ts-slug').addEventListener('input', tidySlug)

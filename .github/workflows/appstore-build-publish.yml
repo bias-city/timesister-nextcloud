@@ -3,7 +3,8 @@
 # sign it with the app certificate, attach it to the release and upload it to
 # the App Store. Off as long as one of the secrets APP_PRIVATE_KEY,
 # APP_PUBLIC_CRT, APPSTORE_TOKEN is missing.
-# No Composer, no npm: the app has no runtime dependencies and no build step.
+# Composer installs the runtime libraries (TCPDF, swiss-qr-bill) into vendor/
+# before packaging; no npm, no build step.
 # SPDX-FileCopyrightText: 2021-2024 Nextcloud GmbH and Nextcloud contributors
 # SPDX-License-Identifier: MIT
 
@@ -82,6 +83,10 @@ jobs:
           coverage: none
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install runtime libraries
+        working-directory: ${{ env.APP_NAME }}
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader --no-progress
 
       - name: Package ${{ env.APP_NAME }} ${{ env.APP_VERSION }}
         # .nextcloudignore as with rsync: a leading / = the app's root.
