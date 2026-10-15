@@ -236,6 +236,9 @@ final class TeamAdminService {
 			$v = $settings['entries_since'];
 			$t->setEntriesSince(is_string($v) ? $v : null);
 		}
+		if (array_key_exists('invoicing', $settings)) {
+			$t->setInvoicing($settings['invoicing'] === true ? 1 : 0);
+		}
 	}
 
 	/** The backup owner must be an admin, i.e. a group admin of the team group (422). */

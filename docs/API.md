@@ -1989,3 +1989,247 @@ state.
 Where it went: the named time calendar (`PUT /me/time-calendar`),
 `GET /entries?since` by role, `time_calendar`/`entries_read_at`/
 `entries_error` in `GET /status` as the new "who is missing".
+
+## Invoicing, 0.18.0 (2026-10-15) – issuing on the server, with a ledger
+
+Decided 2026-10-15 (`PLAN-FAKTURA.md`): invoices are **issued on the
+server** in one transaction – number, frozen content, the hours they bill,
+the billing marks and an append-only ledger with a SHA-256 chain. After
+issuing nothing changes; corrections are a reversal or a credit note with
+their own number. Documents (PDF with QR bill, ZUGFeRD, XRechnung) follow
+in 0.19.0; this section is the foundation. Capability `invoicing: 1`.
+Team setting `invoicing` (bool, default `true`): off, the endpoints below
+answer `404 not_found` and clients issue as before (0.16.0, on the Mac).
+
+### The draft (record `invoice`, additions)
+
+The draft stays the record of 0.16.0. New optional fields, written by the
+client while the status is `draft`:
+
+| Field | Rule |
+|---|---|
+| `greeting`, `body`, `footer` | `null` or text up to 4000 characters each (tab and line breaks allowed): the free texts of the document – salutation and introduction, the text after the positions, the footer. Prefilled by the client from the team's template texts. |
+| `positions` | optional list, at most 500: `{ "kind": "hours"\|"flat"\|"discount"\|"text", "text": …, "work_package"?: int, "person"?: uid, "hours"?: number ≥ 0, "rate"?: number ≥ 0, "amount": number }` – the lines as the client composed them from the hours (grouped per work package and person, or as chosen) plus flat fees, discounts (negative `amount`) and text-only lines (`amount` 0). `text` 1–500 characters. |
+| `bookings[].hours`, `bookings[].rate`, `bookings[].code` | optional per booking: the hours of that occurrence, the rate applied, the code; `hours`, `rate` numbers ≥ 0, `code` up to 64 characters. The server stores them with the invoice's hours when issuing. |
+
+An issued invoice (`number` set, status not `draft`) refuses every record
+write: `409 issued` “An issued invoice does not change; reverse it.”
+(before: Leads only). Deleting an issued invoice: `409 issued` too.
+
+### Issuing
+
+`POST /invoices/{key}/issue` – Team Admins, body `{ "issued_on"?: "YYYY-MM-DD", "due_days"?: 1–365 }`
+(default: today, 30). One transaction:
+
+1. The draft must exist, be `draft` without `number`, have a `budget`, at
+   least one position or booking, and a resolvable customer
+   (`project.customer`, a `customer` record). Otherwise `422 invalid`
+   naming what is missing.
+2. Every booking must be in the book (`ts_entries`, `uid` + `event_uid`,
+   not deleted) – `422 invalid` “Booking n is not in the book.” – and must
+   not carry a billing mark of another invoice: `409 conflict` “Booking n
+   is billed by invoice RE-2026-0007.” A series counts per occurrence
+   (`start`).
+3. The number comes from the team's counter and pattern (0.16.0).
+4. Frozen into `ts_inv_invoices`: `issuer_json` (the settings' `issuer`),
+   `customer_json` (name, address lines, country, VAT id, contact if the
+   draft names one), `positions_json`, the three texts, the period, the
+   currency (the budget's), `vat` (the draft's, else the team's default,
+   else 0), and the sums the **server** computes from the positions:
+   `net` = Σ `amount`, `vat_amount` = round(net × vat / 100, 2),
+   `gross` = net + vat_amount. The client's `amount` is taken as sent;
+   the server does not recompute hours × rate.
+5. `ts_inv_hours`: one row per booking (uid, event_uid, start, hours, rate,
+   amount = hours × rate, code).
+6. Billing marks: one `billing` record per booking (`document` = number,
+   `source` = `timesister`, `by` = the issuer, `billed_on` = `issued_on`),
+   written like a batch of records in the same transaction. The book keeps
+   billed objects when they vanish (`kept`, 0.17.0).
+7. The invoice record: `status: "issued"`, `number`, `issued_on`,
+   `hours`, `amount` (= net), `currency`, `vat`, `due_on`, `ledger_seq`,
+   `hash`; a new record version like any write.
+8. The ledger (below): action `issued`.
+
+Answer: the invoice record as `GET /records/invoice/{key}` plus
+`"issue": { "number", "seq", "prev_hash", "hash", "net", "vat_amount", "gross", "currency", "due_on", "document_state": "pending" }`.
+`document_state` stays `pending` until 0.19.0 renders documents.
+
+### Reversal and credit note
+
+`POST /invoices/{key}/reverse` – Team Admins, body
+`{ "kind": "reversal"|"credit", "reason"?: text ≤ 500, "issued_on"? }`:
+
+- The invoice must be `issued` or `paid`; otherwise `422`. Already
+  reversed: `409 conflict`.
+- `reversal`: a new invoice record (key chosen by the server, `inv-…`)
+  with the same positions negated, its own number, `reverses` = the
+  original's key, frozen and ledgered like an issue; the original becomes
+  `status: "cancelled"`, `reversed_by` = the new key; the billing marks of
+  the original are **deleted** (the hours are billable again); the
+  original's `ts_inv_hours` stay (history).
+- `credit`: the same, but the original stays `issued`/`paid` and keeps its
+  marks; the credit note carries the negated positions (or the client's
+  `positions` from the body, if given) and `credits` = the original's key.
+- Answer: both records and the new invoice's `issue` block.
+
+### Paid
+
+`POST /invoices/{key}/paid` `{ "paid_on": "YYYY-MM-DD", "note"?: ≤ 500 }` –
+Team Admins; `issued` → `paid`, ledger action `paid`. `422` when not
+issued. `POST /invoices/{key}/unpaid` reverts (ledger `unpaid`), for a
+mistaken entry.
+
+### Reading
+
+- `GET /invoices/{key}/fixed` – Team Admins and the project's Leads: the
+  frozen content `{ number, status, issued_on, due_on, paid_on, currency, vat, net, vat_amount, gross, issuer, customer, positions, hours: [ … ], greeting, body, footer, chain: { seq, prev_hash, hash }, reverses, reversed_by, credits, document_state }`.
+  A draft: `404 not_found` (nothing is fixed yet).
+- `GET /invoices/ledger?since=<seq>&limit=<n>` (default 500, max 2000) –
+  Team Admins: `{ "entries": [ { seq, at, actor, action, invoice, number, payload_hash, prev_hash, hash } ], "more" }`.
+- `GET /invoices/chain/verify` – Team Admins: recomputes every hash of the
+  team's ledger in order; `{ "ok": true, "entries": n, "head": hash }` or
+  `{ "ok": false, "entries": n, "first_break": seq, "expected": …, "found": … }`.
+
+### The ledger and the chain
+
+```text
+ts_inv_invoices  id, tenant_id, rkey (record key, UNIQUE per team), number (UNIQUE per team), status,
+                 project, budget, customer, period_from, period_to, currency, vat,
+                 issuer_json, customer_json, positions_json, greeting, body, footer,
+                 net, vat_amount, gross, issued_on, issued_by, due_on, paid_on, paid_by,
+                 reverses, reversed_by, credits, seq, prev_hash, hash,
+                 pdf_file_id, xml_file_id, document_state, created_at, modified_at
+ts_inv_hours     invoice_id, uid, event_uid, start, hours, rate, amount, code
+                 UNIQUE(invoice_id, uid, event_uid, start)
+ts_inv_ledger    id, tenant_id, seq, at, actor, action, invoice_id, number, payload_hash, prev_hash, hash
+                 UNIQUE(tenant_id, seq)
+```
+
+- `payload_hash` = SHA-256 of the canonical JSON of the frozen invoice
+  (keys sorted, no whitespace, numbers as sent) at the moment of the
+  action; for `paid`/`unpaid` the JSON `{ key, number, paid_on, note }`.
+- `hash` = SHA-256 of `seq ‖ "\n" ‖ at ‖ "\n" ‖ actor ‖ "\n" ‖ action ‖ "\n" ‖ number ‖ "\n" ‖ payload_hash ‖ "\n" ‖ prev_hash`;
+  `prev_hash` is the previous entry's `hash` of the team, empty for the
+  first. `at` is UTC `YYYY-MM-DDTHH:MM:SSZ`. Hex, lower case.
+- The ledger has no update and no delete path in the code. A team is
+  deleted with its ledger only through the existing team deletion (with
+  ZIP first). The team ZIP carries `ledger.json` and `invoices.json`
+  (frozen content) for reading; an import never recreates a ledger
+  (numbers and chain belong to the server that issued them).
+- 0.19.0 adds: the chain line on every document, the daily chain head
+  file in Nextcloud Files, documents and their file hashes in the ledger.
+
+### Rights
+
+| | user | lead | admin |
+|---|---|---|---|
+| issue, reverse, paid, ledger, verify | – | – | yes |
+| `fixed` | – | of the projects they lead | yes |
+
+### Capability
+
+```json
+"timesister": { …, "invoicing": 1 }
+```
+
+### As built, 0.18.0 (2026-10-15)
+
+What the server does beyond or beside the lines above, so the Mac app
+can rely on it:
+
+- **The write lock is tied to the server's issue.** `409 issued` (every
+  record write, delete, restore and batch – a batch names the write with
+  `index`) applies to invoices with a frozen row, i.e. issued through
+  `POST /invoices/{key}/issue` (or created by a reversal or credit note).
+  A record a client set to `issued` with a number itself (0.16.0, on the
+  Mac) stays writable as before, also with the team setting on – nothing
+  on the server could reverse it. For a Lead the 403 of 0.16.0 comes
+  first. The lock holds also when `invoicing` is switched off later.
+- **The record's `amount` may be negative** (a reversal's); `hours` stays
+  ≥ 0. New optional record fields written by the server: `due_on` (a day),
+  `ledger_seq`, `hash`, `reverses`, `credits`, `reversed_by`, `contact`
+  (the draft may name a contact: the `id` of one of the customer's
+  `contacts`, or free text; frozen into `customer.contact`).
+- **Positions:** `amount` is any number (negative for a discount or a
+  credit), `work_package` null or an integer ≥ 0; errors read
+  “Position n: …”. `bookings[].hours`/`rate` null or ≥ 0, `code` ≤ 64.
+- **The number:** the server fills the team's pattern itself – `{no}`/
+  `{nr}` with the width, `{year}`/`{yy}` from `issued_on`, `{project}` and
+  `{customer}` with the keys of the project and the customer. Without a
+  pattern: `{year}-{no:4}` (`2026-0007`). A number already frozen in the
+  team (a changed pattern): `409 conflict`; a result longer than 64
+  characters: `422`. The counter is taken inside the transaction: a
+  failed issue leaves no gap.
+- **What issuing needs** (`422 invalid` naming it): a live project, the
+  budget in it, a currency (the budget's, else the draft's), the project's
+  customer (`customer`, older `kunde`) as a live record, and the settings'
+  `issuer` (“The team has no invoice issuer; set “issuer” in the settings
+  first.”). `vat`: the draft's, else `setting/settings.vat` (a
+  percentage), else 0.
+- **Billed already?** Per occurrence through the invoices' hours (`409`
+  “Booking n is billed by invoice RE-2026-0007.”); where no live server
+  invoice bills an occurrence of the event, a live `billing` record of the
+  person's event counts (set by hand or by a client; `document` or `?`).
+  A series has one mark per UID: `document` is the latest invoice's
+  number; a reversal deletes the mark only when no other live invoice
+  bills an occurrence of the event. Hours and rate missing on a booking
+  count 0 (the row is written, `amount` 0).
+- **`fixed`** adds `key`, `project`, `budget`, `customer_key`, `period`
+  `{from, to}`, `issued_by`, `paid_by`, `hours_total`; `customer` holds
+  `id`, `name`, `address_extra`, `street`, `postcode`, `city`, `country`,
+  `email`, `phone`, `vat_id` (what the record has) and `contact`. A Lead
+  not of the project, or an unknown key for a Lead: `403`.
+- **Reversal and credit note:** the new record copies the original's
+  (negated `positions`, no `bookings`, `hours` 0, `note` = `reason`,
+  `created_by` the caller) with `reverses` or `credits`; the frozen row
+  copies issuer, customer, texts (`body` = `reason` when given), period,
+  VAT. A reversal appends **two** ledger entries – `reversal` for the new
+  invoice (payload: its frozen content) and `cancelled` for the original
+  (payload `{ key, number, reversed_by, reason }`); a credit note one
+  (`credit`). A credit note leaves `reversed_by` empty, so a credited
+  invoice can still be reversed; a cancelled one can be neither. The
+  answer: `{ "record", "original", "issue" }`.
+- **Paid:** the answer is the record plus
+  `"ledger": { seq, prev_hash, hash }`; `unpaid` takes `{ "note"? }`.
+  Payload `{ key, number, paid_on, note }` (`paid_on` null on `unpaid`).
+- **The payload** (`payload_hash`) of `issued`, `reversal` and `credit` is
+  the canonical JSON of
+  `{ key, number, issued_on, issued_by, due_on, project, budget, customer_key, period: {from, to}, currency, vat, net, vat_amount, gross, issuer, customer, positions, hours: [ {uid, event_uid, start, hours, rate, amount, code} ], greeting, body, footer, reverses, credits }`
+  – everything frozen, nothing that changes later. The ledger stores
+  that text: `GET /invoices/ledger` entries carry `payload` (a string),
+  and `chain/verify` also checks `payload_hash` against it and that `seq`
+  goes on without a gap; a break names the `field` (`seq`, `prev_hash`,
+  `payload_hash`, `hash`) with `expected` and `found`.
+- **Canonical JSON:** object keys sorted by byte order, recursively;
+  lists as they are; no whitespace; `/` and non-ASCII unescaped; numbers
+  as given – a float keeps its fraction (`1875.0`), an integer has none
+  (`1875`); server sums are floats (`200.0`); an empty object is `{}`.
+- **Example values** (`tests/Unit/LedgerRulesTest.php` holds them):
+  payload `{"number":"RE-2026-0007","net":1875.0,"positions":[{"kind":"hours","text":"Planung / Phase 1","hours":12.5,"rate":150,"amount":1875}],"customer":{"name":"Müller AG","city":"Basel"},"greeting":null,"key":"inv-1a2b3c4d","empty":{}}`
+  → canonical
+  `{"customer":{"city":"Basel","name":"Müller AG"},"empty":{},"greeting":null,"key":"inv-1a2b3c4d","net":1875.0,"number":"RE-2026-0007","positions":[{"amount":1875,"hours":12.5,"kind":"hours","rate":150,"text":"Planung / Phase 1"}]}`
+  → `payload_hash` `d8858b9612db6eb93674f78402ffc2876879e675bd4a27d1a1dd1006f4640be5`.
+  Entry 1: `seq` 1, `at` `2026-10-15T14:30:00Z`, `actor` `pbadmin`,
+  `action` `issued`, `number` `RE-2026-0007`, `prev_hash` `""` →
+  `hash` `034409014b2fa66604870366eea807323f9ecbfb759f31f8fb05234756674d55`
+  (= SHA-256 of `"1\n2026-10-15T14:30:00Z\npbadmin\nissued\nRE-2026-0007\nd8858b…0be5\n"`).
+  Entry 2: payload `{"key":"inv-1a2b3c4d","note":null,"number":"RE-2026-0007","paid_on":"2026-10-20"}`
+  → `payload_hash` `39e5fa1f3b789d9c5220d4306da211cee579f76d7416eb5710dcdafcce5c7a9a`;
+  `seq` 2, `at` `2026-10-15T15:00:00Z`, `pbadmin`, `paid`, `prev_hash` =
+  entry 1's hash → `hash` `e837e0f26f98711b04d672ffd9c3adaf07d7390ed297ca50ba600b080615deac`.
+- **Reading the ledger:** `since` ≥ 0, `limit` 1–2000, otherwise `422`.
+- **Team setting:** `PUT /team/settings` takes `entries_since` and/or
+  `invoicing` (bool; anything else `422`); `POST`/`PUT /admin/teams`
+  `settings.invoicing` likewise; `settings` in `/me`, `/team` and
+  `/admin/teams` carry it. Off: the seven endpoints answer `404 not_found`
+  “Invoicing on the server is off for this team.”
+- **Stored** (`Version1013Date20261015150000`, additive): amounts as
+  `DECIMAL(14,2)`, `vat` `DECIMAL(5,2)`, hours and rates `DECIMAL(10,2)`
+  (exact; the API hands floats out); `ts_inv_invoices` also `hours` (the
+  total); `ts_inv_hours` also `tenant_id`; `ts_inv_ledger` also `payload`
+  (TEXT). `ts_tenants.invoicing` (0/1). The ledger mapper refuses
+  `update()` and `delete()`; only deleting a team removes its ledger.
+- **Team ZIP:** `ledger.json` `{ "entries": [ … as GET /invoices/ledger ] }`
+  and `invoices.json` `{ "invoices": [ … as fixed ] }`; the import reads
+  past them. Deleting a team reports `invoices`, `invoice_hours`, `ledger`
+  in `counts`.

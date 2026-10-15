@@ -36,6 +36,27 @@ final class EntryMapper extends QBMapper {
 	}
 
 	/**
+	 * The live object of a person's event (0.18.0): calendar or feed, not
+	 * a tombstone (a kept one counts – it is billed). Null when the event
+	 * is not in the book.
+	 */
+	public function findByEvent(int $tenantId, string $uid, string $eventUid): ?Entry {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('id', 'tenant_id', 'uid', 'source', 'event_uid', 'object_uri', 'etag', 'summary', 'codes', 'first_start', 'last_end', 'cancelled', 'kept', 'deleted', 'revision', 'modified_at')
+			->from($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('uid', $qb->createNamedParameter($uid)))
+			->andWhere($qb->expr()->eq('event_uid', $qb->createNamedParameter($eventUid)))
+			->andWhere($qb->expr()->eq('deleted', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)))
+			->orderBy('id')->setMaxResults(1);
+		try {
+			return $this->findEntity($qb);
+		} catch (DoesNotExistException) {
+			return null;
+		}
+	}
+
+	/**
 	 * The entries of one source, by event UID; without `$all` only the
 	 * live ones (not kept, not deleted). `ics` is left out: the full read
 	 * compares etags and only loads what changed.

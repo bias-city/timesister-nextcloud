@@ -86,11 +86,13 @@ class InvoiceRulesTest extends TestCase {
 			$this->assertSame('422 “budget” is required: every invoice belongs to a budget.', $i === 0 ? self::check([], ['budget']) : self::check($over), (string)$i);
 		}
 		$this->assertSame('422 “budget” must be text of at most 128 characters.', self::check(['budget' => str_repeat('b', 129)]));
-		foreach (['hours', 'amount'] as $f) {
-			foreach ([-1, '12', true, [1]] as $bad) {
-				$this->assertSame("422 “{$f}” must be null or a number ≥ 0.", self::check([$f => $bad]), $f . ' ' . var_export($bad, true));
-			}
+		foreach ([-1, '12', true, [1]] as $bad) {
+			$this->assertSame('422 “hours” must be null or a number ≥ 0.', self::check(['hours' => $bad]), var_export($bad, true));
 		}
+		foreach (['12', true, [1]] as $bad) {
+			$this->assertSame('422 “amount” must be null or a number.', self::check(['amount' => $bad]), var_export($bad, true));
+		}
+		$this->assertSame('ok', self::check(['amount' => -200]), '0.18.0: a reversal’s amount is negative');
 		$this->assertSame('ok', self::check(['vat' => 8.1]));
 		$this->assertSame('ok', self::check(['vat' => 0]));
 		foreach ([-1, 100.5, '8.1', true] as $bad) {
@@ -147,6 +149,50 @@ class InvoiceRulesTest extends TestCase {
 			$fat[$i]['uid'] .= $i;
 		}
 		$this->assertSame('413 An invoice may be at most 768 KB.', self::check(['bookings' => $fat]));
+	}
+
+	/** 0.18.0: the document's texts, the positions and the hours per booking. */
+	public function testTextsPositionsAndHours(): void {
+		$pos = static fn (array $over = []): array => array_merge(['kind' => 'hours', 'text' => 'Planning', 'work_package' => 2, 'person' => 'alice', 'hours' => 12.5, 'rate' => 150, 'amount' => 1875], $over);
+		$this->assertSame('ok', self::check(['greeting' => "Dear Sir or Madam\n\nFor the work in September:", 'body' => "Payable within 30 days.\tThank you.", 'footer' => 'Denkstatt · Basel', 'due_on' => '2026-11-14']));
+		$this->assertSame('ok', self::check(['greeting' => null, 'body' => null, 'footer' => null, 'positions' => null]));
+		$this->assertSame('ok', self::check(['positions' => [$pos(), $pos(['kind' => 'flat', 'amount' => 500.5]), $pos(['kind' => 'discount', 'amount' => -50]), $pos(['kind' => 'text', 'amount' => 0, 'hours' => null, 'rate' => null, 'person' => null, 'work_package' => null])]]));
+		$this->assertSame('ok', self::check(['positions' => []]));
+		$r = RecordValidator::validate('invoice', 'inv-1a2b3c4d', self::data(['positions' => [$pos()]]));
+		$this->assertStringContainsString('"positions":[{"kind":"hours","text":"Planning","work_package":2,"person":"alice","hours":12.5,"rate":150,"amount":1875}]', $r['json'], 'stored as sent');
+		foreach (['greeting', 'body', 'footer'] as $f) {
+			$this->assertSame("422 “{$f}” must be text of at most 4000 characters.", self::check([$f => str_repeat('x', 4001)]));
+			$this->assertSame("422 “{$f}” must be text of at most 4000 characters.", self::check([$f => "bell\x07"]));
+			$this->assertSame("422 “{$f}” must be text of at most 4000 characters.", self::check([$f => 7]));
+		}
+		$this->assertSame('422 “due_on” must be a day in the format YYYY-MM-DD.', self::check(['due_on' => '2026-13-01']));
+		$this->assertSame('422 “positions” must be a list of at most 500 positions.', self::check(['positions' => 'x']));
+		$this->assertSame('422 “positions” must be a list of at most 500 positions.', self::check(['positions' => array_fill(0, 501, $pos())]));
+		$this->assertSame('ok', self::check(['positions' => array_fill(0, 500, $pos())]));
+		$this->assertSame('422 Position 1: Each position must be a JSON object.', self::check(['positions' => ['x']]));
+		$this->assertSame('422 Position 2: “kind” of a position is one of hours, flat, discount, text.', self::check(['positions' => [$pos(), $pos(['kind' => 'rebate'])]]));
+		$this->assertSame('422 Position 1: “text” must be text of 1 to 500 characters.', self::check(['positions' => [$pos(['text' => ''])]]));
+		$this->assertSame('422 Position 1: “text” must be text of 1 to 500 characters.', self::check(['positions' => [$pos(['text' => str_repeat('t', 501)])]]));
+		$this->assertSame('422 Position 1: “work_package” must be null or an integer ≥ 0.', self::check(['positions' => [$pos(['work_package' => '2'])]]));
+		$this->assertSame('422 Position 1: “work_package” must be null or an integer ≥ 0.', self::check(['positions' => [$pos(['work_package' => -1])]]));
+		$this->assertSame('422 Position 1: “person” must be text of at most 64 characters.', self::check(['positions' => [$pos(['person' => str_repeat('p', 65)])]]));
+		$this->assertSame('422 Position 1: “hours” must be null or a number ≥ 0.', self::check(['positions' => [$pos(['hours' => -1])]]));
+		$this->assertSame('422 Position 1: “rate” must be null or a number ≥ 0.', self::check(['positions' => [$pos(['rate' => '150'])]]));
+		$this->assertSame('422 Position 1: “amount” must be a number.', self::check(['positions' => [$pos(['amount' => null])]]));
+		$this->assertSame('422 Position 1: “amount” must be a number.', self::check(['positions' => [$pos(['amount' => '1875'])]]));
+		$b = static fn (array $over = []): array => ['bookings' => [array_merge(['person' => 'alice', 'uid' => 'u1', 'start' => '2026-09-02'], $over)]];
+		$this->assertSame('ok', self::check($b(['hours' => 2.5, 'rate' => 150, 'code' => 'D196.4'])));
+		$this->assertSame('ok', self::check($b(['hours' => 0, 'rate' => null, 'code' => null])));
+		$this->assertSame('422 Booking 1: “hours” must be null or a number ≥ 0.', self::check($b(['hours' => -2])));
+		$this->assertSame('422 Booking 1: “rate” must be null or a number ≥ 0.', self::check($b(['rate' => '150'])));
+		$this->assertSame('422 Booking 1: “code” must be text of at most 64 characters.', self::check($b(['code' => str_repeat('c', 65)])));
+		$this->assertSame('ok', self::outcome(fn () => InvoiceRules::checkPositions([(object)$pos()])), 'the public check for a credit note’s positions');
+		$this->assertSame('422 Position 1: “amount” must be a number.', self::outcome(fn () => InvoiceRules::checkPositions([(object)$pos(['amount' => true])])));
+	}
+
+	public function testIssuedCode(): void {
+		$e = ApiException::issued();
+		$this->assertSame([409, 'issued', 'An issued invoice does not change; reverse it.'], [$e->getStatus(), $e->getErrorCode(), $e->getMessage()]);
 	}
 
 	public function testLeadWritesOnlyDrafts(): void {

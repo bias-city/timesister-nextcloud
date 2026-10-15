@@ -196,7 +196,7 @@ final class TenantService {
 		return $out;
 	}
 
-	/** @return array{id:int,name:string,slug:string,groups:array{team:?string},backup_owner:?string,settings:array{backup_required:bool,entries_since:?string}} */
+	/** @return array{id:int,name:string,slug:string,groups:array{team:?string},backup_owner:?string,settings:array{backup_required:bool,entries_since:?string,invoicing:bool}} */
 	public function presentTeam(Tenant $t): array {
 		return [
 			'id' => $t->getId(),
@@ -208,12 +208,14 @@ final class TenantService {
 		];
 	}
 
-	/** @return array{backup_required:bool,entries_since:?string} */
+	/** @return array{backup_required:bool,entries_since:?string,invoicing:bool} */
 	public static function settingsOf(Tenant $t): array {
 		return [
 			'backup_required' => $t->getBackupRequired() === 1,
 			// The stored cutoff (0.17.0); the effective one is `entries_since` in /me.
 			'entries_since' => $t->getEntriesSince(),
+			// Issuing on the server (0.18.0).
+			'invoicing' => $t->invoicingOn(),
 		];
 	}
 }

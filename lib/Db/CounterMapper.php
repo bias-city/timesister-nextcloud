@@ -54,35 +54,7 @@ final class CounterMapper {
 	private function takeOnce(int $tenantId, string $name, int $start, int $now): int {
 		$this->db->beginTransaction();
 		try {
-			$qb = $this->db->getQueryBuilder();
-			$qb->update(self::TABLE)
-				->set('last_no', $qb->func()->add('last_no', $qb->createNamedParameter(1, IQueryBuilder::PARAM_INT)))
-				->set('modified_at', $qb->createNamedParameter($now, IQueryBuilder::PARAM_INT))
-				->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
-				->andWhere($qb->expr()->eq('name', $qb->createNamedParameter($name)));
-			if ($qb->executeStatement() === 0) {
-				$value = InvoiceNumbering::next(null, $start);
-				$ins = $this->db->getQueryBuilder();
-				$ins->insert(self::TABLE)->values([
-					'tenant_id' => $ins->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT),
-					'name' => $ins->createNamedParameter($name),
-					'last_no' => $ins->createNamedParameter($value, IQueryBuilder::PARAM_INT),
-					'modified_at' => $ins->createNamedParameter($now, IQueryBuilder::PARAM_INT),
-				]);
-				$ins->executeStatement();
-			} else {
-				$value = (int)$this->last($tenantId, $name);
-				if ($value < $start) {
-					// The start was raised: continue there.
-					$value = $start;
-					$set = $this->db->getQueryBuilder();
-					$set->update(self::TABLE)
-						->set('last_no', $set->createNamedParameter($value, IQueryBuilder::PARAM_INT))
-						->where($set->expr()->eq('tenant_id', $set->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
-						->andWhere($set->expr()->eq('name', $set->createNamedParameter($name)));
-					$set->executeStatement();
-				}
-			}
+			$value = $this->takeWithin($tenantId, $name, $start, $now);
 			$this->db->commit();
 			return $value;
 		} catch (\Throwable $e) {
@@ -91,6 +63,45 @@ final class CounterMapper {
 			}
 			throw $e;
 		}
+	}
+
+	/**
+	 * Takes the next number inside the caller's transaction (0.18.0,
+	 * issuing an invoice): the number is committed with everything else or
+	 * not at all, so a failed issue leaves no gap. Call only inside a
+	 * transaction.
+	 */
+	public function takeWithin(int $tenantId, string $name, int $start, int $now): int {
+		$qb = $this->db->getQueryBuilder();
+		$qb->update(self::TABLE)
+			->set('last_no', $qb->func()->add('last_no', $qb->createNamedParameter(1, IQueryBuilder::PARAM_INT)))
+			->set('modified_at', $qb->createNamedParameter($now, IQueryBuilder::PARAM_INT))
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('name', $qb->createNamedParameter($name)));
+		if ($qb->executeStatement() === 0) {
+			$value = InvoiceNumbering::next(null, $start);
+			$ins = $this->db->getQueryBuilder();
+			$ins->insert(self::TABLE)->values([
+				'tenant_id' => $ins->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT),
+				'name' => $ins->createNamedParameter($name),
+				'last_no' => $ins->createNamedParameter($value, IQueryBuilder::PARAM_INT),
+				'modified_at' => $ins->createNamedParameter($now, IQueryBuilder::PARAM_INT),
+			]);
+			$ins->executeStatement();
+		} else {
+			$value = (int)$this->last($tenantId, $name);
+			if ($value < $start) {
+				// The start was raised: continue there.
+				$value = $start;
+				$set = $this->db->getQueryBuilder();
+				$set->update(self::TABLE)
+					->set('last_no', $set->createNamedParameter($value, IQueryBuilder::PARAM_INT))
+					->where($set->expr()->eq('tenant_id', $set->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+					->andWhere($set->expr()->eq('name', $set->createNamedParameter($name)));
+				$set->executeStatement();
+			}
+		}
+		return $value;
 	}
 
 	/** Deleting a team (0.10.1): its counters. @return int rows */
