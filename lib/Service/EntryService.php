@@ -250,23 +250,29 @@ final class EntryService {
 	}
 
 	/**
-	 * `PUT /team/settings` (Team Admins): only `entries_since`. A change
-	 * marks every source for a full read.
+	 * `PUT /team/settings` (Team Admins): `entries_since` (a change marks
+	 * every source for a full read) and, since 0.18.0, `invoicing`.
 	 *
 	 * @return array<string,mixed> the settings as in GET /team
 	 */
 	public function setSince(Membership $m, \stdClass $body): array {
 		$this->requireAdmin($m);
-		foreach (array_keys(get_object_vars($body)) as $key) {
-			if ($key !== 'entries_since') {
-				throw ApiException::invalid(Message::of('Unknown team setting “{key}”.', ['key' => $key]));
-			}
+		$settings = TeamRules::settings(['settings' => get_object_vars($body)]);
+		if (array_key_exists('backup_required', $settings)) {
+			throw ApiException::invalid(Message::of('Unknown team setting “{key}”.', ['key' => 'backup_required']));
 		}
-		if (!property_exists($body, 'entries_since')) {
+		if ($settings === []) {
 			throw ApiException::missing('entries_since');
 		}
 		$t = $this->team->tenant($m->tenantId);
-		$this->applySince($t, EntryRules::parseSince($body->entries_since));
+		if (array_key_exists('invoicing', $settings)) {
+			$t->setInvoicing($settings['invoicing'] === true ? 1 : 0);
+			$this->tenants->update($t);
+		}
+		if (array_key_exists('entries_since', $settings)) {
+			$v = $settings['entries_since'];
+			$this->applySince($t, is_string($v) ? $v : null);
+		}
 		return TenantService::settingsOf($t);
 	}
 

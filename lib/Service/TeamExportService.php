@@ -12,6 +12,10 @@ use OCA\TimeSister\Db\BackupConsentMapper;
 use OCA\TimeSister\Db\ClientStatusMapper;
 use OCA\TimeSister\Db\History;
 use OCA\TimeSister\Db\HistoryMapper;
+use OCA\TimeSister\Db\InvInvoice;
+use OCA\TimeSister\Db\InvInvoiceMapper;
+use OCA\TimeSister\Db\InvLedger;
+use OCA\TimeSister\Db\InvLedgerMapper;
 use OCA\TimeSister\Db\Record;
 use OCA\TimeSister\Db\RecordMapper;
 use OCA\TimeSister\Db\Tenant;
@@ -28,9 +32,10 @@ use Psr\Log\LoggerInterface;
 /**
  * The team backup as a ZIP (0.10.0): team, members, consents,
  * every record with its history, status, absences, a fresh export of
- * every active member's time calendar, (0.16.0) the invoice template and
+ * every active member's time calendar, (0.16.0) the invoice template,
  * (0.17.0) the named time calendars with the cutoff – not the book of
- * entries itself, which is read again from the calendars. Layout in
+ * entries itself, which is read again from the calendars – and (0.18.0)
+ * the invoice ledger and the frozen invoices, for reading only. Layout in
  * {@see ZipRules}.
  */
 final class TeamExportService {
@@ -48,6 +53,9 @@ final class TeamExportService {
 		private VisibleCopy $visible,
 		private InvoiceTemplateStore $templates,
 		private TimeCalendarMapper $timeCalendars,
+		private InvInvoiceMapper $invoices,
+		private InvLedgerMapper $ledger,
+		private IssueService $issues,
 		private ITimeFactory $time,
 		private LoggerInterface $logger,
 	) {
@@ -77,6 +85,9 @@ final class TeamExportService {
 		foreach ($this->recordFiles($tid) as $p => $json) {
 			$put($p, $json);
 		}
+		// 0.18.0: the ledger and the frozen invoices, for reading; an import never recreates them.
+		$put(ZipRules::LEDGER, Json::encode(self::toObject(['entries' => array_map(static fn (InvLedger $e): array => $e->present(), $this->ledger->findAll($tid))])));
+		$put(ZipRules::INVOICES, Json::encode(self::toObject(['invoices' => array_map(fn (InvInvoice $i): array => $this->issues->fixedOf($i), $this->invoices->findAll($tid))])));
 		$template = $this->template($tid);
 		if ($template !== null) {
 			$put(ZipRules::TEMPLATE, $template['content']);

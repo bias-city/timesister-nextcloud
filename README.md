@@ -5,7 +5,9 @@ versioned records, separate teams via one Nextcloud group each (roles
 Team Admin, Lead and User; Team Admins are that group's group admins),
 the team's time entries read from the members' named calendars and feeds
 (0.17.0; no calendar shares), Jobs (shares of a project or work package
-offered to people of the team), permission checks on the server, history, calendar backups and status
+offered to people of the team), invoices issued on the server with an
+append-only ledger and a SHA-256 chain (0.18.0), permission checks on the
+server, history, calendar backups and status
 reports from clients. No UI apart from an admin settings section.
 API: [`docs/API.md`](docs/API.md).
 

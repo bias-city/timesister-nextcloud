@@ -5,7 +5,8 @@
 // API.md and every endpoint, plus roles and departure (version 2), projects
 // (catalog and lead), Jobs and their weekly numbers, billing marks and externals, invoices and their numbers, quotes, the invoice template, team boundary, conflicts, batch, delta, history,
 // backups (with consent, visible copy and weekly job), heartbeat,
-// concurrency and the time entries (named calendars, job, roles).
+// concurrency, the time entries (named calendars, job, roles) and invoicing
+// on the server (issue, reverse, paid, ledger and chain).
 //
 //   NC_URL=http://localhost:8081 node tests/integration/integration.mjs
 //
@@ -23,6 +24,7 @@ import { vorlagen } from './teil-vorlagen.mjs'
 import { jobs } from './teil-jobs.mjs'
 import { wochen } from './teil-wochen.mjs'
 import { eintraege } from './teil-eintraege.mjs'
+import { faktura } from './teil-faktura.mjs'
 import { summary } from './harness.mjs'
 
 await teams()
@@ -36,6 +38,7 @@ await vorlagen()
 await jobs()
 await wochen()
 await eintraege()
+await faktura()
 await rest()
 await sicherungen()
 process.exit(summary())

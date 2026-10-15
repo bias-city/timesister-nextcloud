@@ -40,7 +40,10 @@ use OCP\Capabilities\ICapability;
  * team's Word template for invoices under /templates/invoice (Team Admins).
  * `entries: 1` since 0.17.0: the app holds the team's time entries –
  * named time calendars, feeds read by the server, GET /entries by role; the
- * shares matrix (/team/access, 0.5.0 to 0.16.x) is gone.
+ * shares matrix (/team/access, 0.5.0 to 0.16.x) is gone. `invoicing: 1`
+ * since 0.18.0: invoices are issued on the server (POST /invoices/{key}/issue,
+ * reverse, paid), frozen with a ledger and a SHA-256 chain; team setting
+ * `invoicing`.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -48,7 +51,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int}} */
+	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -68,6 +71,7 @@ final class Capabilities implements ICapability {
 				'invoices' => 1,
 				'invoice_template' => 1,
 				'entries' => 1,
+				'invoicing' => 1,
 			],
 		];
 	}

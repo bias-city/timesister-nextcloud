@@ -271,9 +271,9 @@ async function testteam() {
 	head('Team settings in /me (Planungsbüro, read only)')
 	{
 		const me = (await ocs(U1, 'GET', '/me')).data
-		// 0.17.0: `entries_since` (date or null) next to `backup_required`; `leads_see_calendars` is gone with the shares matrix.
-		check('/me names settings with backup_required and entries_since', typeof me?.settings?.backup_required === 'boolean'
-			&& 'entries_since' in (me?.settings || {}) && Object.keys(me.settings).length === 2, me?.settings)
+		// 0.17.0: `entries_since` (date or null) next to `backup_required`; `leads_see_calendars` is gone with the shares matrix. 0.18.0: `invoicing`.
+		check('/me names settings with backup_required, entries_since and invoicing', typeof me?.settings?.backup_required === 'boolean'
+			&& 'entries_since' in (me?.settings || {}) && typeof me?.settings?.invoicing === 'boolean' && Object.keys(me.settings).length === 3, me?.settings)
 		const team = (await ocs(A, 'GET', '/team')).data
 		check('/team names the same settings', JSON.stringify(team?.settings) === JSON.stringify(me?.settings), team?.settings)
 	}
@@ -300,15 +300,15 @@ async function testteam() {
 		const auto = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, backup_owner: null })
 		check('backup_owner null: automatic again', auto.data?.backup_owner === first, auto.text)
 
-		const defaults = { backup_required: false, entries_since: null }
+		const defaults = { backup_required: false, entries_since: null, invoicing: true }
 		check('settings: default values on creation', JSON.stringify(made.data?.settings) === JSON.stringify(defaults), made.data?.settings)
 		const who = { user: first, pass: `Test-2026-${first}!` }
 		check('member\'s /me: default values', JSON.stringify((await ocs(who, 'GET', '/me')).data?.settings) === JSON.stringify(defaults))
 		const req = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { backup_required: true } })
-		check('set only backup_required, entries_since stays', JSON.stringify(req.data?.settings) === JSON.stringify({ backup_required: true, entries_since: null }), req.text)
+		check('set only backup_required, entries_since stays', JSON.stringify(req.data?.settings) === JSON.stringify({ backup_required: true, entries_since: null, invoicing: true }), req.text)
 		expect('leads_see_calendars is gone (0.17.0): unknown key', await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { leads_see_calendars: false } }), 422, 'invalid')
 		const same = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, base)
-		const want = { backup_required: true, entries_since: null }
+		const want = { backup_required: true, entries_since: null, invoicing: true }
 		check('PUT without settings: unchanged', JSON.stringify(same.data?.settings) === JSON.stringify(want), same.text)
 		check('/me, /team and /admin/teams read them', JSON.stringify((await ocs(who, 'GET', '/me')).data?.settings) === JSON.stringify(want)
 			&& JSON.stringify((await ocs(who, 'GET', '/team')).data?.settings) === JSON.stringify(want)
@@ -318,8 +318,10 @@ async function testteam() {
 		expect('settings: malformed entries_since', await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { entries_since: '2024-1-1' } }), 422, 'invalid')
 		const since = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { entries_since: '2024-01-01' } })
 		check('entries_since through /admin/teams (0.17.0)', since.data?.settings?.entries_since === '2024-01-01' && since.data?.settings?.backup_required === true, since.text)
-		const madeWith = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { backup_required: false, entries_since: null } })
-		check('both back to default', JSON.stringify(madeWith.data?.settings) === JSON.stringify(defaults), madeWith.text)
+		const off = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { invoicing: false } })
+		check('invoicing off through /admin/teams (0.18.0)', off.data?.settings?.invoicing === false && off.data?.settings?.backup_required === true, off.text)
+		const madeWith = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { backup_required: false, entries_since: null, invoicing: true } })
+		check('all back to default', JSON.stringify(madeWith.data?.settings) === JSON.stringify(defaults), madeWith.text)
 	} finally {
 		if (id) {
 			await ocs(ADMIN, 'DELETE', `/admin/teams/${id}`)

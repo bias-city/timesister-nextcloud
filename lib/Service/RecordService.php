@@ -8,6 +8,7 @@ namespace OCA\TimeSister\Service;
 
 use OCA\TimeSister\Db\History;
 use OCA\TimeSister\Db\HistoryMapper;
+use OCA\TimeSister\Db\InvInvoiceMapper;
 use OCA\TimeSister\Db\Record;
 use OCA\TimeSister\Db\RecordMapper;
 use OCA\TimeSister\Db\TenantMapper;
@@ -36,6 +37,7 @@ final class RecordService {
 		private JobAccess $jobs,
 		private RecordRights $rights,
 		private TenantService $team,
+		private InvInvoiceMapper $invoices,
 	) {
 	}
 
@@ -381,103 +383,123 @@ final class RecordService {
 	 * @return array{revision:int,records:list<array<string,mixed>>}
 	 */
 	private function writeOnce(Membership $m, array $ops, bool $batch): array {
-		$n = count($ops);
-		$now = $this->time->getTime();
 		$this->db->beginTransaction();
 		try {
-			$top = $this->tenants->bumpRevision($m->tenantId, $n);
-			$plans = [];
-			$problems = [];
-			$own = null;
-			foreach ($ops as $op) {
-				$cur = $this->records->findOne($m->tenantId, $op['kind'], $op['key']);
-				[$outcome, $newVersion] = VersionCheck::decide(
-					$cur === null ? null : ['version' => $cur->getVersion(), 'deleted' => $cur->isTombstone()],
-					$op['version'],
-					$op['json'] === null,
-				);
-				if ($outcome !== VersionCheck::OK) {
-					$problems[] = ['op' => $op, 'outcome' => $outcome, 'current' => $cur === null ? null : $this->present($cur)];
-					continue;
-				}
-				if (in_array($op['kind'], RecordRights::AGAINST_STORED, true)) {
-					// A Lead's invoice or quote against the stored state, under the team lock.
-					try {
-						if ($op['kind'] === QuoteRules::KIND) {
-							$this->rights->requireQuoteWrite($m, $cur, $op['json'], $own ??= $this->ownKeys($m));
-						} else {
-							$this->rights->requireInvoiceWrite($m, $cur, $op['json']);
-						}
-					} catch (ApiException $e) {
-						throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
-					}
-				}
-				// The project as it was: its leads and customer decide whom to deliver again.
-				$old = $op['kind'] === 'project' && $cur !== null && !$cur->isTombstone() && $cur->getData() !== null
-					? Json::decode((string)$cur->getData()) : null;
-				$plans[] = [$op, $cur, $newVersion, $old instanceof \stdClass ? $old : null];
-			}
-			if ($problems !== []) {
-				$this->db->rollBack();
-				throw $this->problemError($problems, $batch);
-			}
-
-			$rev = $top - $n;
-			$out = [];
-			$scope = ['customers' => [], 'projects' => [], 'leads' => []];
-			foreach ($plans as [$op, $cur, $newVersion, $old]) {
-				if ($op['kind'] === 'project') {
-					$new = $op['json'] === null ? null : Json::decode($op['json']);
-					$c = ProjectAccess::scopeChange($old, $new instanceof \stdClass ? $new : null);
-					$scope['customers'] = [...$scope['customers'], ...$c['customers']];
-					if ($c['bookings']) {
-						$scope['projects'][] = $op['key'];
-						$scope['leads'] = [...$scope['leads'], ...self::leadKeys($old), ...self::leadKeys($new instanceof \stdClass ? $new : null)];
-					}
-				}
-				$rev++;
-				$isDelete = $op['json'] === null;
-				$r = $cur ?? new Record();
-				if ($cur === null) {
-					$r->setTenantId($m->tenantId);
-					$r->setKind($op['kind']);
-					$r->setRkey($op['key']);
-				}
-				// An invoice's or quote's tombstone keeps its last data (never handed out): who may read it.
-				$r->setData($isDelete && in_array($op['kind'], RecordRights::AGAINST_STORED, true) ? $cur?->getData() : $op['json']);
-				if (!$isDelete) {
-					// A tombstone keeps the accounts: this is how the person learns their record is gone.
-					$r->setAccounts($op['accounts'] === [] ? null : Json::encode($op['accounts']));
-				}
-				$r->setVersion($newVersion);
-				$r->setRevision($rev);
-				$r->setDeleted($isDelete ? 1 : 0);
-				$r->setModifiedBy($m->uid);
-				$r->setModifiedAt($now);
-				$r = $cur === null ? $this->records->insert($r) : $this->records->update($r);
-
-				$h = new History();
-				$h->setTenantId($m->tenantId);
-				$h->setKind($op['kind']);
-				$h->setRkey($op['key']);
-				$h->setVersion($newVersion);
-				$h->setDeleted($isDelete ? 1 : 0);
-				$h->setData($op['json']);
-				$h->setModifiedBy($m->uid);
-				$h->setModifiedAt($now);
-				$this->history->insert($h);
-
-				$out[] = $this->present($r);
-			}
-			$top = $this->deliverAgain($m->tenantId, $top, $scope);
+			$out = $this->applyWithin($m, $ops, $batch);
 			$this->db->commit();
-			return ['revision' => $top, 'records' => $out];
+			return $out;
 		} catch (\Throwable $e) {
 			if ($this->db->inTransaction()) {
 				$this->db->rollBack();
 			}
 			throw $e;
 		}
+	}
+
+	/**
+	 * The writes inside an open transaction (0.18.0: IssueService writes
+	 * the invoice record and its billing marks together with the frozen
+	 * invoice and the ledger). `$top` is the team's revision when the
+	 * caller already raised it by `count($ops)` – otherwise it is raised
+	 * here. `$system`: the server's own write, which may change an issued
+	 * invoice (reversal, paid); a client's write to one is `409 issued`.
+	 *
+	 * @param list<array{kind:string,key:string,version:int,json:?string,accounts:?list<string>,index?:int}> $ops
+	 * @return array{revision:int,records:list<array<string,mixed>>}
+	 */
+	public function applyWithin(Membership $m, array $ops, bool $batch = false, ?int $top = null, bool $system = false): array {
+		$n = count($ops);
+		$now = $this->time->getTime();
+		$top ??= $this->tenants->bumpRevision($m->tenantId, $n);
+		$plans = [];
+		$problems = [];
+		$own = null;
+		foreach ($ops as $op) {
+			$cur = $this->records->findOne($m->tenantId, $op['kind'], $op['key']);
+			[$outcome, $newVersion] = VersionCheck::decide(
+				$cur === null ? null : ['version' => $cur->getVersion(), 'deleted' => $cur->isTombstone()],
+				$op['version'],
+				$op['json'] === null,
+			);
+			if ($outcome !== VersionCheck::OK) {
+				$problems[] = ['op' => $op, 'outcome' => $outcome, 'current' => $cur === null ? null : $this->present($cur)];
+				continue;
+			}
+			if (in_array($op['kind'], RecordRights::AGAINST_STORED, true)) {
+				// A Lead's invoice or quote against the stored state, under the team lock.
+				try {
+					if ($op['kind'] === QuoteRules::KIND) {
+						$this->rights->requireQuoteWrite($m, $cur, $op['json'], $own ??= $this->ownKeys($m));
+					} else {
+						$this->rights->requireInvoiceWrite($m, $cur, $op['json']);
+					}
+				} catch (ApiException $e) {
+					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+				}
+			}
+			if ($op['kind'] === InvoiceRules::KIND && !$system && $this->invoices->findByKey($m->tenantId, $op['key']) !== null) {
+				// Issued on the server (0.18.0): frozen; only a reversal changes it.
+				$e = ApiException::issued();
+				throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+			}
+			// The project as it was: its leads and customer decide whom to deliver again.
+			$old = $op['kind'] === 'project' && $cur !== null && !$cur->isTombstone() && $cur->getData() !== null
+				? Json::decode((string)$cur->getData()) : null;
+			$plans[] = [$op, $cur, $newVersion, $old instanceof \stdClass ? $old : null];
+		}
+		if ($problems !== []) {
+			throw $this->problemError($problems, $batch);
+		}
+
+		$rev = $top - $n;
+		$out = [];
+		$scope = ['customers' => [], 'projects' => [], 'leads' => []];
+		foreach ($plans as [$op, $cur, $newVersion, $old]) {
+			if ($op['kind'] === 'project') {
+				$new = $op['json'] === null ? null : Json::decode($op['json']);
+				$c = ProjectAccess::scopeChange($old, $new instanceof \stdClass ? $new : null);
+				$scope['customers'] = [...$scope['customers'], ...$c['customers']];
+				if ($c['bookings']) {
+					$scope['projects'][] = $op['key'];
+					$scope['leads'] = [...$scope['leads'], ...self::leadKeys($old), ...self::leadKeys($new instanceof \stdClass ? $new : null)];
+				}
+			}
+			$rev++;
+			$isDelete = $op['json'] === null;
+			$r = $cur ?? new Record();
+			if ($cur === null) {
+				$r->setTenantId($m->tenantId);
+				$r->setKind($op['kind']);
+				$r->setRkey($op['key']);
+			}
+			// An invoice's or quote's tombstone keeps its last data (never handed out): who may read it.
+			$r->setData($isDelete && in_array($op['kind'], RecordRights::AGAINST_STORED, true) ? $cur?->getData() : $op['json']);
+			if (!$isDelete) {
+				// A tombstone keeps the accounts: this is how the person learns their record is gone.
+				$r->setAccounts($op['accounts'] === [] ? null : Json::encode($op['accounts']));
+			}
+			$r->setVersion($newVersion);
+			$r->setRevision($rev);
+			$r->setDeleted($isDelete ? 1 : 0);
+			$r->setModifiedBy($m->uid);
+			$r->setModifiedAt($now);
+			$r = $cur === null ? $this->records->insert($r) : $this->records->update($r);
+
+			$h = new History();
+			$h->setTenantId($m->tenantId);
+			$h->setKind($op['kind']);
+			$h->setRkey($op['key']);
+			$h->setVersion($newVersion);
+			$h->setDeleted($isDelete ? 1 : 0);
+			$h->setData($op['json']);
+			$h->setModifiedBy($m->uid);
+			$h->setModifiedAt($now);
+			$this->history->insert($h);
+
+			$out[] = $this->present($r);
+		}
+		$top = $this->deliverAgain($m->tenantId, $top, $scope);
+		return ['revision' => $top, 'records' => $out];
 	}
 
 	/**

@@ -10,7 +10,7 @@ import { storedZip } from './teil-vorlagen.mjs'
 
 const CODE = seedProjectOf('pb').toUpperCase()
 const calendarUrl = (uid) => `${NC}/remote.php/dav/calendars/${uid}/zeit-${uid}/`
-const uidOf = (name) => `ts-${RUN}-${name}@integration.test`
+const uidOf = (name) => `ts-${RUN}-${name}@example.test`
 const event = (summary, day) => [`DTSTART:${day}T080000Z`, `DTEND:${day}T090000Z`, `SUMMARY:${summary}`]
 const billingKey = (person, uid) => `${person}+${sha256(uid).slice(0, 32)}`
 

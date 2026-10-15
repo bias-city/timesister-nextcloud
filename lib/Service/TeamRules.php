@@ -64,7 +64,7 @@ final class TeamRules {
 	}
 
 	/** Team settings (API version 1.2) with their default values. */
-	public const SETTINGS = ['backup_required' => false];
+	public const SETTINGS = ['backup_required' => false, 'invoicing' => true];
 	/** Settings that are a date or null (0.17.0). */
 	public const DATE_SETTINGS = ['entries_since'];
 

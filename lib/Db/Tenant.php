@@ -30,6 +30,8 @@ use OCP\DB\Types;
  * @method void setEntriesRevision(int $entriesRevision)
  * @method string|null getEntriesSince()
  * @method void setEntriesSince(?string $entriesSince)
+ * @method int getInvoicing()
+ * @method void setInvoicing(int $invoicing)
  */
 final class Tenant extends Entity {
 	protected string $name = '';
@@ -46,6 +48,8 @@ final class Tenant extends Entity {
 	/** Time entries (0.17.0): the revision counter and the stored cutoff (null: default). */
 	protected int $entriesRevision = 0;
 	protected ?string $entriesSince = null;
+	/** Team setting `invoicing` (0.18.0), 0 or 1: issuing on the server. */
+	protected int $invoicing = 1;
 
 	public function __construct() {
 		$this->addType('name', Types::STRING);
@@ -58,5 +62,11 @@ final class Tenant extends Entity {
 		$this->addType('backupRequired', Types::SMALLINT);
 		$this->addType('entriesRevision', Types::INTEGER);
 		$this->addType('entriesSince', Types::STRING);
+		$this->addType('invoicing', Types::SMALLINT);
+	}
+
+	/** Issuing on the server (0.18.0) is on for this team. */
+	public function invoicingOn(): bool {
+		return $this->invoicing === 1;
 	}
 }

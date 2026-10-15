@@ -1,5 +1,33 @@
 # Changes
 
+## 0.18.0 – 2026-10-15 (beta)
+
+API unchanged in form (`api: 2`); new capability `invoicing: 1`. Plan:
+`PLAN-FAKTURA.md`, contract: `API.md` «Invoicing, 0.18.0».
+
+- **Invoices are issued on the server.** `POST /invoices/{key}/issue`
+  takes the number from the team's counter and pattern, freezes issuer,
+  customer, positions and texts, computes net, VAT and gross, writes the
+  hours and the billing marks and appends the ledger entry – in one
+  transaction. The record becomes `issued` with `number`, `due_on`,
+  `ledger_seq` and `hash`; from then on every record write answers
+  `409 issued`.
+- **Reversal and credit note** (`POST /invoices/{key}/reverse`): a new
+  invoice with negated positions and its own number; a reversal cancels
+  the original and releases its hours. **Paid/unpaid**
+  (`POST /invoices/{key}/paid`, `/unpaid`) with a ledger entry each.
+- **Reading:** `GET /invoices/{key}/fixed` (Team Admins, the project's
+  Leads), `GET /invoices/ledger`, `GET /invoices/chain/verify` recomputes
+  the SHA-256 chain and names the first break.
+- **Team setting `invoicing`** (default on; `PUT /team/settings`,
+  `/admin/teams`): off, the endpoints answer 404 and clients issue as in
+  0.16.0.
+- Draft additions: `greeting`, `body`, `footer`, `positions`,
+  `bookings[].hours/rate/code`; the record's `amount` may be negative.
+- Tables `ts_inv_invoices`, `ts_inv_hours`, `ts_inv_ledger` (append-only
+  mapper), `ts_tenants.invoicing`; the team ZIP carries `ledger.json` and
+  `invoices.json` for reading.
+
 ## 0.17.0 – 2026-10-15 (beta)
 
 API unchanged in form (`api: 2`); new capability `entries: 1`.

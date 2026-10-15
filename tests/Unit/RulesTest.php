@@ -123,7 +123,8 @@ class RulesTest extends TestCase {
 	}
 
 	public function testTeamSettings(): void {
-		$this->assertSame(['backup_required' => false], TeamRules::SETTINGS, 'default values');
+		$this->assertSame(['backup_required' => false, 'invoicing' => true], TeamRules::SETTINGS, 'default values');
+		$this->assertSame(['invoicing' => false], TeamRules::settings(['settings' => ['invoicing' => false]]), '0.18.0: issuing on the server');
 		$this->assertSame([], TeamRules::settings(['name' => 'x']), 'missing: unchanged');
 		$this->assertSame([], TeamRules::settings(['settings' => null]));
 		$this->assertSame([], TeamRules::settings(['settings' => []]));

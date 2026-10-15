@@ -22,6 +22,8 @@ final class InvoiceNumbering {
 	/** The running number, with an optional width 1–8. */
 	private const NUMBER = '/^(no|nr)(:[1-8])?$/';
 	private const COUNTER = 'invoice';
+	/** The number when the team set no pattern (0.18.0). */
+	public const DEFAULT_PATTERN = '{year}-{no:4}';
 
 	/** `invoice_number` of the settings record when it is written; null or missing passes. */
 	public static function validate(mixed $v): void {
@@ -83,6 +85,39 @@ final class InvoiceNumbering {
 			'per_year' => is_bool($perYear) ? $perYear : true,
 			'start' => is_int($start) && $start >= 1 ? min($start, self::START_MAX) : 1,
 		];
+	}
+
+	/** The pattern of the settings record, or null when none is set (lenient like {@see of()}). */
+	public static function patternOf(mixed $settings): ?string {
+		$v = $settings instanceof \stdClass ? ($settings->{self::FIELD} ?? null) : null;
+		$p = $v instanceof \stdClass ? ($v->pattern ?? null) : null;
+		return is_string($p) && $p !== '' ? $p : null;
+	}
+
+	/**
+	 * Fills the pattern with the running number (0.18.0, issuing on the
+	 * server): `{no}`/`{nr}` with an optional width, year, two-digit year,
+	 * project and customer keys. Without a pattern: `{year}-{no:4}`. The
+	 * result must fit the invoice number (64 characters).
+	 */
+	public static function fill(?string $pattern, int $no, int $year, string $project, ?string $customer): string {
+		$out = (string)preg_replace_callback('/\{([^{}]*)\}/', static function (array $m) use ($no, $year, $project, $customer): string {
+			$name = $m[1];
+			if (preg_match(self::NUMBER, $name, $w)) {
+				return isset($w[2]) ? str_pad((string)$no, (int)substr($w[2], 1), '0', STR_PAD_LEFT) : (string)$no;
+			}
+			return match ($name) {
+				'year', 'jahr' => (string)$year,
+				'yy', 'jj' => substr(str_pad((string)$year, 4, '0', STR_PAD_LEFT), -2),
+				'project', 'projekt' => $project,
+				'customer', 'kunde' => $customer ?? '',
+				default => $m[0],
+			};
+		}, $pattern ?? self::DEFAULT_PATTERN);
+		if ($out === '' || mb_strlen($out) > InvoiceRules::NUMBER_MAX) {
+			throw ApiException::invalid(Message::of('The invoice number {number} is empty or longer than {max} characters; change the pattern.', ['number' => $out, 'max' => InvoiceRules::NUMBER_MAX]));
+		}
+		return $out;
 	}
 
 	/** The counter's name: one per year, or one for all years. */

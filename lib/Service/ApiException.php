@@ -24,6 +24,8 @@ final class ApiException extends \RuntimeException {
 	public const INVALID = 'invalid';
 	public const TOO_LARGE = 'too_large';
 	public const CONFIRM = 'confirm';
+	/** 409: the invoice is issued on the server and does not change (0.18.0). */
+	public const ISSUED = 'issued';
 
 	private Message $text;
 
@@ -69,6 +71,11 @@ final class ApiException extends \RuntimeException {
 	/** 422 with code `confirm`: the typed confirmation does not match. */
 	public static function confirm(Message|string $message): self {
 		return new self(422, self::CONFIRM, $message);
+	}
+
+	/** An issued invoice refuses every record write (0.18.0). */
+	public static function issued(): self {
+		return new self(409, self::ISSUED, Message::of('An issued invoice does not change; reverse it.'));
 	}
 
 	public static function badRequest(Message|string $message): self {

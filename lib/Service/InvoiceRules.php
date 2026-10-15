@@ -29,6 +29,12 @@ final class InvoiceRules {
 	public const BUDGET_MAX = 128;
 	public const NOTE_MAX = 2000;
 	public const BY_MAX = 64;
+	/** 0.18.0: the free texts of the document, the positions, the hours per booking. */
+	public const TEXT_MAX = 4000;
+	public const MAX_POSITIONS = 500;
+	public const POSITION_KINDS = ['hours', 'flat', 'discount', 'text'];
+	public const POSITION_TEXT_MAX = 500;
+	public const CODE_MAX = 64;
 
 	private const CONTROL = '/[\x00-\x1F\x7F]/';
 	private const CONTROL_NOTE = '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/';
@@ -71,18 +77,20 @@ final class InvoiceRules {
 		}
 		self::text($d->note ?? null, 'note', self::NOTE_MAX, self::CONTROL_NOTE);
 		self::text($d->created_by ?? null, 'created_by', self::BY_MAX, self::CONTROL);
-		foreach (['created_on', 'issued_on', 'paid_on'] as $f) {
+		foreach (['created_on', 'issued_on', 'paid_on', 'due_on'] as $f) {
 			$v = $d->{$f} ?? null;
 			if ($v !== null && (!is_string($v) || !Time::isDay($v))) {
 				throw ApiException::invalid(Message::of('“{field}” must be a day in the format YYYY-MM-DD.', ['field' => $f]));
 			}
 		}
-		// Frozen when issued: hours, amount and currency as issued.
-		foreach (['hours', 'amount'] as $f) {
-			$v = $d->{$f} ?? null;
-			if ($v !== null && !ProjectRules::isRate($v)) {
-				throw ApiException::invalid(Message::of('“{field}” must be null or a number ≥ 0.', ['field' => $f]));
-			}
+		// Frozen when issued: hours, amount and currency as issued (the amount negative on a reversal, 0.18.0).
+		$hours = $d->hours ?? null;
+		if ($hours !== null && !ProjectRules::isRate($hours)) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or a number ≥ 0.', ['field' => 'hours']));
+		}
+		$amount = $d->amount ?? null;
+		if ($amount !== null && !(is_int($amount) || (is_float($amount) && is_finite($amount)))) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or a number.', ['field' => 'amount']));
 		}
 		// VAT in percent, per invoice - the rate can change during a budget.
 		$vat = $d->vat ?? null;
@@ -96,7 +104,56 @@ final class InvoiceRules {
 			}
 			$d->currency = strtoupper($c);
 		}
+		// 0.18.0: the document's free texts and the positions as the client composed them.
+		foreach (['greeting', 'body', 'footer'] as $f) {
+			self::text($d->{$f} ?? null, $f, self::TEXT_MAX, self::CONTROL_NOTE);
+		}
+		if (($d->positions ?? null) !== null) {
+			self::checkPositions($d->positions);
+		}
 		self::bookings($d->bookings ?? null);
+	}
+
+	/**
+	 * The positions (0.18.0): at most 500 of `hours`, `flat`, `discount` or
+	 * `text`, each with a text and an amount (negative for a discount,
+	 * 0 for a text line); work package, person, hours and rate optional.
+	 */
+	public static function checkPositions(mixed $list): void {
+		if (!is_array($list) || !array_is_list($list) || count($list) > self::MAX_POSITIONS) {
+			throw ApiException::invalid(Message::of('“positions” must be a list of at most {max} positions.', ['max' => self::MAX_POSITIONS]));
+		}
+		foreach ($list as $i => $p) {
+			try {
+				if (!($p instanceof \stdClass)) {
+					throw ApiException::invalid('Each position must be a JSON object.');
+				}
+				if (!in_array($p->kind ?? null, self::POSITION_KINDS, true)) {
+					throw ApiException::invalid(Message::of('“kind” of a position is one of {kinds}.', ['kinds' => implode(', ', self::POSITION_KINDS)]));
+				}
+				$t = $p->text ?? null;
+				if (!is_string($t) || $t === '' || mb_strlen($t) > self::POSITION_TEXT_MAX || preg_match(self::CONTROL_NOTE, $t) || !mb_check_encoding($t, 'UTF-8')) {
+					throw ApiException::invalid(Message::of('“{field}” must be text of 1 to {max} characters.', ['field' => 'text', 'max' => self::POSITION_TEXT_MAX]));
+				}
+				$wp = $p->work_package ?? null;
+				if ($wp !== null && (!is_int($wp) || $wp < 0)) {
+					throw ApiException::invalid('“work_package” must be null or an integer ≥ 0.');
+				}
+				self::text($p->person ?? null, 'person', self::PERSON_MAX, self::CONTROL);
+				foreach (['hours', 'rate'] as $f) {
+					$v = $p->{$f} ?? null;
+					if ($v !== null && !ProjectRules::isRate($v)) {
+						throw ApiException::invalid(Message::of('“{field}” must be null or a number ≥ 0.', ['field' => $f]));
+					}
+				}
+				$a = $p->amount ?? null;
+				if (!(is_int($a) || (is_float($a) && is_finite($a)))) {
+					throw ApiException::invalid('“amount” must be a number.');
+				}
+			} catch (ApiException $e) {
+				throw ApiException::invalid(Message::of('Position {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]));
+			}
+		}
 	}
 
 	private static function bookings(mixed $list): void {
@@ -122,6 +179,14 @@ final class InvoiceRules {
 					throw ApiException::invalid('The same booking (person, uid, start) is there twice.');
 				}
 				$seen[$id] = true;
+				// 0.18.0: the hours, the rate and the code of the occurrence, stored with the invoice when issuing.
+				foreach (['hours', 'rate'] as $f) {
+					$v = $b->{$f} ?? null;
+					if ($v !== null && !ProjectRules::isRate($v)) {
+						throw ApiException::invalid(Message::of('“{field}” must be null or a number ≥ 0.', ['field' => $f]));
+					}
+				}
+				self::text($b->code ?? null, 'code', self::CODE_MAX, self::CONTROL);
 			} catch (ApiException $e) {
 				throw ApiException::invalid(Message::of('Booking {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]));
 			}
