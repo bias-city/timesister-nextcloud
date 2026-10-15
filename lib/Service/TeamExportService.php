@@ -8,7 +8,6 @@ namespace OCA\TimeSister\Service;
 
 use OCA\TimeSister\AppInfo\Application;
 use OCA\TimeSister\Db\AbsenceMapper;
-use OCA\TimeSister\Db\AccessMapper;
 use OCA\TimeSister\Db\BackupConsentMapper;
 use OCA\TimeSister\Db\ClientStatusMapper;
 use OCA\TimeSister\Db\History;
@@ -16,6 +15,8 @@ use OCA\TimeSister\Db\HistoryMapper;
 use OCA\TimeSister\Db\Record;
 use OCA\TimeSister\Db\RecordMapper;
 use OCA\TimeSister\Db\Tenant;
+use OCA\TimeSister\Db\TimeCalendar;
+use OCA\TimeSister\Db\TimeCalendarMapper;
 use OCP\App\IAppManager;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\Files\IAppData;
@@ -25,16 +26,18 @@ use OCP\ITempManager;
 use Psr\Log\LoggerInterface;
 
 /**
- * The team backup as a ZIP (0.10.0): team, members, shares, consents,
- * every record with its history, status, absences and a fresh export of
- * every active member's time calendar. Layout in {@see ZipRules}.
+ * The team backup as a ZIP (0.10.0): team, members, consents,
+ * every record with its history, status, absences, a fresh export of
+ * every active member's time calendar, (0.16.0) the invoice template and
+ * (0.17.0) the named time calendars with the cutoff – not the book of
+ * entries itself, which is read again from the calendars. Layout in
+ * {@see ZipRules}.
  */
 final class TeamExportService {
 	public function __construct(
 		private TenantService $tenants,
 		private RecordMapper $records,
 		private HistoryMapper $history,
-		private AccessMapper $access,
 		private BackupConsentMapper $consents,
 		private AbsenceMapper $absences,
 		private ClientStatusMapper $status,
@@ -43,6 +46,8 @@ final class TeamExportService {
 		private ITempManager $temp,
 		private IAppData $appData,
 		private VisibleCopy $visible,
+		private InvoiceTemplateStore $templates,
+		private TimeCalendarMapper $timeCalendars,
 		private ITimeFactory $time,
 		private LoggerInterface $logger,
 	) {
@@ -71,6 +76,11 @@ final class TeamExportService {
 		$put(ZipRules::ABSENCES, Json::encode(self::toObject($this->absenceRows($tid))));
 		foreach ($this->recordFiles($tid) as $p => $json) {
 			$put($p, $json);
+		}
+		$template = $this->template($tid);
+		if ($template !== null) {
+			$put(ZipRules::TEMPLATE, $template['content']);
+			$put(ZipRules::TEMPLATE_META, Json::encode(self::toObject($template['meta'])));
 		}
 		foreach (array_map('strval', array_keys($this->tenants->memberRoles($tid))) as $uid) {
 			$p = ZipRules::calendarPath($uid);
@@ -139,24 +149,26 @@ final class TeamExportService {
 		$members = [];
 		$all = $this->tenants->members($tid);
 		foreach (array_map('strval', array_keys($all)) as $uid) {
-			$members[] = $this->tenants->presentMember($uid, $all[$uid]);
-		}
-		$access = [];
-		foreach ($this->access->findByTenant($tid) as $a) {
-			$access[] = ['viewer' => $a->getViewer(), 'owner' => $a->getOwner(), 'source' => $a->getSource(),
-				'level' => $a->getLevel(), 'updated_by' => $a->getUpdatedBy(), 'updated_at' => Time::iso($a->getUpdatedAt())];
+			$members[] = $this->tenants->presentMember($tid, $uid, $all[$uid]);
 		}
 		$consents = [];
 		foreach ($this->consents->findByTenant($tid) as $c) {
 			$consents[] = ['uid' => $c->getUid(), 'consent' => $c->getConsent() === 1, 'since' => Time::iso($c->getSince()),
 				'revoked_at' => Time::iso($c->getRevokedAt()), 'notice' => $c->getNotice(), 'notice_at' => Time::iso($c->getNoticeAt())];
 		}
+		$named = [];
+		foreach ($this->timeCalendars->findByTenant($tid) as $row) {
+			if ($row->getSource() === TimeCalendar::CALENDAR) {
+				$named[] = ['uid' => $row->getUid(), 'calendar_uri' => (string)$row->getCalendarUri(), 'named_at' => Time::iso($row->getNamedAt())];
+			}
+		}
+		// `settings.entries_since` comes with presentTeam.
 		return $this->tenants->presentTeam($t) + [
 			'revision' => $t->getRevision(),
 			'created_at' => Time::iso($t->getCreatedAt()),
 			'members' => $members,
-			'access' => $access,
 			'consents' => $consents,
+			'time_calendars' => $named,
 		];
 	}
 
@@ -170,7 +182,6 @@ final class TeamExportService {
 				'app_version' => $s->getAppVersion(),
 				'last_sync' => Time::iso($s->getLastSync()),
 				'calendar_url' => $s->getCalendarUrl(),
-				'calendar_shared' => $s->getCalendarShared(),
 				'job_weeks' => $weeks === null ? null : Json::decode($weeks),
 				'job_weeks_at' => Time::iso($s->getJobWeeksAt()),
 			];
@@ -224,6 +235,21 @@ final class TeamExportService {
 			'modified_at' => Time::iso($h->getModifiedAt()),
 			'data' => ($h->getDeleted() === 1 || $raw === null) ? null : Json::decode($raw),
 		];
+	}
+
+	/**
+	 * The invoice template; a failure to read it leaves it out rather than
+	 * failing the backup.
+	 *
+	 * @return ?array{meta:array{name:string,size:int,sha256:string,modified_at:string,modified_by:string},content:string}
+	 */
+	private function template(int $tid): ?array {
+		try {
+			return $this->templates->get($tid);
+		} catch (\Throwable $e) {
+			$this->logger->warning('TimeSister: invoice template of team {team} not in the team backup', ['app' => 'timesister', 'team' => $tid, 'exception' => $e]);
+			return null;
+		}
 	}
 
 	/** The time calendar as the weekly job exports it; null when missing or failing. */

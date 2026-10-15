@@ -10,7 +10,7 @@ namespace OCA\TimeSister\Service;
 final class StatusRules {
 	/**
 	 * @param array<string,mixed> $in
-	 * @return array{app_version:?string,last_sync:?int,last_backup:?string,calendar_url:?string,calendar_shared:?bool,applied_shares:?array<string,string>}
+	 * @return array{app_version:?string,last_sync:?int,last_backup:?string,calendar_url:?string,projects:?list<string>}
 	 */
 	public static function validate(array $in): array {
 		$v = $in['app_version'] ?? null;
@@ -36,12 +36,35 @@ final class StatusRules {
 				throw ApiException::invalid('“calendar_url” must be an http(s) address.');
 			}
 		}
-		$shared = $in['calendar_shared'] ?? null;
-		if ($shared !== null && !is_bool($shared)) {
-			throw ApiException::notBool('calendar_shared');
+		$projects = $in['projects'] ?? null;
+		$projects = $projects === null ? null : self::projects($projects);
+		return ['app_version' => $v, 'last_sync' => $sync, 'last_backup' => $backup, 'calendar_url' => $url, 'projects' => $projects];
+	}
+
+	/** At most this many project keys in `projects`. */
+	public const MAX_PROJECTS = 500;
+
+	/**
+	 * `projects` (0.12.0): the project keys the person booked on in the last
+	 * 12 months – at most 500, each 1–64 bytes without control characters.
+	 * Without duplicates, sorted.
+	 *
+	 * @return list<string>
+	 */
+	public static function projects(mixed $in): array {
+		$bad = static fn (): ApiException => ApiException::badRequest(Message::of('“{field}” must be a list of at most {max} project keys.', ['field' => 'projects', 'max' => self::MAX_PROJECTS]));
+		if (!is_array($in) || !array_is_list($in) || count($in) > self::MAX_PROJECTS) {
+			throw $bad();
 		}
-		$applied = $in['applied_shares'] ?? null;
-		$applied = $applied === null ? null : AccessRules::validateApplied($applied);
-		return ['app_version' => $v, 'last_sync' => $sync, 'last_backup' => $backup, 'calendar_url' => $url, 'calendar_shared' => $shared, 'applied_shares' => $applied];
+		$out = [];
+		foreach ($in as $key) {
+			if (!is_string($key) || $key === '' || strlen($key) > 64 || preg_match('/[\x00-\x1F\x7F]/', $key)) {
+				throw $bad();
+			}
+			$out[$key] = true;
+		}
+		$keys = array_map('strval', array_keys($out));
+		sort($keys, SORT_STRING);
+		return $keys;
 	}
 }

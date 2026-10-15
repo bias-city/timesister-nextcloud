@@ -8,9 +8,10 @@ namespace OCA\TimeSister\Service;
 
 /**
  * A team's three roles, from weak to strong (since 0.5.0). `admin` (shown
- * as “Team Admin”) is whoever manages the team group in Nextcloud; the app
- * (ts_members) keeps `lead`, otherwise `user`. The words people see come
- * from {@see RoleName}.
+ * as “Team Admin”) is whoever manages the team group in Nextcloud; `lead`
+ * follows from the leads of the active projects (0.11.0, {@see
+ * LeadResolver}) and is never set; otherwise `user`. The words people see
+ * come from {@see RoleName}.
  */
 final class Role {
 	public const USER = 'user';
@@ -18,16 +19,16 @@ final class Role {
 	public const ADMIN = 'admin';
 
 	/**
-	 * Until 0.4.0 the role “Manager”. The migration to 0.5.0 turns stored
-	 * entries into `lead`; older data read as `lead`, too.
+	 * Until 0.4.0 the role “Manager”. The migration to 0.5.0 turned stored
+	 * entries into `lead`; since 0.11.0 no stored role counts any more.
 	 */
 	public const LEGACY_SUBADMIN = 'subadmin';
 
 	/** All roles, weakest first. */
 	public const ALL = [self::USER, self::LEAD, self::ADMIN];
 
-	/** What PUT /team/members can set; `admin` sets the group admin in Nextcloud. */
-	public const APP_ROLES = [self::USER, self::LEAD, self::ADMIN];
+	/** What PUT /team/members can set (0.11.0: no `lead`); `admin` sets the group admin in Nextcloud. */
+	public const APP_ROLES = [self::USER, self::ADMIN];
 
 	/** The team group: the only row in ts_role_groups that counts (API version 2). */
 	public const TEAM_GROUP = 'team';
@@ -60,7 +61,7 @@ final class Role {
 		return $role === self::ADMIN;
 	}
 
-	/** Lead and Team Admin read all master data. */
+	/** Lead and Team Admin read master data of others – a Lead only narrowed (0.14.0, {@see RecordRights}). */
 	public static function readsAll(string $role): bool {
 		return self::rank($role) >= self::rank(self::LEAD);
 	}

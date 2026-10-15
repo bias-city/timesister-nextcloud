@@ -10,6 +10,8 @@ use OCA\TimeSister\Db\AbsenceMapper;
 use OCA\TimeSister\Db\AccessMapper;
 use OCA\TimeSister\Db\BackupConsentMapper;
 use OCA\TimeSister\Db\MemberMapper;
+use OCA\TimeSister\Db\TimeCalendarMapper;
+use OCA\TimeSister\Service\EntryService;
 use OCA\TimeSister\Service\RecordService;
 use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventListener;
@@ -20,8 +22,10 @@ use Psr\Log\LoggerInterface;
  * Account deleted: the person records stay – booked hours are attached to
  * them. They only get the `account_deleted_at` note; `data`, version and
  * revision stay unchanged. Backup consent is dropped; existing backups stay
- * until the retention period ends. App role, leaving date and shares are
- * dropped: a new account with the same identifier inherits nothing.
+ * until the retention period ends. App role, leaving date and rows of the
+ * former shares matrix are dropped: a new account with the same identifier
+ * inherits nothing. The
+ * named time calendar goes with the account; its entries become tombstones.
  *
  * @template-implements IEventListener<UserDeletedEvent>
  */
@@ -32,6 +36,8 @@ final class UserDeletedListener implements IEventListener {
 		private MemberMapper $members,
 		private AccessMapper $access,
 		private AbsenceMapper $absences,
+		private TimeCalendarMapper $timeCalendars,
+		private EntryService $entries,
 		private LoggerInterface $logger,
 	) {
 	}
@@ -45,6 +51,10 @@ final class UserDeletedListener implements IEventListener {
 		$this->members->deleteByUid($uid);
 		$this->access->deleteByUid($uid);
 		$this->absences->deleteByUid($uid);
+		foreach ($this->timeCalendars->findByUid($uid) as $tc) {
+			$this->entries->vanishAll($tc->getTenantId(), $uid, $tc->getSource());
+			$this->timeCalendars->delete($tc);
+		}
 		$n = $this->records->markAccountDeleted($uid);
 		if ($n > 0) {
 			// No identifier in the log: no personal data.

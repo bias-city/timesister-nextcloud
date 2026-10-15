@@ -22,6 +22,9 @@ final class ZipRules {
 	public const ABSENCES = 'absences.json';
 	public const RECORDS = 'records/';
 	public const CALENDARS = 'calendars/';
+	/** The team's invoice template (0.16.0) and its meta: name, size, sha256, modified_at, modified_by. */
+	public const TEMPLATE = 'templates/invoice.docx';
+	public const TEMPLATE_META = 'templates/invoice.json';
 	public const MODE_MERGE = 'merge';
 	public const MODE_REPLACE = 'replace';
 	public const TOKEN_PATTERN = '/^[0-9a-f]{32}$/';
@@ -29,7 +32,7 @@ final class ZipRules {
 	public const TOKEN_TTL = 86400;
 
 	/** Fields whose string value is an account; lists of accounts; `names` is keyed by account. */
-	private const UID_FIELDS = ['login', 'assignee', 'sender', 'by', 'person', 'uid', 'owner', 'modified_by'];
+	private const UID_FIELDS = ['login', 'assignee', 'sender', 'by', 'person', 'uid', 'owner', 'modified_by', 'created_by'];
 	private const UID_LISTS = ['accounts', 'recipients', 'declined_by', 'leads'];
 
 	public static function stamp(int $now): string {
@@ -225,10 +228,14 @@ final class ZipRules {
 		return self::mapUid($uid, $mapping) ?? $uid;
 	}
 
-	/** Person keys follow the account; billing keys carry the person in front of `+`. */
+	/** Person keys follow the account; billing keys carry the person in front of `+`, booking keys the account in front of the first `+`. */
 	public static function mapKey(string $kind, string $key, array $mapping): string {
 		if ($kind === 'person') {
 			return self::keepUid($key, $mapping);
+		}
+		if (BookingRules::isKind($kind)) {
+			$k = BookingRules::parse($kind, $key);
+			return $k === null ? $key : self::keepUid($k['uid'], $mapping) . substr($key, strlen($k['uid']));
 		}
 		if ($kind === RecordValidator::BILLING) {
 			$person = BillingRules::personOf($key);
@@ -321,6 +328,27 @@ final class ZipRules {
 			return 'skip';
 		}
 		return 'update';
+	}
+
+	/**
+	 * What to do with the backup's invoice template: `store`, `keep` the
+	 * one here or nothing because it is the `same`. Merge takes it only
+	 * when none is here or it is younger; replace whenever it differs.
+	 *
+	 * @param ?array{sha256:string,modified_at:string,...} $target
+	 * @param array{sha256:string,modified_at:string,...} $source
+	 */
+	public static function decideTemplate(?array $target, array $source, string $mode): string {
+		if ($target === null) {
+			return 'store';
+		}
+		if ($target['sha256'] === $source['sha256']) {
+			return 'same';
+		}
+		if ($mode === self::MODE_MERGE && (int)Time::parseIso($source['modified_at']) <= (int)Time::parseIso($target['modified_at'])) {
+			return 'keep';
+		}
+		return 'store';
 	}
 
 	/**

@@ -91,17 +91,47 @@ class ZipReaderTest extends TestCase {
 		$this->assertSame('AT', $b['team']['name']);
 		$this->assertCount(2, $b['team']['members']);
 		$this->assertSame(1788220800, $b['team']['members'][1]['left_at']);
-		$this->assertTrue($b['team']['members'][1]['may_override']);
-		$this->assertSame('view', $b['team']['access'][0]['level']);
+		// 0.17.0: `may_override`, `access` and `calendar_shared` of older ZIPs are ignored.
+		$this->assertArrayNotHasKey('may_override', $b['team']['members'][1]);
+		$this->assertArrayNotHasKey('access', $b['team']);
 		$this->assertTrue($b['team']['consents'][0]['consent']);
 		$this->assertCount(1, $b['records']);
 		$this->assertSame('atuser', $b['records'][0]['key']);
 		$this->assertSame('{"weeks":[]}', $b['status']['atuser']['job_weeks']);
-		$this->assertSame(1, $b['status']['atuser']['calendar_shared']);
+		$this->assertArrayNotHasKey('calendar_shared', $b['status']['atuser']);
 		$this->assertSame('vacation', $b['absences']['atuser'][0]['kind']);
 		$cals = array_column($b['calendars'], 'missing', 'uid');
 		$this->assertSame(['atuser' => false, 'atadmin' => true], $cals);
 		$this->assertSame(['atadmin', 'atuser'], ZipReader::accounts($b));
+		// A ZIP from before 0.17.0: no cutoff, no named time calendars.
+		$this->assertSame(['entries_since' => null], $b['team']['settings']);
+		$this->assertSame([], $b['team']['time_calendars']);
+	}
+
+	/** 0.17.0: the cutoff and the named time calendars travel in team.json. */
+	public function testReadsCutoffAndTimeCalendars(): void {
+		$team = static fn (array $extra): string => json_encode(['name' => 'AT', 'slug' => 'at', 'members' => [['uid' => 'atadmin', 'role' => 'admin']], 'consents' => []] + $extra);
+		$b = ZipReader::read(ZipFile::open($this->backup([ZipRules::TEAM => $team([
+			'settings' => ['backup_required' => false, 'entries_since' => '2024-01-01'],
+			'time_calendars' => [['uid' => 'atadmin', 'calendar_uri' => 'zeit-atadmin', 'named_at' => '2026-10-15T08:00:00Z'], ['uid' => 'gone', 'calendar_uri' => 'Zeit Mia']],
+		])])));
+		$this->assertSame('2024-01-01', $b['team']['settings']['entries_since']);
+		$this->assertSame([['uid' => 'atadmin', 'calendar_uri' => 'zeit-atadmin'], ['uid' => 'gone', 'calendar_uri' => 'Zeit Mia']], $b['team']['time_calendars']);
+		$this->assertContains('gone', ZipReader::accounts($b), 'a named account counts for the mapping');
+		$this->assertNull(ZipReader::read(ZipFile::open($this->backup([ZipRules::TEAM => $team(['settings' => ['entries_since' => null]])])))['team']['settings']['entries_since']);
+		foreach ([
+			['settings' => ['entries_since' => '2024-13-01']],
+			['settings' => ['entries_since' => 20240101]],
+			['time_calendars' => [['uid' => 'atadmin']]],
+			['time_calendars' => [['uid' => '', 'calendar_uri' => 'zeit-x']]],
+			['time_calendars' => [['uid' => 'atadmin', 'calendar_uri' => 'a/b']]],
+			['time_calendars' => 'zeit-atadmin'],
+		] as $bad) {
+			$path = $this->backup([ZipRules::TEAM => $team($bad)]);
+			$this->assertSame('422 invalid', self::code(function () use ($path): void {
+				ZipReader::read(ZipFile::open($path));
+			}), json_encode($bad));
+		}
 	}
 
 	public function testRejectsTampering(): void {
@@ -162,7 +192,6 @@ class ZipReaderTest extends TestCase {
 		foreach ([
 			[ZipRules::TEAM => '[]'],
 			[ZipRules::TEAM => '{"name":"AT","members":[{"uid":"a","role":"boss"}]}'],
-			[ZipRules::TEAM => '{"name":"AT","access":[{"viewer":"a","owner":"b","source":"x","level":"view"}]}'],
 			[ZipRules::ABSENCES => '{"atuser":[{"source_uid":"u\n1","kind":"vacation","start":"2026-10-10","end":"2026-10-12"}]}'],
 			[ZipRules::recordPath('person', 'atuser') => '{"kind":"person","key":"atuser"}'],
 			[ZipRules::STATUS => 'nope'],

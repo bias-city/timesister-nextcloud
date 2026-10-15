@@ -64,14 +64,16 @@ final class TeamRules {
 	}
 
 	/** Team settings (API version 1.2) with their default values. */
-	public const SETTINGS = ['leads_see_calendars' => true, 'backup_required' => false];
+	public const SETTINGS = ['backup_required' => false];
+	/** Settings that are a date or null (0.17.0). */
+	public const DATE_SETTINGS = ['entries_since'];
 
 	/**
 	 * Team settings from the body. If `settings` or a key is missing, the
-	 * value stays. Unknown keys or a non-boolean value: 422.
+	 * value stays. Unknown keys, a non-boolean value or a malformed date: 422.
 	 *
 	 * @param array<string,mixed> $in
-	 * @return array<string,bool>
+	 * @return array<string,bool|string|null>
 	 */
 	public static function settings(array $in): array {
 		$s = $in['settings'] ?? null;
@@ -83,6 +85,10 @@ final class TeamRules {
 		}
 		$out = [];
 		foreach ($s as $key => $value) {
+			if (is_string($key) && in_array($key, self::DATE_SETTINGS, true)) {
+				$out[$key] = EntryRules::parseSince($value);
+				continue;
+			}
 			if (!is_string($key) || !array_key_exists($key, self::SETTINGS)) {
 				throw ApiException::invalid(Message::of('Unknown team setting “{key}”.', ['key' => $key]));
 			}

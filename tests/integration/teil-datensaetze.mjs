@@ -3,11 +3,16 @@ import { ADMIN, as, ocs, sql } from './lib.mjs'
 import { A, AA, AL, AU, C, L, NOAH, P, R, RUN, U1, U2, V, ISO, b64, check, expect, head, isObj, keysOf, me, sha256, ensure } from './harness.mjs'
 
 export async function datensaetze() {
+	// A project led by pblead and its customer (0.14.0); deleted at the end.
+	const PL = `PK-${RUN}`
+	const CL = `KL-${RUN}`
 	let rev0 = 0
+	// Bare test projects are drafts: from active on a project needs a code (0.16.0).
+	const DRAFT = 'draft'
 	head('Write, validate, conflict')
 	{
 		rev0 = (await me(A)).revision
-		const data = { id: P, name: 'Planungsbüro/Ä', mapping: {}, subprojects: [], budgets: [{ from: '2026-01-01', hours: 33.6 }], nested: { empty: {} } }
+		const data = { id: P, name: 'Planungsbüro/Ä', codes: [P], mapping: {}, subprojects: [], budgets: [{ from: '2026-01-01', hours: 33.6 }], nested: { empty: {} } }
 		const r = await ocs(A, 'PUT', `/records/project/${P}`, { version: 0, data })
 		expect('new project with version 0', r, 200)
 		check('response is the record (version 1, revision > old)', r.data?.version === 1 && r.data?.revision > rev0 && r.data?.deleted === false
@@ -38,11 +43,11 @@ export async function datensaetze() {
 		expect('kind in the body', await ocs(A, 'PUT', `/records/project/${P}`, { version: 2, kind: 'person', data }), 400, 'invalid')
 		expect('not JSON', await ocs(A, 'PUT', `/records/project/${P}`, undefined, { raw: '{kaputt' }), 400, 'invalid')
 		const big = 'x'.repeat(256 * 1024)
-		expect('record over 256 KB', await ocs(A, 'PUT', `/records/project/${P}`, { version: 2, data: { id: P, pad: big } }), 413, 'too_large')
-		expect('body over 1 MB', await ocs(A, 'PUT', `/records/project/${P}`, { version: 2, data: { id: P, pad: 'y'.repeat(1100 * 1024) } }), 413, 'too_large')
+		expect('record over 256 KB', await ocs(A, 'PUT', `/records/project/${P}`, { version: 2, data: { id: P, status: DRAFT, pad: big } }), 413, 'too_large')
+		expect('body over 1 MB', await ocs(A, 'PUT', `/records/project/${P}`, { version: 2, data: { id: P, status: DRAFT, pad: 'y'.repeat(1100 * 1024) } }), 413, 'too_large')
 
 		const odd = `a+b@c.d-${RUN}`
-		expect('key with @ + . -', await ocs(A, 'PUT', `/records/project/${encodeURIComponent(odd)}`, { version: 0, data: { id: odd } }), 200)
+		expect('key with @ + . -', await ocs(A, 'PUT', `/records/project/${encodeURIComponent(odd)}`, { version: 0, data: { id: odd, status: DRAFT } }), 200)
 		const got = await ocs(A, 'GET', `/records/project/${encodeURIComponent(odd)}`)
 		check('… and read again', got.status === 200 && got.data?.key === odd, got.text)
 
@@ -97,10 +102,23 @@ export async function datensaetze() {
 	}
 	head('Permissions: lead (pblead)')
 	{
+		// 0.14.0: others as a name card, customers only of the Lead's projects.
+		expect('customer of a project the Lead leads', await ocs(A, 'PUT', `/records/customer/${CL}`, { version: 0, data: { id: CL, name: 'Lead customer', contacts: [] } }), 200)
+		expect('… and the project, led by pblead', await ocs(A, 'PUT', `/records/project/${PL}`, { version: 0, data: { id: PL, name: 'Led', codes: [PL], subprojects: [], leads: ['pblead'], customer: CL, status: 'active' } }), 200)
 		const k = keysOf(await ocs(L, 'GET', '/records'))
-		check('reads all persons and customers', k.has('person/pbuser1') && k.has(`person/${NOAH}`) && k.has(`customer/${C}`) && k.has(`project/${P}`))
-		expect('customer directly', await ocs(L, 'GET', `/records/customer/${C}`), 200)
-		expect('another person directly', await ocs(L, 'GET', '/records/person/pbuser1'), 200)
+		check('reads the persons and only the customer of their project', k.has('person/pbuser1') && k.has(`person/${NOAH}`) && k.has(`customer/${CL}`)
+			&& !k.has(`customer/${C}`) && k.has(`project/${P}`), [...k].filter((x) => x.startsWith('customer/')))
+		expect('customer of their project directly', await ocs(L, 'GET', `/records/customer/${CL}`), 200)
+		expect('another customer directly', await ocs(L, 'GET', `/records/customer/${C}`), 403, 'forbidden')
+		expect('a customer that does not exist', await ocs(L, 'GET', `/records/customer/nie-${RUN}`), 403, 'forbidden')
+		const card = await ocs(L, 'GET', '/records/person/pbuser1')
+		const fields = ['accounts', 'first_name', 'initials', 'last_name', 'login', 'schema']
+		check('another person directly: only the name card', card.status === 200 && card.data?.data?.login === 'pbuser1'
+			&& Object.keys(card.data?.data || {}).every((f) => fields.includes(f)), card.data?.data)
+		const inList = ((await ocs(L, 'GET', '/records')).data?.records || []).find((x) => x.kind === 'person' && x.key === NOAH)
+		check('… also in the list', !!inList && Object.keys(inList.data || {}).every((f) => fields.includes(f)), inList?.data)
+		const ownP = await ocs(L, 'GET', '/records/person/pblead')
+		check('own person: in full', ownP.status === 200 && ownP.data?.data?.login === 'pblead', ownP.data)
 		expect('PUT', await ocs(L, 'PUT', `/records/customer/${C}`, { version: 1, data: { id: C } }), 403, 'forbidden')
 		expect('DELETE', await ocs(L, 'DELETE', `/records/customer/${C}?version=1`), 403, 'forbidden')
 		expect('Batch', await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'project', key: `L-${RUN}`, version: 0, data: { id: `L-${RUN}` } }] }), 403, 'forbidden')
@@ -112,6 +130,40 @@ export async function datensaetze() {
 		expect('GET /team', await ocs(L, 'GET', '/team'), 403, 'forbidden')
 		expect('report heartbeat', await ocs(L, 'POST', '/status', { app_version: '0.2.0' }), 200)
 	}
+	// ---------------------------------------------------------------------------
+	head('Cost rates on the person (0.16.0): Team Admins alone')
+	{
+		const caps = await ocs(U1, 'GET', '/ocs/v1.php/cloud/capabilities?format=json')
+		check('capability cost_rates: 1', caps.data?.capabilities?.timesister?.cost_rates === 1, caps.data?.capabilities?.timesister)
+		const cur = (await ocs(A, 'GET', '/records/person/pbuser1')).data
+		const rates = [{ from: '2026-01-01', rate: 95 }, { from: '2026-07-01', rate: 110.5 }]
+		const rev = (await me(A)).revision
+		const w = await ocs(A, 'PUT', '/records/person/pbuser1', { version: cur.version, data: { ...cur.data, cost_rates: rates } })
+		check('admin writes cost_rates and reads them back', w.status === 200 && JSON.stringify(w.data?.data?.cost_rates) === JSON.stringify(rates), w.text.slice(0, 300))
+		const again = await ocs(V, 'GET', '/records/person/pbuser1')
+		check('second Team Admin reads them', JSON.stringify(again.data?.data?.cost_rates) === JSON.stringify(rates), again.data?.data)
+		const hasRates = (d) => Object.prototype.hasOwnProperty.call(d || {}, 'cost_rates')
+		const own = await ocs(U1, 'GET', '/records/person/pbuser1')
+		check('pbuser1: own person without cost_rates, the rest there', own.status === 200 && own.data?.data?.first_name === 'Mia' && !hasRates(own.data?.data), own.data?.data)
+		check('… not in the list', !hasRates(((await ocs(U1, 'GET', '/records')).data?.records || []).find((x) => x.kind === 'person' && x.key === 'pbuser1')?.data))
+		const delta = ((await ocs(U1, 'GET', `/records?since=${rev}`)).data?.records || []).find((x) => x.kind === 'person' && x.key === 'pbuser1')
+		check('… not in the delta', !!delta && !hasRates(delta.data), delta)
+		check('… not in the history', ((await ocs(U1, 'GET', '/records/person/pbuser1/history')).data || []).every((h) => !hasRates(h.data)))
+		check('pblead: not on the name card', !hasRates((await ocs(L, 'GET', '/records/person/pbuser1')).data?.data))
+		const bad = async (name, cost_rates, text) => {
+			const r = await ocs(A, 'PUT', '/records/person/pbuser1', { version: cur.version + 1, data: { ...cur.data, cost_rates } })
+			check(`422 ${name}`, r.status === 422 && r.data?.message?.includes(text), `${r.status} ${r.data?.message}`)
+		}
+		await bad('not a list', { '2026-01-01': 95 }, '“cost_rates” must be a list')
+		await bad('no day', [{ rate: 95 }], 'needs a day “from”')
+		await bad('no such day', [{ from: '2026-02-30', rate: 95 }], 'needs a day “from”')
+		await bad('negative', [{ from: '2026-01-01', rate: -1 }], 'needs a day “from”')
+		await bad('a day twice', [{ from: '2026-01-01', rate: 95 }, { from: '2026-01-01', rate: 99 }], 'names the day 2026-01-01 twice')
+		expect('null clears them', await ocs(A, 'PUT', '/records/person/pbuser1', { version: cur.version + 1, data: { ...cur.data, cost_rates: null } }), 200)
+		// Back to the record as it was before this part.
+		expect('pbuser1 restored', await ocs(A, 'PUT', '/records/person/pbuser1', { version: cur.version + 2, data: cur.data }), 200)
+	}
+
 	head('Permissions: both Team Admins (pbverw, pbadmin)')
 	{
 		for (const [who, name] of [[V, 'pbverw'], [A, 'pbadmin']]) {
@@ -135,14 +187,15 @@ export async function datensaetze() {
 		const kd = keysOf(await ocs(AA, 'GET', `/records?since=${Math.max(0, rev0 - 1)}`))
 		check('not in the delta either', !kd.has(`project/${P}`) && !kd.has('person/pbuser1'))
 		expect('pb project directly', await ocs(AA, 'GET', `/records/project/${P}`), 404, 'not_found')
-		expect('pb customer directly (lead at)', await ocs(AL, 'GET', `/records/customer/${C}`), 404, 'not_found')
+		// 0.14.0: a Lead reads no customer outside their projects – 403, existence not revealed.
+		expect('pb customer directly (lead at)', await ocs(AL, 'GET', `/records/customer/${C}`), 403, 'forbidden')
 		expect('pb person directly', await ocs(AA, 'GET', '/records/person/pbuser1'), 404, 'not_found')
 		expect('history of a pb record', await ocs(AA, 'GET', `/records/project/${P}/history`), 404, 'not_found')
 		expect('restore of a pb record', await ocs(AA, 'POST', `/records/project/${P}/restore`, { version: 1, current: 2 }), 404, 'not_found')
 		expect('DELETE of a pb record', await ocs(AA, 'DELETE', `/records/project/${P}?version=2`), 404, 'not_found')
 		const pbRev = (await me(A)).revision
 		const atRev = (await me(AA)).revision
-		const own = await ocs(AA, 'PUT', `/records/project/${P}`, { version: 0, data: { id: P, name: 'Atelier' } })
+		const own = await ocs(AA, 'PUT', `/records/project/${P}`, { version: 0, data: { id: P, status: DRAFT, name: 'Atelier' } })
 		check('the same key in at is its own record (version 1)', own.status === 200 && own.data?.version === 1, own.text)
 		check("writing in at only bumps at's revision", own.data?.revision === atRev + 1 && (await me(A)).revision === pbRev, { pbRev, atRev, got: own.data?.revision })
 		const pbP = await ocs(A, 'GET', `/records/project/${P}`)
@@ -153,6 +206,57 @@ export async function datensaetze() {
 		const t = await ocs(AA, 'GET', '/team')
 		check('GET /team: at, no pb accounts', t.data?.slug === 'at' && !JSON.stringify(t.data?.members).includes('pb'), t.text)
 		expect('at user reads no pb customer', await ocs(AU, 'GET', `/records/customer/${C}`), 403, 'forbidden')
+	}
+
+	// ---------------------------------------------------------------------------
+	head('Booking reports and billable marks (0.14.0)')
+	{
+		const id = `b1-${RUN}@example.test`
+		const booking = { id, date: '2026-10-07', start: '08:15', end: '10:00', minutes: 105, code: PL, title: 'Site visit', notes: 'First line\nSecond line', billable: true, billed: false }
+		const report = (project, month, bookings = [booking]) => ({ schema: 1, person: 'pbuser1', project, month, at: '2026-10-07T12:00:00Z', bookings })
+		const rk = `pbuser1+${PL}+2026-10`
+		const rp = `pbuser1+${P}+2026-10`
+		const mk = `pbuser1+${PL}+${sha256(id).slice(0, 32)}`
+		const mark = (project) => ({ schema: 1, person: 'pbuser1', project, uid: id, billable: false })
+		try {
+			const cat = await ocs(U1, 'GET', `/records/project/${PL}`)
+			check('catalog: led true for a project with a Lead, no leads', cat.data?.data?.led === true && !('leads' in (cat.data?.data || {})), cat.data?.data)
+			check('… no led without a Lead', !('led' in ((await ocs(U1, 'GET', `/records/project/${P}`)).data?.data || {})))
+			check('/me.lead_of of pblead names the project', ((await me(L)).lead_of || []).some((x) => x.key === PL))
+			expect('the person reports their bookings', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(rk)}`, { version: 0, data: report(PL, '2026-10') }), 200)
+			expect('… on a project without Lead too', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(rp)}`, { version: 0, data: report(P, '2026-10', []) }), 200)
+			expect('unknown field', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(`pbuser1+${PL}+2026-11`)}`, { version: 0, data: { ...report(PL, '2026-11', []), x: 1 } }), 422, 'invalid')
+			expect('a day outside the month', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(`pbuser1+${PL}+2026-11`)}`, { version: 0, data: report(PL, '2026-11') }), 422, 'invalid')
+			expect('month ≠ key', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(`pbuser1+${PL}+2026-11`)}`, { version: 0, data: report(PL, '2026-10') }), 422, 'invalid')
+			expect('another User writes it', await ocs(U2, 'PUT', `/records/booking-report/${encodeURIComponent(`pbuser1+${PL}+2026-09`)}`, { version: 0, data: report(PL, '2026-09', []) }), 403, 'forbidden')
+			expect('a Team Admin writes it', await ocs(A, 'PUT', `/records/booking-report/${encodeURIComponent(`pbuser1+${PL}+2026-09`)}`, { version: 0, data: report(PL, '2026-09', []) }), 403, 'forbidden')
+			expect('the Lead writes it', await ocs(L, 'PUT', `/records/booking-report/${encodeURIComponent(`pbuser1+${PL}+2026-09`)}`, { version: 0, data: report(PL, '2026-09', []) }), 403, 'forbidden')
+			const lr = await ocs(L, 'GET', `/records/booking-report/${encodeURIComponent(rk)}`)
+			check('the project\'s Lead reads it, with title and notes', lr.status === 200 && lr.data?.data?.bookings?.[0]?.notes === 'First line\nSecond line', lr.text.slice(0, 300))
+			expect('… but not the report on a project they do not lead', await ocs(L, 'GET', `/records/booking-report/${encodeURIComponent(rp)}`), 403, 'forbidden')
+			const lk = keysOf(await ocs(L, 'GET', '/records'))
+			check('… the same in the list', lk.has(`booking-report/${rk}`) && !lk.has(`booking-report/${rp}`))
+			expect('Team Admin reads it', await ocs(V, 'GET', `/records/booking-report/${encodeURIComponent(rk)}`), 200)
+			expect('another User does not', await ocs(U2, 'GET', `/records/booking-report/${encodeURIComponent(rk)}`), 403, 'forbidden')
+			check('… nor in the list', !keysOf(await ocs(U2, 'GET', '/records')).has(`booking-report/${rk}`))
+
+			expect('billable: the Lead marks a booking', await ocs(L, 'PUT', `/records/billable/${encodeURIComponent(mk)}`, { version: 0, data: mark(PL) }), 200)
+			expect('… hash ≠ uid', await ocs(L, 'PUT', `/records/billable/${encodeURIComponent(`pbuser1+${PL}+${'0'.repeat(32)}`)}`, { version: 0, data: mark(PL) }), 422, 'invalid')
+			expect('… not on a project they do not lead', await ocs(L, 'PUT', `/records/billable/${encodeURIComponent(`pbuser1+${P}+${sha256(id).slice(0, 32)}`)}`, { version: 0, data: mark(P) }), 403, 'forbidden')
+			expect('the person reads the mark', await ocs(U1, 'GET', `/records/billable/${encodeURIComponent(mk)}`), 200)
+			expect('… but does not write it', await ocs(U1, 'PUT', `/records/billable/${encodeURIComponent(mk)}`, { version: 1, data: { ...mark(PL), billable: true } }), 403, 'forbidden')
+			expect('another User does not read it', await ocs(U2, 'GET', `/records/billable/${encodeURIComponent(mk)}`), 403, 'forbidden')
+			expect('Lead: batch with a billable mark only', await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'billable', key: mk, version: 1, data: { ...mark(PL), billable: true } }] }), 200)
+			expect('Team Admin: batch with someone else\'s booking report', await ocs(A, 'POST', '/records/batch', { writes: [{ kind: 'booking-report', key: rk, version: 1, data: report(PL, '2026-10', []) }] }), 403, 'forbidden')
+		} finally {
+			for (const [who, kind, key] of [[L, 'billable', mk], [U1, 'booking-report', rk], [U1, 'booking-report', rp]]) {
+				const cur = await ocs(who, 'GET', `/records/${kind}/${encodeURIComponent(key)}`)
+				if (cur.status === 200 && !cur.data?.deleted) {
+					await ocs(who, 'DELETE', `/records/${kind}/${encodeURIComponent(key)}?version=${cur.data.version}`)
+				}
+			}
+			check('booking report and mark withdrawn', (await ocs(U1, 'GET', `/records/booking-report/${encodeURIComponent(rk)}`)).status === 404)
+		}
 	}
 
 	// ---------------------------------------------------------------------------
@@ -179,7 +283,7 @@ export async function datensaetze() {
 		check('user gets the tombstone of a readable project', u.data?.records?.some((x) => x.key === P && x.deleted))
 		expect('since invalid', await ocs(A, 'GET', '/records?since=abc'), 400, 'invalid')
 
-		const again = await ocs(A, 'PUT', `/records/project/${P}`, { version: 0, data: { id: P, name: 'new' } })
+		const again = await ocs(A, 'PUT', `/records/project/${P}`, { version: 0, data: { id: P, status: DRAFT, name: 'new' } })
 		check('recreate on a tombstone: version = tombstone + 1', again.status === 200 && again.data?.version === 4, again.text)
 
 		// Tombstone of a person via accounts
@@ -217,18 +321,19 @@ export async function datensaetze() {
 	{
 		const before = (await me(A)).revision
 		const ok = await ocs(A, 'POST', '/records/batch', { writes: [
-			{ kind: 'project', key: `B1-${RUN}`, version: 0, data: { id: `B1-${RUN}` } },
-			{ kind: 'project', key: `B2-${RUN}`, version: 0, data: { id: `B2-${RUN}` } },
-			{ kind: 'project', key: P, version: 5, data: { id: P, name: 'from batch' } },
+			{ kind: 'project', key: `B1-${RUN}`, version: 0, data: { id: `B1-${RUN}`, status: DRAFT } },
+			{ kind: 'project', key: `B2-${RUN}`, version: 0, data: { id: `B2-${RUN}`, status: DRAFT } },
+			{ kind: 'project', key: P, version: 5, data: { id: P, status: DRAFT, name: 'from batch' } },
 		] })
 		expect('three writes', ok, 200)
 		const revs = (ok.data?.records || []).map((x) => x.revision)
-		check('revision = old + 3, each write its own', ok.data?.revision === before + 3 && JSON.stringify(revs) === JSON.stringify([before + 1, before + 2, before + 3]), { before, got: ok.data?.revision, revs })
+		// Since 0.14 a project write also touches its reports and marks (one more revision when P has a Lead).
+		check('revision ≥ old + 3, each write its own', ok.data?.revision >= before + 3 && JSON.stringify(revs) === JSON.stringify([before + 1, before + 2, before + 3]), { before, got: ok.data?.revision, revs })
 
 		const mid = (await me(A)).revision
 		const bad = await ocs(A, 'POST', '/records/batch', { writes: [
-			{ kind: 'project', key: `B3-${RUN}`, version: 0, data: { id: `B3-${RUN}` } },
-			{ kind: 'project', key: P, version: 1, data: { id: P, name: 'stale' } },
+			{ kind: 'project', key: `B3-${RUN}`, version: 0, data: { id: `B3-${RUN}`, status: DRAFT } },
+			{ kind: 'project', key: P, version: 1, data: { id: P, status: DRAFT, name: 'stale' } },
 			{ kind: 'project', key: `B1-${RUN}`, version: 1, data: null },
 		] })
 		expect('one conflict', bad, 409, 'conflict')
@@ -243,10 +348,10 @@ export async function datensaetze() {
 		check('deleting something unknown is a conflict with current null', gone.status === 409 && gone.data?.conflicts?.[0]?.current === null, gone.text)
 		const empty = await ocs(A, 'POST', '/records/batch', { writes: [] })
 		check('empty list: nothing, revision stays', empty.status === 200 && empty.data?.records?.length === 0 && empty.data?.revision === (await me(A)).revision, empty.text)
-		const tooMany = Array.from({ length: 501 }, (_, i) => ({ kind: 'project', key: `M${i}-${RUN}`, version: 0, data: { id: `M${i}-${RUN}` } }))
+		const tooMany = Array.from({ length: 501 }, (_, i) => ({ kind: 'project', key: `M${i}-${RUN}`, version: 0, data: { id: `M${i}-${RUN}`, status: DRAFT } }))
 		expect('501 writes', await ocs(A, 'POST', '/records/batch', { writes: tooMany }), 413, 'too_large')
 		expect('the same record twice', await ocs(A, 'POST', '/records/batch', { writes: [
-			{ kind: 'project', key: `D-${RUN}`, version: 0, data: { id: `D-${RUN}` } },
+			{ kind: 'project', key: `D-${RUN}`, version: 0, data: { id: `D-${RUN}`, status: DRAFT } },
 			{ kind: 'project', key: `D-${RUN}`, version: 1, data: { id: `D-${RUN}` } },
 		] }), 422, 'invalid')
 		const inv = await ocs(A, 'POST', '/records/batch', { writes: [{ kind: 'project', key: `E-${RUN}`, version: 0, data: { id: 'falsch' } }] })
@@ -260,14 +365,25 @@ export async function datensaetze() {
 	head('Concurrency')
 	{
 		const puts = await Promise.all(Array.from({ length: 20 }, (_, i) =>
-			ocs(V, 'PUT', `/records/project/par-${RUN}-${i}`, { version: 0, data: { id: `par-${RUN}-${i}` } })))
+			ocs(V, 'PUT', `/records/project/par-${RUN}-${i}`, { version: 0, data: { id: `par-${RUN}-${i}`, status: DRAFT } })))
 		const revs = puts.map((r) => r.data?.revision)
 		check('20 concurrent PUTs: all 200', puts.every((r) => r.status === 200), puts.map((r) => r.status))
 		check('… with 20 different revisions', new Set(revs).size === 20, revs)
 		const same = await Promise.all(Array.from({ length: 10 }, () =>
-			ocs(A, 'PUT', `/records/project/same-${RUN}`, { version: 0, data: { id: `same-${RUN}` } })))
+			ocs(A, 'PUT', `/records/project/same-${RUN}`, { version: 0, data: { id: `same-${RUN}`, status: DRAFT } })))
 		const codes = same.map((r) => r.status).sort()
 		check('10 concurrent creations of the same key: exactly one wins', codes.filter((c) => c === 200).length === 1 && codes.filter((c) => c === 409).length === 9, codes)
 	}
 
+	// ---------------------------------------------------------------------------
+	head('Lead project: cleaning up')
+	{
+		for (const [kind, key] of [['project', PL], ['customer', CL]]) {
+			const cur = await ocs(A, 'GET', `/records/${kind}/${key}`)
+			if (cur.status === 200) {
+				await ocs(A, 'DELETE', `/records/${kind}/${key}?version=${cur.data.version}`)
+			}
+		}
+		check('project and customer of the Lead removed', (await ocs(A, 'GET', `/records/project/${PL}`)).status === 404)
+	}
 }

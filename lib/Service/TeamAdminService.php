@@ -14,6 +14,8 @@ use OCA\TimeSister\Db\RoleGroup;
 use OCA\TimeSister\Db\RoleGroupMapper;
 use OCA\TimeSister\Db\Tenant;
 use OCA\TimeSister\Db\TenantMapper;
+use OCA\TimeSister\Db\TimeCalendar;
+use OCA\TimeSister\Db\TimeCalendarMapper;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\DB\Exception as DbException;
 use OCP\Group\ISubAdmin;
@@ -40,6 +42,7 @@ final class TeamAdminService {
 		private TenantService $tenantService,
 		private WeekMarks $marks,
 		private ITimeFactory $time,
+		private TimeCalendarMapper $timeCalendars,
 	) {
 	}
 
@@ -124,8 +127,13 @@ final class TeamAdminService {
 				$t->setBackupOwner($owner);
 			}
 			// Only the settings that were sent change.
+			$sinceBefore = $t->getEntriesSince();
 			self::applySettings($t, $settings);
 			$this->tenants->update($t);
+			if ($t->getEntriesSince() !== $sinceBefore) {
+				// A moved cutoff: every named calendar and feed is read again.
+				$this->timeCalendars->markReread($id);
+			}
 			// Also removes old mappings from API version 1 (role and
 			// account groups); the Nextcloud groups themselves stay.
 			$this->roleGroups->deleteByTenant($id);
@@ -159,13 +167,19 @@ final class TeamAdminService {
 			$silent = [];
 			$consenting = 0;
 			$withoutWeek = 0;
-			$notShared = 0;
+			$withoutCalendar = 0;
+			$named = [];
+			foreach ($this->timeCalendars->findByTenant($t->getId()) as $tc) {
+				if ($tc->getSource() === TimeCalendar::CALENDAR) {
+					$named[$tc->getUid()] = true;
+				}
+			}
 			$members = $this->tenantService->memberRoles($t->getId());
 			foreach (array_map('strval', array_keys($members)) as $uid) {
 				$role = $members[$uid];
-				// Calendar not shared: reported this way (POST /status); never reported does not count.
-				if (($seen[$uid] ?? null)?->getCalendarShared() === 0) {
-					$notShared++;
+				// Without a named time calendar (0.17.0): the server reads no entries of this person.
+				if (!isset($named[$uid])) {
+					$withoutCalendar++;
 				}
 				// Without a backup this week only counts for those who gave
 				// consent. Checked and unchanged counts as backed up (the
@@ -200,7 +214,7 @@ final class TeamAdminService {
 				'member_count' => count($members),
 				'backup_consent' => $consenting,
 				'without_backup_week' => $withoutWeek,
-				'calendar_not_shared' => $notShared,
+				'without_time_calendar' => $withoutCalendar,
 				'last_server_backup' => $lastDays === [] ? null : max($lastDays),
 				'backup_owner_choice' => $t->getBackupOwner(),
 				'admins' => array_map(fn (string $uid) => [
@@ -213,13 +227,14 @@ final class TeamAdminService {
 		return $out;
 	}
 
-	/** @param array<string,bool> $settings */
+	/** @param array<string,bool|string|null> $settings */
 	private static function applySettings(Tenant $t, array $settings): void {
-		if (array_key_exists('leads_see_calendars', $settings)) {
-			$t->setLeadsSeeCalendars($settings['leads_see_calendars'] ? 1 : 0);
-		}
 		if (array_key_exists('backup_required', $settings)) {
-			$t->setBackupRequired($settings['backup_required'] ? 1 : 0);
+			$t->setBackupRequired($settings['backup_required'] === true ? 1 : 0);
+		}
+		if (array_key_exists('entries_since', $settings)) {
+			$v = $settings['entries_since'];
+			$t->setEntriesSince(is_string($v) ? $v : null);
 		}
 	}
 

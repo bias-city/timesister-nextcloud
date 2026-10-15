@@ -12,20 +12,23 @@ use OCA\TimeSister\Db\BackupConsentMapper;
 use OCA\TimeSister\Db\BackupFileMapper;
 use OCA\TimeSister\Db\BackupMapper;
 use OCA\TimeSister\Db\ClientStatusMapper;
+use OCA\TimeSister\Db\CounterMapper;
+use OCA\TimeSister\Db\EntryMapper;
 use OCA\TimeSister\Db\HistoryMapper;
 use OCA\TimeSister\Db\MemberMapper;
 use OCA\TimeSister\Db\RecordMapper;
 use OCA\TimeSister\Db\RoleGroupMapper;
 use OCA\TimeSister\Db\Tenant;
 use OCA\TimeSister\Db\TenantMapper;
+use OCA\TimeSister\Db\TimeCalendarMapper;
 use OCP\IDBConnection;
 use Psr\Log\LoggerInterface;
 
 /**
  * Deleting a team (0.10.1), also one with content. First a team ZIP is
  * stored exactly as before an import (protected in the app data, visible
- * with the backup owner); without it nothing is deleted. Then rows and
- * protected calendar backups go. The Nextcloud group, the accounts, their
+ * with the backup owner); without it nothing is deleted. Then rows,
+ * protected calendar backups and the invoice template go. The Nextcloud group, the accounts, their
  * time calendars and the visible `.ics` files with the backup owner stay.
  *
  * Not final: the unit test replaces the four steps that need Nextcloud.
@@ -46,7 +49,11 @@ class TeamDeleteService {
 		private MemberMapper $members,
 		private AccessMapper $access,
 		private AbsenceMapper $absences,
+		private CounterMapper $counters,
+		private TimeCalendarMapper $timeCalendars,
+		private EntryMapper $entries,
 		private ProtectedStore $store,
+		private InvoiceTemplateStore $templates,
 		private TeamExportService $export,
 		private TenantService $tenantService,
 		private LoggerInterface $logger,
@@ -62,7 +69,7 @@ class TeamDeleteService {
 		TeamDeleteRules::checkConfirm($t->getName(), $confirm);
 		$id = $t->getId();
 		$content = $this->countContent($id);
-		$backup = TeamDeleteRules::hasContent($content['records'], $content['backups']) ? $this->keep($t) : null;
+		$backup = TeamDeleteRules::hasContent($content['records'], $content['backups'], $content['templates']) ? $this->keep($t) : null;
 		$counts = $this->wipe($t);
 		$this->tenantService->reset();
 		$this->wipeFiles($id);
@@ -70,9 +77,13 @@ class TeamDeleteService {
 		return TeamDeleteRules::answer($id, $backup, $counts);
 	}
 
-	/** @return array{records:int,backups:int} records including tombstones */
+	/** @return array{records:int,backups:int,templates:int} records including tombstones */
 	protected function countContent(int $id): array {
-		return ['records' => $this->records->stats($id)['all'], 'backups' => $this->backups->countByTenant($id)];
+		return [
+			'records' => $this->records->stats($id)['all'],
+			'backups' => $this->backups->countByTenant($id),
+			'templates' => $this->templates->info($id) === null ? 0 : 1,
+		];
 	}
 
 	/**
@@ -110,6 +121,9 @@ class TeamDeleteService {
 				'backups' => $this->backups->deleteByTenant($id),
 				// Only the tracking rows: the visible .ics files stay with the backup owner.
 				'backup_files' => $this->backupFiles->deleteByTenant($id),
+				'counters' => $this->counters->deleteByTenant($id),
+				'time_calendars' => $this->timeCalendars->deleteByTenant($id),
+				'entries' => $this->entries->deleteByTenant($id),
 			];
 			$this->tenants->delete($t);
 			$this->db->commit();
@@ -122,12 +136,17 @@ class TeamDeleteService {
 		return $counts;
 	}
 
-	/** The protected calendar backups in the app data; `exports/` stays. */
+	/** The protected calendar backups and the invoice template in the app data; `exports/` stays. */
 	protected function wipeFiles(int $id): void {
 		try {
 			$this->store->deleteTeam($id);
 		} catch (\Exception $e) {
 			$this->logger->warning('TimeSister: protected backups of deleted team {team} not removed', ['app' => 'timesister', 'team' => $id, 'exception' => $e]);
+		}
+		try {
+			$this->templates->delete($id);
+		} catch (\Exception $e) {
+			$this->logger->warning('TimeSister: invoice template of deleted team {team} not removed', ['app' => 'timesister', 'team' => $id, 'exception' => $e]);
 		}
 	}
 }

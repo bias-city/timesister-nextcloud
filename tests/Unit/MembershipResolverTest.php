@@ -34,19 +34,17 @@ class MembershipResolverTest extends TestCase {
 		return 'ok';
 	}
 
-	/** @return array<string,array{list<string>,list<string>,array<int,array{role:?string,left_at:?int}>,int,string}> */
+	/** @return array<string,array{list<string>,list<string>,array<int,array{role:?string,left_at:?int}>,int,bool}> */
 	public static function members(): array {
 		return [
-			'in the team group' => [['pb-team'], [], [], 1, 'user'],
-			'app role lead' => [['pb-team'], [], [1 => ['role' => 'lead', 'left_at' => null]], 1, 'lead'],
-			'old app role subadmin counts as lead' => [['pb-team'], [], [1 => ['role' => 'subadmin', 'left_at' => null]], 1, 'lead'],
-			'group admin is admin' => [['pb-team'], ['pb-team'], [], 1, 'admin'],
-			'group admin beats app role' => [['pb-team'], ['pb-team'], [1 => ['role' => 'lead', 'left_at' => null]], 1, 'admin'],
-			'group admin, not in the group' => [[], ['at-team'], [], 2, 'admin'],
-			'foreign groups do not interfere' => [['admin', 'Familie', 'at-team'], ['Familie'], [], 2, 'user'],
-			'app role of another team does not count' => [['at-team'], [], [1 => ['role' => 'subadmin', 'left_at' => null]], 2, 'user'],
-			'unknown app role is user' => [['pb-team'], [], [1 => ['role' => 'boss', 'left_at' => null]], 1, 'user'],
-			'departed from pb, in at: at' => [['pb-team', 'at-team'], [], [1 => ['role' => null, 'left_at' => 100]], 2, 'user'],
+			'in the team group' => [['pb-team'], [], [], 1, false],
+			'a stored app role lead no longer counts (0.11.0)' => [['pb-team'], [], [1 => ['role' => 'lead', 'left_at' => null]], 1, false],
+			'a stored subadmin no longer counts' => [['pb-team'], [], [1 => ['role' => 'subadmin', 'left_at' => null]], 1, false],
+			'group admin is admin' => [['pb-team'], ['pb-team'], [], 1, true],
+			'group admin, not in the group' => [[], ['at-team'], [], 2, true],
+			'foreign groups do not interfere' => [['admin', 'Familie', 'at-team'], ['Familie'], [], 2, false],
+			'entry of another team does not count' => [['at-team'], [], [1 => ['role' => 'subadmin', 'left_at' => null]], 2, false],
+			'departed from pb, in at: at' => [['pb-team', 'at-team'], [], [1 => ['role' => null, 'left_at' => 100]], 2, false],
 		];
 	}
 
@@ -56,8 +54,16 @@ class MembershipResolverTest extends TestCase {
 	 * @param array<int,array{role:?string,left_at:?int}> $entries
 	 */
 	#[DataProvider('members')]
-	public function testRole(array $groups, array $managed, array $entries, int $tenant, string $role): void {
-		$this->assertSame(['tenant_id' => $tenant, 'role' => $role], MembershipResolver::resolve($groups, $managed, self::ROWS, $entries));
+	public function testTeamAndAdmin(array $groups, array $managed, array $entries, int $tenant, bool $admin): void {
+		$this->assertSame(['tenant_id' => $tenant, 'admin' => $admin], MembershipResolver::resolve($groups, $managed, self::ROWS, $entries));
+	}
+
+	/** The one derivation (0.11.0): group admin, then project lead, then user. */
+	public function testRoleOf(): void {
+		$this->assertSame('admin', MembershipResolver::roleOf(true, true));
+		$this->assertSame('admin', MembershipResolver::roleOf(true, false));
+		$this->assertSame('lead', MembershipResolver::roleOf(false, true));
+		$this->assertSame('user', MembershipResolver::roleOf(false, false));
 	}
 
 	public function testNoTeam(): void {
@@ -83,9 +89,9 @@ class MembershipResolverTest extends TestCase {
 		$this->assertSame('403 no_team', self::code(fn () => MembershipResolver::resolve(['pb-team'], [], self::ROWS, $left)));
 		// Also an admin whose departure is recorded.
 		$this->assertSame('403 no_team', self::code(fn () => MembershipResolver::resolve(['pb-team'], ['pb-team'], self::ROWS, $left)));
-		// Readmitted: the role is back.
+		// Readmitted: the membership is back.
 		$back = [1 => ['role' => 'lead', 'left_at' => null]];
-		$this->assertSame(['tenant_id' => 1, 'role' => 'lead'], MembershipResolver::resolve(['pb-team'], [], self::ROWS, $back));
+		$this->assertSame(['tenant_id' => 1, 'admin' => false], MembershipResolver::resolve(['pb-team'], [], self::ROWS, $back));
 	}
 
 	public function testTeamGroups(): void {
@@ -96,21 +102,23 @@ class MembershipResolverTest extends TestCase {
 		$m = MembershipResolver::members(
 			['carol', 'alice', 'bob', 'dora'],
 			['erin', 'alice'],
-			['bob' => ['role' => 'lead', 'left_at' => null, 'may_override' => true], 'dora' => ['role' => 'subadmin', 'left_at' => 50], 'entry-only' => ['role' => 'lead', 'left_at' => null]],
+			['bob' => ['role' => 'lead', 'left_at' => null], 'dora' => ['role' => 'subadmin', 'left_at' => 50], 'entry-only' => ['role' => 'lead', 'left_at' => null]],
+			// Project leads (0.11.0): bob and dora lead; carol's stored role would not count either way.
+			['bob', 'dora', 'alice', 'nobody'],
 		);
 		$this->assertSame([
-			'alice' => ['role' => 'admin', 'left_at' => null, 'may_override' => false],
-			'bob' => ['role' => 'lead', 'left_at' => null, 'may_override' => true],
-			'carol' => ['role' => 'user', 'left_at' => null, 'may_override' => false],
-			'dora' => ['role' => 'lead', 'left_at' => 50, 'may_override' => false],
-			'erin' => ['role' => 'admin', 'left_at' => null, 'may_override' => false],
-		], $m, 'by uid, admins also outside the group, entries without a group are missing');
+			'alice' => ['role' => 'admin', 'left_at' => null],
+			'bob' => ['role' => 'lead', 'left_at' => null],
+			'carol' => ['role' => 'user', 'left_at' => null],
+			'dora' => ['role' => 'lead', 'left_at' => 50],
+			'erin' => ['role' => 'admin', 'left_at' => null],
+		], $m, 'by uid, admins also outside the group, entries without a group are missing, leads from the projects');
 		$this->assertSame(['alice' => 'admin', 'bob' => 'lead', 'carol' => 'user', 'erin' => 'admin'], MembershipResolver::activeRoles($m));
 	}
 
 	public function testRoleOrder(): void {
 		$this->assertSame(['user', 'lead', 'admin'], Role::ALL);
-		$this->assertSame(['user', 'lead', 'admin'], Role::APP_ROLES);
+		$this->assertSame(['user', 'admin'], Role::APP_ROLES, 'lead is derived, not set (0.11.0)');
 		$this->assertSame('admin', Role::stronger('admin', 'lead'));
 		$this->assertSame('lead', Role::stronger('user', 'lead'));
 		$this->assertFalse(Role::manages('lead'));

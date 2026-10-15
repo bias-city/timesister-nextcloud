@@ -19,7 +19,8 @@ use OCP\IDBConnection;
  * Records with version and revision, history, restoring.
  *
  * Every method gets the caller's membership and filters by their team;
- * AccessPolicy checks the rights.
+ * RecordRights checks the rights per kind (AccessPolicy for the plain
+ * master data, Jobs through JobAccess).
  */
 final class RecordService {
 	public const HISTORY_LIMIT = 100;
@@ -33,7 +34,7 @@ final class RecordService {
 		private AccessPolicy $policy,
 		private ITimeFactory $time,
 		private JobAccess $jobs,
-		private AccessService $access,
+		private RecordRights $rights,
 		private TenantService $team,
 	) {
 	}
@@ -49,43 +50,14 @@ final class RecordService {
 		}
 	}
 
-	/** May the caller mark this person's events as billed (0.7.6)? */
-	private function canBill(Membership $m, string $person): bool {
-		if ($m->manages()) {
-			return true;
-		}
-		return BillingRules::canWrite($m->role, $this->access->levelsOf($m)[$person] ?? null);
-	}
-
-	/** Billing marks: whoever may write them, and the person themselves. */
-	private function canReadBilling(Membership $m, string $key, array $ownKeys): bool {
-		$person = BillingRules::personOf($key);
-		return $person !== null && (in_array($person, $ownKeys, true) || $this->canBill($m, $person));
-	}
-
-	/** The rights of a write: billing marks per person, everything else Team Admins. */
-	private function requireWriteOf(Membership $m, string $kind, string $key): void {
-		if ($kind === RecordValidator::BILLING) {
-			if (!$this->canBill($m, BillingRules::requirePerson($key))) {
-				throw ApiException::forbidden('Only Team Admins, and Leads who may see this person’s time calendar, mark it as billed.');
-			}
-			return;
-		}
-		$this->policy->requireWrite($m);
-	}
-
-	/** A person without `feed` for whoever may not see it (0.7.6). */
-	private function trimPerson(Membership $m, Record $r, mixed $data): mixed {
-		if ($r->getKind() !== 'person' || !($data instanceof \stdClass) || !isset($data->feed)
-			|| $this->access->canSeeFeed($m, $r->getRkey(), $r->accountList())) {
-			return $data;
-		}
-		$copy = clone $data;
-		unset($copy->feed);
-		return $copy;
-	}
-
 	/** Jobs change only through /jobs (JobService), never as records. */
+	/** A project's `team` (0.16.0) names only accounts of the team – also ones who left. */
+	private function checkTeam(Membership $m, string $kind, mixed $data): void {
+		if ($kind === 'project' && $data instanceof \stdClass && is_array($data->{ProjectRules::TEAM} ?? null)) {
+			ProjectRules::requireTeamMembers($data, array_map('strval', array_keys($this->team->members($m->tenantId))));
+		}
+	}
+
 	private static function noJob(string $kind): void {
 		if ($kind === RecordValidator::JOB) {
 			throw ApiException::badRequest(Message::of('A {job} changes only through the {job} endpoints (/jobs).', ['job' => JobWord::JOB]));
@@ -109,19 +81,14 @@ final class RecordService {
 	}
 
 	/**
-	 * Like present(); a project full only for Team Admins and its
-	 * leads, otherwise only the booking catalog.
+	 * Like present(), in the form the caller may read ({@see RecordRights::shape()}).
 	 *
 	 * @param list<string> $ownKeys the caller's person keys
 	 * @return array<string,mixed>
 	 */
 	private function presentFor(Membership $m, Record $r, array $ownKeys): array {
 		$out = $this->present($r);
-		$data = $out['data'];
-		if ($r->getKind() === 'project' && $data instanceof \stdClass && !$this->policy->canSeeFullProject($m, $data, $ownKeys)) {
-			$out['data'] = ProjectAccess::catalog($data);
-		}
-		$out['data'] = $this->trimPerson($m, $r, $out['data']);
+		$out['data'] = $this->rights->shape($m, $r, $out['data'], $ownKeys);
 		return $out;
 	}
 
@@ -157,13 +124,7 @@ final class RecordService {
 				}
 				continue;
 			}
-			if ($r->getKind() === RecordValidator::BILLING) {
-				if ($this->canReadBilling($m, $r->getRkey(), $own)) {
-					$out[] = $this->present($r);
-				}
-				continue;
-			}
-			if ($this->policy->canRead($m, $r->getKind(), $r->getRkey(), $r->accountList())) {
+			if ($this->rights->canRead($m, $r->getKind(), $r->getRkey(), $r->accountList(), $own, $r)) {
 				$out[] = $this->presentFor($m, $r, $own);
 			}
 		}
@@ -181,10 +142,7 @@ final class RecordService {
 			}
 			return $this->jobs->presentFor($m, $r, $own, $this->present($r));
 		}
-		$readable = $kind === RecordValidator::BILLING
-			? $this->canReadBilling($m, $key, $this->ownKeys($m))
-			: $this->policy->canRead($m, $kind, $key, $r?->accountList() ?? []);
-		if (!$readable) {
+		if (!$this->rights->canRead($m, $kind, $key, $r?->accountList() ?? [], $this->ownKeys($m), $r)) {
 			throw ApiException::forbidden('This account may not read this record.');
 		}
 		if ($r === null || $r->isTombstone()) {
@@ -209,7 +167,7 @@ final class RecordService {
 		self::noJob($kind);
 		RecordValidator::checkAddress($kind, $key);
 		if ($kind !== 'project') {
-			$this->requireWriteOf($m, $kind, $key);
+			$this->rights->requireWrite($m, $kind, $key);
 		}
 		$version = RecordValidator::checkVersion($body->version ?? null);
 		if (!property_exists($body, 'data')) {
@@ -218,6 +176,7 @@ final class RecordService {
 		if ($kind === 'project' && !$this->policy->canWrite($m)) {
 			$this->requireProjectLead($m, $key);
 		}
+		$this->checkTeam($m, $kind, $body->data);
 		$v = RecordValidator::validate($kind, $key, $body->data);
 		$this->checkSettings($m, $kind, $key, $body->data);
 		return $this->write($m, [[
@@ -244,7 +203,7 @@ final class RecordService {
 	public function delete(Membership $m, string $kind, string $key, mixed $version): array {
 		self::noJob($kind);
 		RecordValidator::checkAddress($kind, $key);
-		$this->requireWriteOf($m, $kind, $key);
+		$this->rights->requireWrite($m, $kind, $key);
 		if ($version === null || $version === '') {
 			throw ApiException::missing('version', true);
 		}
@@ -257,9 +216,8 @@ final class RecordService {
 	/** @return array{revision:int,records:list<array<string,mixed>>} */
 	public function batch(Membership $m, \stdClass $body): array {
 		$writes = $body->writes ?? null;
-		// A Lead's batch may hold billing marks only; their rights are checked per write.
-		if (!$this->policy->canWrite($m) && (!is_array($writes) || $writes === []
-			|| array_filter($writes, static fn (mixed $w) => !($w instanceof \stdClass) || ($w->kind ?? null) !== RecordValidator::BILLING) !== [])) {
+		// Everyone else's batch may hold per-record kinds only (marks, booking reports); checked per write.
+		if (!$this->policy->canWrite($m) && !RecordRights::perRecordOnly($writes)) {
 			$this->policy->requireWrite($m);
 		}
 		if (!is_array($writes) || !array_is_list($writes)) {
@@ -271,7 +229,6 @@ final class RecordService {
 		$ops = [];
 		$seen = [];
 		foreach ($writes as $i => $w) {
-			$n = $i + 1;
 			try {
 				if (!($w instanceof \stdClass)) {
 					throw ApiException::badRequest('Each write must be a JSON object.');
@@ -283,8 +240,8 @@ final class RecordService {
 				}
 				RecordValidator::checkAddress($kind, $key);
 				self::noJob($kind);
-				if ($kind === RecordValidator::BILLING) {
-					$this->requireWriteOf($m, $kind, $key);
+				if (in_array($kind, RecordRights::PER_RECORD, true)) {
+					$this->rights->requireWrite($m, $kind, $key);
 				}
 				$version = RecordValidator::checkVersion($w->version ?? null);
 				if (!property_exists($w, 'data')) {
@@ -296,17 +253,23 @@ final class RecordService {
 				}
 				$seen[$id] = true;
 				if ($w->data === null) {
-					$ops[] = ['kind' => $kind, 'key' => $key, 'version' => $version, 'json' => null, 'accounts' => null];
+					$ops[] = ['kind' => $kind, 'key' => $key, 'version' => $version, 'json' => null, 'accounts' => null, 'index' => $i];
 				} else {
+					$this->checkTeam($m, $kind, $w->data);
 					$v = RecordValidator::validate($kind, $key, $w->data);
 					$this->checkSettings($m, $kind, $key, $w->data);
-					$ops[] = ['kind' => $kind, 'key' => $key, 'version' => $version, 'json' => $v['json'], 'accounts' => $v['accounts']];
+					$ops[] = ['kind' => $kind, 'key' => $key, 'version' => $version, 'json' => $v['json'], 'accounts' => $v['accounts'], 'index' => $i];
 				}
 			} catch (ApiException $e) {
-				throw new ApiException($e->getStatus(), $e->getErrorCode(), Message::of('Write {n}: {message}', ['n' => $n, 'message' => $e->getText()]), ['index' => $i]);
+				throw self::inWrite($e, $i);
 			}
 		}
 		return $this->write($m, $ops, true);
+	}
+
+	/** An error of the batch's write number `$i + 1`. */
+	private static function inWrite(ApiException $e, int $i): ApiException {
+		return new ApiException($e->getStatus(), $e->getErrorCode(), Message::of('Write {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]), ['index' => $i]);
 	}
 
 	/** @return list<array<string,mixed>> newest first, at most 100 */
@@ -323,12 +286,12 @@ final class RecordService {
 				throw ApiException::forbidden('This account may not read the history of this record.');
 			}
 		}
-		// Project: also its leads (by the current version). Billing: whoever reads the mark.
+		// Project: also its leads (by the current version). Marks, booking reports, invoices, quotes: whoever reads them.
 		$raw = $r?->getData();
 		$lead = $kind === 'project' && $r !== null && !$r->isTombstone() && $raw !== null
 			&& $this->policy->canSeeFullProject($m, Json::decode($raw), $this->ownKeys($m));
-		if ($kind === RecordValidator::BILLING) {
-			$lead = $this->canReadBilling($m, $key, $this->ownKeys($m));
+		if (in_array($kind, RecordRights::PER_RECORD, true)) {
+			$lead = $this->rights->canRead($m, $kind, $key, [], $this->ownKeys($m), $r);
 		}
 		if (!$lead && $kind !== RecordValidator::JOB && !$this->policy->canReadHistory($m, $kind, $key, $r?->accountList() ?? [])) {
 			throw ApiException::forbidden('This account may not read the history of this record.');
@@ -336,7 +299,8 @@ final class RecordService {
 		if ($r === null) {
 			throw ApiException::notFound('This record does not exist.');
 		}
-		return array_map(function (History $h) use ($m, $r): array {
+		$own = $this->ownKeys($m);
+		return array_map(function (History $h) use ($m, $r, $own, $kind): array {
 			$raw = $h->getData();
 			$data = ($h->getDeleted() === 1 || $raw === null) ? null : Json::decode($raw);
 			return [
@@ -344,7 +308,7 @@ final class RecordService {
 				'deleted' => $h->getDeleted() === 1,
 				'modified_by' => $h->getModifiedBy(),
 				'modified_at' => Time::iso($h->getModifiedAt()),
-				'data' => $this->trimPerson($m, $r, $data),
+				'data' => $kind === 'project' ? $data : $this->rights->shape($m, $r, $data, $own),
 			];
 		}, $this->history->findFor($m->tenantId, $kind, $key, self::HISTORY_LIMIT));
 	}
@@ -353,7 +317,7 @@ final class RecordService {
 	public function restore(Membership $m, string $kind, string $key, \stdClass $body): array {
 		self::noJob($kind);
 		RecordValidator::checkAddress($kind, $key);
-		$this->requireWriteOf($m, $kind, $key);
+		$this->rights->requireWrite($m, $kind, $key);
 		$version = RecordValidator::checkVersion($body->version ?? null, 'version');
 		$current = RecordValidator::checkVersion($body->current ?? null, 'current');
 		$h = $this->history->findVersion($m->tenantId, $kind, $key, $version);
@@ -392,7 +356,7 @@ final class RecordService {
 	 * writes never get the same revision. On a conflict everything rolls
 	 * back – including the revision.
 	 *
-	 * @param list<array{kind:string,key:string,version:int,json:?string,accounts:?list<string>}> $ops
+	 * @param list<array{kind:string,key:string,version:int,json:?string,accounts:?list<string>,index?:int}> $ops
 	 * @return array{revision:int,records:list<array<string,mixed>>}
 	 */
 	private function write(Membership $m, array $ops, bool $batch): array {
@@ -413,7 +377,7 @@ final class RecordService {
 	}
 
 	/**
-	 * @param list<array{kind:string,key:string,version:int,json:?string,accounts:?list<string>}> $ops
+	 * @param list<array{kind:string,key:string,version:int,json:?string,accounts:?list<string>,index?:int}> $ops
 	 * @return array{revision:int,records:list<array<string,mixed>>}
 	 */
 	private function writeOnce(Membership $m, array $ops, bool $batch): array {
@@ -424,6 +388,7 @@ final class RecordService {
 			$top = $this->tenants->bumpRevision($m->tenantId, $n);
 			$plans = [];
 			$problems = [];
+			$own = null;
 			foreach ($ops as $op) {
 				$cur = $this->records->findOne($m->tenantId, $op['kind'], $op['key']);
 				[$outcome, $newVersion] = VersionCheck::decide(
@@ -435,7 +400,22 @@ final class RecordService {
 					$problems[] = ['op' => $op, 'outcome' => $outcome, 'current' => $cur === null ? null : $this->present($cur)];
 					continue;
 				}
-				$plans[] = [$op, $cur, $newVersion];
+				if (in_array($op['kind'], RecordRights::AGAINST_STORED, true)) {
+					// A Lead's invoice or quote against the stored state, under the team lock.
+					try {
+						if ($op['kind'] === QuoteRules::KIND) {
+							$this->rights->requireQuoteWrite($m, $cur, $op['json'], $own ??= $this->ownKeys($m));
+						} else {
+							$this->rights->requireInvoiceWrite($m, $cur, $op['json']);
+						}
+					} catch (ApiException $e) {
+						throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+					}
+				}
+				// The project as it was: its leads and customer decide whom to deliver again.
+				$old = $op['kind'] === 'project' && $cur !== null && !$cur->isTombstone() && $cur->getData() !== null
+					? Json::decode((string)$cur->getData()) : null;
+				$plans[] = [$op, $cur, $newVersion, $old instanceof \stdClass ? $old : null];
 			}
 			if ($problems !== []) {
 				$this->db->rollBack();
@@ -444,7 +424,17 @@ final class RecordService {
 
 			$rev = $top - $n;
 			$out = [];
-			foreach ($plans as [$op, $cur, $newVersion]) {
+			$scope = ['customers' => [], 'projects' => [], 'leads' => []];
+			foreach ($plans as [$op, $cur, $newVersion, $old]) {
+				if ($op['kind'] === 'project') {
+					$new = $op['json'] === null ? null : Json::decode($op['json']);
+					$c = ProjectAccess::scopeChange($old, $new instanceof \stdClass ? $new : null);
+					$scope['customers'] = [...$scope['customers'], ...$c['customers']];
+					if ($c['bookings']) {
+						$scope['projects'][] = $op['key'];
+						$scope['leads'] = [...$scope['leads'], ...self::leadKeys($old), ...self::leadKeys($new instanceof \stdClass ? $new : null)];
+					}
+				}
 				$rev++;
 				$isDelete = $op['json'] === null;
 				$r = $cur ?? new Record();
@@ -453,7 +443,8 @@ final class RecordService {
 					$r->setKind($op['kind']);
 					$r->setRkey($op['key']);
 				}
-				$r->setData($op['json']);
+				// An invoice's or quote's tombstone keeps its last data (never handed out): who may read it.
+				$r->setData($isDelete && in_array($op['kind'], RecordRights::AGAINST_STORED, true) ? $cur?->getData() : $op['json']);
 				if (!$isDelete) {
 					// A tombstone keeps the accounts: this is how the person learns their record is gone.
 					$r->setAccounts($op['accounts'] === [] ? null : Json::encode($op['accounts']));
@@ -478,6 +469,7 @@ final class RecordService {
 
 				$out[] = $this->present($r);
 			}
+			$top = $this->deliverAgain($m->tenantId, $top, $scope);
 			$this->db->commit();
 			return ['revision' => $top, 'records' => $out];
 		} catch (\Throwable $e) {
@@ -486,6 +478,86 @@ final class RecordService {
 			}
 			throw $e;
 		}
+	}
+
+	/**
+	 * A project's leads, customer or active state changed (0.14.0): its
+	 * customers, booking reports, billable marks, invoices and quotes get a new revision, so
+	 * whoever may read them now finds them in the next delta – also the
+	 * quotes naming one of the old or new leads, whose Lead role may have
+	 * begun. Who no longer may, drops them by the rule (API.md); nothing
+	 * goes out as deleted.
+	 *
+	 * @param array{customers:list<string>,projects:list<string>,leads:list<string>} $scope
+	 * @return int the team's revision afterwards
+	 */
+	private function deliverAgain(int $tenantId, int $top, array $scope): int {
+		$customers = array_values(array_unique($scope['customers']));
+		$projects = array_values(array_unique($scope['projects']));
+		if ($customers === [] && $projects === []) {
+			return $top;
+		}
+		$rev = $this->tenants->bumpRevision($tenantId, 1);
+		foreach ($customers as $key) {
+			$r = $this->records->findOne($tenantId, 'customer', $key);
+			if ($r !== null) {
+				$this->records->touchRevision($r->getId(), $rev);
+			}
+		}
+		foreach ($projects as $project) {
+			$this->records->touchByProject($tenantId, BookingRules::KINDS, $project, $rev);
+		}
+		if ($projects !== []) {
+			foreach ($this->records->findLiveByKind($tenantId, InvoiceRules::KIND) as $r) {
+				if (in_array(InvoiceRules::projectOf($r->getData()), $projects, true)) {
+					$this->records->touchRevision($r->getId(), $rev);
+				}
+			}
+			$names = $this->namesOf($tenantId, array_values(array_unique($scope['leads'])));
+			foreach ($this->records->findLiveByKind($tenantId, QuoteRules::KIND) as $r) {
+				if (in_array(InvoiceRules::projectOf($r->getData()), $projects, true) || QuoteRules::namesAny($r->getData(), $names)) {
+					$this->records->touchRevision($r->getId(), $rev);
+				}
+			}
+		}
+		return $rev;
+	}
+
+	/**
+	 * The lead keys of a project's data.
+	 *
+	 * @return list<string>
+	 */
+	private static function leadKeys(?\stdClass $d): array {
+		$out = [];
+		foreach ((array)($d?->{ProjectAccess::LEADS} ?? []) as $k) {
+			if (is_string($k)) {
+				$out[] = $k;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Every key a quote's `leads` may name these project leads by: the
+	 * key, the accounts of its person and every person key of these
+	 * accounts ({@see ownKeys()}).
+	 *
+	 * @param list<string> $leads
+	 * @return array<string,true>
+	 */
+	private function namesOf(int $tenantId, array $leads): array {
+		$out = [];
+		foreach ($leads as $k) {
+			$p = $this->records->findOne($tenantId, 'person', $k);
+			foreach ([$k, ...($p !== null && !$p->isTombstone() ? $p->accountList() : [])] as $uid) {
+				$out[$uid] = true;
+				foreach ($this->records->findPersonsOf($uid, $tenantId, true) as $r) {
+					$out[$r->getRkey()] = true;
+				}
+			}
+		}
+		return $out;
 	}
 
 	/** @param list<array{op:array<string,mixed>,outcome:string,current:?array<string,mixed>}> $problems */

@@ -77,6 +77,36 @@ final class TenantMapper extends QBMapper {
 		return (int)$v;
 	}
 
+	/**
+	 * The entries' counter (0.17.0), separate from the records' revision:
+	 * raised by `$n` and read back in the same transaction, like
+	 * {@see bumpRevision}. Call only inside a transaction.
+	 */
+	public function bumpEntriesRevision(int $id, int $n): int {
+		$qb = $this->db->getQueryBuilder();
+		$qb->update($this->getTableName())
+			->set('entries_revision', $qb->func()->add('entries_revision', $qb->createNamedParameter($n, IQueryBuilder::PARAM_INT)))
+			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
+		if ($qb->executeStatement() !== 1) {
+			throw new DoesNotExistException('Team not found');
+		}
+		return $this->entriesRevision($id);
+	}
+
+	/** The team's current entries revision. */
+	public function entriesRevision(int $id): int {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('entries_revision')->from($this->getTableName())
+			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
+		$res = $qb->executeQuery();
+		$v = $res->fetchOne();
+		$res->closeCursor();
+		if ($v === false) {
+			throw new DoesNotExistException('Team not found');
+		}
+		return (int)$v;
+	}
+
 	/** @param list<int> $ids */
 	public function markBroken(array $ids, int $now): void {
 		if ($ids === []) {

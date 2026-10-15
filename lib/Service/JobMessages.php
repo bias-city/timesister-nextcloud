@@ -18,6 +18,8 @@ final class JobMessages {
 	public const COUNTER_LAPSED = 'job_counter_lapsed';
 	public const CHANGED = 'job_changed';
 	public const RETURNED = 'job_returned';
+	public const REOPENED = 'job_reopened';
+	public const DONE = 'job_done';
 	public const DELETED = 'job_deleted';
 
 	/**
@@ -28,6 +30,7 @@ final class JobMessages {
 	public static function subject(string $subject, array $p): ?Message {
 		$v = [
 			'job' => JobWord::JOB,
+			'done' => JobWord::DONE,
 			'title' => is_string($p['title'] ?? null) ? $p['title'] : '',
 			'user' => is_string($p['user'] ?? null) ? $p['user'] : '',
 		];
@@ -39,6 +42,8 @@ final class JobMessages {
 			self::COUNTER_LAPSED => Message::of('The {job} “{title}” has gone to someone else – your counter-proposal has lapsed', $v),
 			self::CHANGED => Message::of('{user} changed the {job} “{title}”', $v),
 			self::RETURNED => Message::of('{user} returned the {job} “{title}”', $v),
+			self::REOPENED => Message::of('{user} reopened the {job} “{title}”', $v),
+			self::DONE => Message::of('{user} declared the {job} “{title}” {done}', $v),
 			self::DELETED => Message::of('{user} deleted the {job} “{title}”', $v),
 			default => null,
 		};

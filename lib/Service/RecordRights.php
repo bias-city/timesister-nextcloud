@@ -1,0 +1,195 @@
+<?php
+
+declare(strict_types=1);
+
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+namespace OCA\TimeSister\Service;
+
+use OCA\TimeSister\Db\Record;
+use OCA\TimeSister\Db\RecordMapper;
+
+/**
+ * Who reads and writes which record (not Jobs), and in which form – the
+ * rules per kind in one place for list, delta, single record and history
+ * (0.14.0: members see themselves, Leads their projects, Team Admins
+ * everything; 0.16.0 invoices and quotes likewise). The projects a Lead
+ * leads are read once per request.
+ */
+final class RecordRights {
+	/** Kinds with rights per record: a non-admin batch may hold only these. */
+	public const PER_RECORD = [RecordValidator::BILLING, BookingRules::REPORT, BookingRules::MARK, InvoiceRules::KIND, QuoteRules::KIND];
+	/** Kinds whose Lead write is checked against the stored record, and whose tombstone keeps its last data for that. */
+	public const AGAINST_STORED = [InvoiceRules::KIND, QuoteRules::KIND];
+
+	/** @var array<string,array<string,true>> "tenant:uid" → customer keys */
+	private array $customers = [];
+	/** @var array<string,array<string,true>> "tenant:uid" → active projects led */
+	private array $led = [];
+
+	public function __construct(
+		private AccessPolicy $policy,
+		private TenantService $team,
+		private RecordMapper $records,
+	) {
+	}
+
+	/** The active projects the caller leads (TenantService::leadOf), by key. @return array<string,true> */
+	public function ledProjects(Membership $m): array {
+		$id = $m->tenantId . ':' . $m->uid;
+		if (!isset($this->led[$id])) {
+			$this->led[$id] = [];
+			foreach ($this->team->leadOf($m->tenantId, $m->uid) as $p) {
+				$this->led[$id][$p['key']] = true;
+			}
+		}
+		return $this->led[$id];
+	}
+
+	/**
+	 * The customers a Lead reads: named by a project they lead.
+	 *
+	 * @param list<string> $ownKeys
+	 * @return array<string,true>
+	 */
+	public function customersOf(Membership $m, array $ownKeys): array {
+		$id = $m->tenantId . ':' . $m->uid;
+		if (!isset($this->customers[$id])) {
+			$projects = array_map(static function (Record $r): mixed {
+				$raw = $r->getData();
+				return $raw === null ? null : Json::decode($raw);
+			}, $this->records->findLiveByKind($m->tenantId, 'project'));
+			$this->customers[$id] = ProjectAccess::customersLedBy($projects, $ownKeys);
+		}
+		return $this->customers[$id];
+	}
+
+	/**
+	 * May the caller read this record (list, delta, single, history of the
+	 * per-record kinds)?
+	 *
+	 * @param list<string> $accounts the record's accounts (only for `person`)
+	 * @param list<string> $ownKeys the caller's person keys
+	 * @param ?Record $record the stored record (invoices, quotes: its data decides)
+	 */
+	public function canRead(Membership $m, string $kind, string $key, array $accounts, array $ownKeys, ?Record $record = null): bool {
+		if ($kind === QuoteRules::KIND) {
+			// Team Admins; Leads those naming them or of a project they lead, also as a tombstone.
+			return $m->manages() || ($this->ledProjects($m) !== []
+				&& QuoteRules::leadReads(InvoiceRules::decode($record?->getData()), $ownKeys, $this->ledProjects($m)));
+		}
+		if ($kind === InvoiceRules::KIND) {
+			// Team Admins; Leads those of the active projects they lead, also as a tombstone.
+			$project = InvoiceRules::projectOf($record?->getData());
+			return $m->manages() || ($project !== null && isset($this->ledProjects($m)[$project]));
+		}
+		if ($kind === RecordValidator::BILLING) {
+			$person = BillingRules::personOf($key);
+			return BillingRules::canRead($m->role, $person !== null && in_array($person, $ownKeys, true));
+		}
+		if (BookingRules::isKind($kind)) {
+			return BookingRules::canRead($m->role, $m->uid, $kind, $key, $m->manages() ? [] : $this->ledProjects($m));
+		}
+		if (!$this->policy->canRead($m, $kind, $key, $accounts)) {
+			return false;
+		}
+		// Leads: only the customers of their projects (0.14.0).
+		if ($kind === 'customer' && !$m->manages()) {
+			return isset($this->customersOf($m, $ownKeys)[$key]);
+		}
+		return true;
+	}
+
+	/** The rights of a write: per record for billing and bookings, everything else Team Admins. */
+	public function requireWrite(Membership $m, string $kind, string $key): void {
+		if ($kind === RecordValidator::BILLING) {
+			BillingRules::requirePerson($key);
+			if (!BillingRules::canWrite($m->role)) {
+				throw ApiException::forbidden('Only Team Admins mark bookings as billed.');
+			}
+			return;
+		}
+		if (BookingRules::isKind($kind)) {
+			BookingRules::requireWrite($m->role, $m->uid, $kind, $key, $m->manages() ? [] : $this->ledProjects($m));
+			return;
+		}
+		if ($kind === InvoiceRules::KIND) {
+			// A Lead's write is checked against the stored invoice: requireInvoiceWrite().
+			if (!$m->manages() && $this->ledProjects($m) === []) {
+				throw ApiException::forbidden('Only Team Admins and the project’s Leads write invoices.');
+			}
+			return;
+		}
+		if ($kind === QuoteRules::KIND) {
+			// Likewise for a quote: requireQuoteWrite(). A Member has none to write.
+			if (!$m->manages() && $this->ledProjects($m) === []) {
+				throw ApiException::forbidden('Only Team Admins and the quote’s or project’s Leads write quotes.');
+			}
+			return;
+		}
+		$this->policy->requireWrite($m);
+	}
+
+	/**
+	 * An invoice write against the stored state (inside the write's
+	 * transaction): Team Admins anything, a Lead only drafts without a
+	 * number of projects they lead ({@see InvoiceRules::requireLeadWrite()}).
+	 *
+	 * @param ?Record $cur the stored record; a tombstone keeps its last data
+	 * @param ?string $json the new data, null when deleting
+	 */
+	public function requireInvoiceWrite(Membership $m, ?Record $cur, ?string $json): void {
+		if ($m->manages()) {
+			return;
+		}
+		InvoiceRules::requireLeadWrite(InvoiceRules::decode($cur?->getData()), InvoiceRules::decode($json), $this->ledProjects($m));
+	}
+
+	/**
+	 * A quote write against the stored state, likewise: a Lead only quotes
+	 * they read before and after ({@see QuoteRules::requireLeadWrite()}).
+	 *
+	 * @param list<string> $ownKeys the caller's person keys
+	 */
+	public function requireQuoteWrite(Membership $m, ?Record $cur, ?string $json, array $ownKeys): void {
+		if ($m->manages()) {
+			return;
+		}
+		QuoteRules::requireLeadWrite(InvoiceRules::decode($cur?->getData()), InvoiceRules::decode($json), $ownKeys, $this->ledProjects($m));
+	}
+
+	/** Is the caller's batch limited to per-record kinds (then it is checked write by write)? */
+	public static function perRecordOnly(mixed $writes): bool {
+		if (!is_array($writes) || $writes === []) {
+			return false;
+		}
+		foreach ($writes as $w) {
+			if (!($w instanceof \stdClass) || !in_array($w->kind ?? null, self::PER_RECORD, true)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * The data as the caller may read it: a project full only for Team
+	 * Admins and its leads (otherwise the booking catalog), a person full
+	 * only for Team Admins – themselves without the admin-only fields
+	 * (`cost_rates`), others as the name card without the feed.
+	 *
+	 * @param list<string> $ownKeys
+	 */
+	public function shape(Membership $m, Record $r, mixed $data, array $ownKeys): mixed {
+		if (!($data instanceof \stdClass) || $m->manages()) {
+			return $data;
+		}
+		if ($r->getKind() === 'project' && !$this->policy->canSeeFullProject($m, $data, $ownKeys)) {
+			return ProjectAccess::catalog($data);
+		}
+		if ($r->getKind() === 'person') {
+			return AccessPolicy::isOwnPerson($m->uid, $r->getRkey(), $r->accountList())
+				? PersonAccess::own($data) : PersonAccess::card($data);
+		}
+		return $data;
+	}
+}

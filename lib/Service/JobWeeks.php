@@ -364,9 +364,39 @@ final class JobWeeks {
 	 *
 	 * @param list<array{week:int,over:float,day?:string,...}> $over
 	 */
-	public static function weeksText(array $over): string {
+	public static function weeksText(array $over, bool $numbers = true): string {
+		if (!$numbers) {
+			return implode(', ', array_map(static fn (array $w): string => $w['week'] . (isset($w['day']) ? ' (' . $w['day'] . ')' : ''), $over));
+		}
 		return implode(', ', array_map(static fn (array $w): string => $w['week'] . ' (+' . JobRules::num($w['over']) . ' h'
 			. (isset($w['day']) ? ', ' . $w['day'] : '') . ')', $over));
+	}
+
+	/**
+	 * The weeks above the line without hours (0.14.0): for whoever is no
+	 * Team Admin, which weeks and days, not the load or capacity.
+	 *
+	 * @param list<array{start:string,week:int,load:float,available:float,over:float,day?:string}> $over
+	 * @return list<array{start:string,week:int,day?:string}>
+	 */
+	public static function withoutNumbers(array $over): array {
+		return array_map(static function (array $w): array {
+			$out = ['start' => $w['start'], 'week' => $w['week']];
+			if (isset($w['day'])) {
+				$out['day'] = $w['day'];
+			}
+			return $out;
+		}, $over);
+	}
+
+	/**
+	 * Fits or not, from {@see JobWeeksService::over()}: null without
+	 * reported numbers, otherwise whether no week or day is above.
+	 *
+	 * @param ?array{reported_at:?string,weeks:list<array<string,mixed>>} $over
+	 */
+	public static function fitsOf(?array $over): ?bool {
+		return $over === null ? null : $over['weeks'] === [];
 	}
 
 	private static function plusDays(string $day, int $n): string {

@@ -16,8 +16,6 @@ use OCP\Notification\UnknownNotificationException;
 
 /** Turns the app's notifications into text, in the recipient's language. */
 final class Notifier implements INotifier {
-	public const OBJECT = 'shares';
-	public const SUBJECT = 'shares_changed';
 	/** Jobs (0.6.0): object `job`/key, one subject per event ({@see JobMessages}). */
 	public const JOB_OBJECT = 'job';
 	public const JOB_OFFERED = JobMessages::OFFERED;
@@ -27,6 +25,8 @@ final class Notifier implements INotifier {
 	public const JOB_COUNTER_LAPSED = JobMessages::COUNTER_LAPSED;
 	public const JOB_CHANGED = JobMessages::CHANGED;
 	public const JOB_RETURNED = JobMessages::RETURNED;
+	public const JOB_REOPENED = JobMessages::REOPENED;
+	public const JOB_DONE = JobMessages::DONE;
 	public const JOB_DELETED = JobMessages::DELETED;
 
 	public function __construct(
@@ -48,17 +48,12 @@ final class Notifier implements INotifier {
 			throw new UnknownNotificationException();
 		}
 		$l = $this->l10nFactory->get(Application::APP_ID, $languageCode);
-		if ($notification->getSubject() === self::SUBJECT) {
-			$notification->setParsedSubject($l->t('Please open TimeSister – your calendar shares have changed.'));
-			$notification->setParsedMessage($l->t('Your Team Admin has changed who sees your time calendar. TimeSister sets the shares the next time it syncs.'));
-		} else {
-			$subject = JobMessages::subject($notification->getSubject(), $notification->getSubjectParameters());
-			if ($subject === null) {
-				throw new UnknownNotificationException();
-			}
-			$notification->setParsedSubject($subject->text($l));
-			$notification->setParsedMessage(JobMessages::message()->text($l));
+		$subject = JobMessages::subject($notification->getSubject(), $notification->getSubjectParameters());
+		if ($subject === null) {
+			throw new UnknownNotificationException();
 		}
+		$notification->setParsedSubject($subject->text($l));
+		$notification->setParsedMessage(JobMessages::message()->text($l));
 		$notification->setIcon($this->url->getAbsoluteURL($this->url->imagePath(Application::APP_ID, 'app-dark.svg')));
 		return $notification;
 	}

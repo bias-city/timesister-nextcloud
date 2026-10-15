@@ -148,6 +148,24 @@ final class RecordMapper extends QBMapper {
 		$qb->executeStatement();
 	}
 
+	/**
+	 * New revision for every record of these kinds whose key names the
+	 * project between two `+` (booking reports, billable marks; 0.14.0).
+	 * A project key with `+` in it may touch a few more: they are only
+	 * delivered again.
+	 *
+	 * @param list<string> $kinds
+	 */
+	public function touchByProject(int $tenantId, array $kinds, string $project, int $revision): int {
+		$qb = $this->db->getQueryBuilder();
+		$qb->update($this->getTableName())
+			->set('revision', $qb->createNamedParameter($revision, IQueryBuilder::PARAM_INT))
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->in('kind', $qb->createNamedParameter($kinds, IQueryBuilder::PARAM_STR_ARRAY)))
+			->andWhere($qb->expr()->like('rkey', $qb->createNamedParameter('%+' . $this->db->escapeLikeParameter($project) . '+%')));
+		return $qb->executeStatement();
+	}
+
 	public function markAccountDeleted(int $id, int $now): void {
 		$qb = $this->db->getQueryBuilder();
 		$qb->update($this->getTableName())

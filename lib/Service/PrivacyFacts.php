@@ -15,7 +15,7 @@ use OCP\AppFramework\Utility\ITimeFactory;
 
 /**
  * What the privacy notice (0.10.2) says about a team, read live: members
- * and roles, Leads with their projects, the shares matrix, backup owner,
+ * and roles, Leads with their projects, backup owner,
  * consents, modules, absence categories, externals (count only, never a
  * feed address). {@see PrivacyDocument} turns this into the text.
  */
@@ -23,7 +23,6 @@ final class PrivacyFacts {
 	public function __construct(
 		private TenantService $tenants,
 		private RecordMapper $records,
-		private AccessService $access,
 		private ConsentService $consents,
 		private IAppManager $appManager,
 		private ITimeFactory $time,
@@ -44,34 +43,13 @@ final class PrivacyFacts {
 		usort($members, static fn (array $a, array $b) => [$a['left_at'] !== null, -Role::rank($a['role']), mb_strtolower($a['name'])]
 			<=> [$b['left_at'] !== null, -Role::rank($b['role']), mb_strtolower($b['name'])]);
 
-		$snapshot = $this->access->snapshot($tid);
-		$matrix = [];
-		foreach ($members as $m) {
-			if ($m['left_at'] !== null) {
-				continue;
-			}
-			$sees = [];
-			$edits = [];
-			// Purely numeric identifiers come as int keys.
-			foreach (array_map('strval', array_keys($snapshot)) as $owner) {
-				$level = $snapshot[$owner][$m['uid']] ?? AccessRules::NONE;
-				if (AccessRules::rank($level) >= AccessRules::rank(AccessRules::VIEW)) {
-					$sees[] = $name($owner);
-				}
-				if ($level === AccessRules::EDIT) {
-					$edits[] = $name($owner);
-				}
-			}
-			sort($sees, SORT_STRING | SORT_FLAG_CASE);
-			sort($edits, SORT_STRING | SORT_FLAG_CASE);
-			$matrix[] = ['uid' => $m['uid'], 'name' => $m['name'], 'role' => $m['role'], 'sees' => $sees, 'edits' => $edits];
-		}
-
-		$persons = $this->records->findLiveByKind($tid, 'person');
 		$projects = $this->records->findLiveByKind($tid, 'project');
+		// Leads follow from the active projects (0.11.0); only members who have not left.
 		$leads = [];
 		foreach ($this->tenants->withRole($tid, Role::LEAD) as $uid) {
-			$leads[] = ['uid' => $uid, 'name' => $name($uid), 'projects' => self::projectsLedBy($uid, $persons, $projects)];
+			$led = array_map(static fn (array $p): string => $p['name'], $this->tenants->leadOf($tid, $uid));
+			sort($led, SORT_STRING | SORT_FLAG_CASE);
+			$leads[] = ['uid' => $uid, 'name' => $name($uid), 'projects' => $led];
 		}
 
 		$yes = 0;
@@ -94,15 +72,37 @@ final class PrivacyFacts {
 			'members' => $members,
 			'admins' => array_map($name, $this->tenants->adminsOf($tid)),
 			'leads' => $leads,
-			'matrix' => $matrix,
 			'backup_owner' => $owner === null ? null : ['uid' => $owner, 'name' => $name($owner)],
 			'consents' => ['yes' => $yes, 'no' => max(0, count($roles) - $yes)],
 			'modules' => $this->modules($tid, $settings, $projects),
 			'absence_kinds' => AbsenceRules::kinds($settings),
 			'vacation_calendar' => AbsenceRules::vacationCalendar($settings) !== null,
-			'externals' => count($this->access->externals($tid)),
+			'externals' => $this->externals($tid, $roles),
 			'customers' => count($this->records->findLiveByKind($tid, 'customer')),
 		];
+	}
+
+	/**
+	 * External persons: live person records with a non-empty `feed` that
+	 * belong to no active member. Count only, never an address.
+	 *
+	 * @param array<string,string> $roles uid → role, active members
+	 */
+	private function externals(int $tid, array $roles): int {
+		$n = 0;
+		$uids = array_map('strval', array_keys($roles));
+		foreach ($this->records->findLiveByKind($tid, 'person') as $r) {
+			$d = self::data($r);
+			$feed = $d?->feed ?? null;
+			if (!is_string($feed) || trim($feed) === '') {
+				continue;
+			}
+			if (isset($roles[$r->getRkey()]) || array_intersect($r->accountList(), $uids) !== []) {
+				continue;
+			}
+			$n++;
+		}
+		return $n;
 	}
 
 	private static function data(?Record $r): ?\stdClass {
@@ -150,28 +150,16 @@ final class PrivacyFacts {
 	}
 
 	/**
-	 * The names of the live projects whose `leads` name this account – by
-	 * identifier or by a person record that carries it in `accounts`.
+	 * The names of the active projects whose `leads` name this account –
+	 * by identifier or by a person record that carries it in `accounts`
+	 * ({@see LeadResolver}).
 	 *
 	 * @param list<Record> $persons
 	 * @param list<Record> $projects
 	 * @return list<string>
 	 */
 	public static function projectsLedBy(string $uid, array $persons, array $projects): array {
-		$keys = [$uid];
-		foreach ($persons as $p) {
-			if ($p->getRkey() === $uid || in_array($uid, $p->accountList(), true)) {
-				$keys[] = $p->getRkey();
-			}
-		}
-		$out = [];
-		foreach ($projects as $p) {
-			$d = self::data($p);
-			if (ProjectAccess::isLead($d, $keys)) {
-				$n = $d?->name ?? null;
-				$out[] = is_string($n) && trim($n) !== '' ? trim($n) : $p->getRkey();
-			}
-		}
+		$out = array_map(static fn (array $p): string => $p['name'], LeadResolver::leadsByUid($persons, $projects)[$uid] ?? []);
 		sort($out, SORT_STRING | SORT_FLAG_CASE);
 		return $out;
 	}

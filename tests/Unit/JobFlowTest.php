@@ -203,6 +203,31 @@ class JobFlowTest extends TestCase {
 		$this->assertNull(JobFlow::paid($paid, false, 'pbadmin', self::LATER)['paid']);
 	}
 
+	public function testDoneByWhoeverManages(): void {
+		$run = JobFlow::accept(self::job(), 'pbuser1', self::NOW);
+		$this->assertSame('409 conflict', self::code(fn () => JobFlow::done(self::job(), 'pblead', self::NOW)), 'only In Progress finishes');
+		$done = JobFlow::done($run, 'pblead', self::LATER);
+		$this->assertSame(['by' => 'pblead', 'at' => self::LATER, 'reason' => 'declared'], $done['done']);
+		$this->assertSame('pbuser1', $done['assignee'], 'the holder stays');
+		$this->assertSame($done, JobFlow::done($done, 'pbuser1', self::LATER), 'Done: as it is, whoever asks');
+		$this->assertSame($done, JobFlow::done($done, 'pbadmin', self::LATER));
+	}
+
+	public function testReopen(): void {
+		$run = JobFlow::accept(self::job(), 'pbuser1', self::NOW);
+		$this->assertSame('409 conflict', self::code(fn () => JobFlow::reopen(self::job(), 'pbuser1', self::NOW)), 'only Done reopens');
+		$this->assertSame($run, JobFlow::reopen($run, 'pbuser1', self::NOW), 'In Progress: as it is');
+		$done = JobFlow::done($run, 'pbuser1', self::LATER);
+		$again = JobFlow::reopen($done, 'pblead', self::LATER);
+		$this->assertSame(['in_progress', null, 'reopen'], [$again['state'], $again['done'], $again['log'][array_key_last($again['log'])]['action']]);
+		$this->assertSame('pbuser1', $again['assignee']);
+		$paid = JobFlow::paid($done, true, 'pbadmin', self::LATER);
+		$this->assertSame('409 conflict', self::code(fn () => JobFlow::reopen($paid, 'pbuser1', self::LATER)), 'paid stays Done');
+		$full = (array)JobFlow::progress($run, 40.0, false, 'pbuser1', self::LATER);
+		$this->assertSame('done', $full['state']);
+		$this->assertSame('409 conflict', self::code(fn () => JobFlow::reopen($full, 'pbuser1', self::LATER)), 'hours booked in full stay Done');
+	}
+
 	public function testProgressAndFulfilled(): void {
 		$j = self::job();
 		$this->assertNull(JobFlow::progress($j, 5, false, 'pbuser1', self::NOW), 'not accepted yet');

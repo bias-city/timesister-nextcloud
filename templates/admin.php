@@ -7,7 +7,7 @@
 <div id="timesister-admin" class="section">
 	<h2><?php p($l->t('TimeSister')); ?></h2>
 	<p class="settings-hint">
-		<?php p($l->t('A team builds on an existing Nextcloud group, the team group. Its group admins are the team’s Team Admins. The roles Team Admin, Lead and User and leaving the team are set here under Members or in the Mac app; master data, calendar shares and backups in the Mac app.')); ?>
+		<?php p($l->t('A team builds on an existing Nextcloud group, the team group. Its group admins are the team’s Team Admins. The roles Team Admin and User and leaving the team are set here under Members or in the Mac app; Lead follows from the leads of the active projects. Master data and backups are kept in the Mac app.')); ?>
 	</p>
 
 	<div class="ts-head">
@@ -47,7 +47,7 @@
 		<div id="ts-members"></div>
 		<div id="ts-privacy" hidden>
 			<h4><?php p($l->t('Privacy')); ?></h4>
-			<p class="ts-hint ts-muted"><?php p($l->t('For the privacy notice every member can download (GET /team/privacy): controller, contact, hosting, retention periods and legal basis. Members, roles, shares and backups are read live from the team. Team Admins can keep these entries from the Mac app as the record setting/privacy. The notice is a template, not legal advice.')); ?></p>
+			<p class="ts-hint ts-muted"><?php p($l->t('For the privacy notice every member can download (GET /team/privacy): controller, contact, hosting, retention periods and legal basis. Members, roles and backups are read live from the team. Team Admins can keep these entries from the Mac app as the record setting/privacy. The notice is a template, not legal advice.')); ?></p>
 			<div class="ts-grid">
 				<label for="ts-p-name"><?php p($l->t('Controller (company)')); ?></label>
 				<input id="ts-p-name" type="text" maxlength="500" autocomplete="off">
@@ -105,7 +105,7 @@
 
 	<form id="ts-delete" class="ts-form" hidden>
 		<h3 id="ts-delete-title"><?php p($l->t('Delete team')); ?></h3>
-		<p class="ts-hint ts-muted"><?php p($l->t('A ZIP of the team is stored first – protected in the app data and with the backup owner under “TimeSister Backups/_team”. Then records with history, roles, shares, absences and the server backups are removed. The Nextcloud group, the accounts and their time calendars stay.')); ?></p>
+		<p class="ts-hint ts-muted"><?php p($l->t('A ZIP of the team is stored first – protected in the app data and with the backup owner under “TimeSister Backups/_team”. Then records with history, roles, time entries, absences and the server backups are removed. The Nextcloud group, the accounts and their time calendars stay.')); ?></p>
 		<div class="ts-grid">
 			<label for="ts-delete-name"><?php p($l->t('Team name')); ?></label>
 			<input id="ts-delete-name" type="text" autocomplete="off" spellcheck="false">

@@ -26,8 +26,6 @@ use OCP\DB\Types;
  * @method void setUpdatedBy(string $updatedBy)
  * @method int getUpdatedAt()
  * @method void setUpdatedAt(int $updatedAt)
- * @method int|null getMayOverride()
- * @method void setMayOverride(?int $mayOverride)
  */
 final class Member extends Entity {
 	protected int $tenantId = 0;
@@ -36,7 +34,7 @@ final class Member extends Entity {
 	protected ?int $leftAt = null;
 	protected string $updatedBy = '';
 	protected int $updatedAt = 0;
-	/** 1: the person may override the shares of their own column. */
+	/** Column of the former shares matrix (removed in 0.17.0); unused, kept because the table keeps it. */
 	protected ?int $mayOverride = null;
 
 	public function __construct() {
@@ -49,8 +47,8 @@ final class Member extends Entity {
 		$this->addType('mayOverride', Types::SMALLINT);
 	}
 
-	/** @return array{role:?string,left_at:?int,may_override:bool} */
+	/** @return array{role:?string,left_at:?int} */
 	public function entry(): array {
-		return ['role' => $this->getRole(), 'left_at' => $this->getLeftAt(), 'may_override' => $this->getMayOverride() === 1];
+		return ['role' => $this->getRole(), 'left_at' => $this->getLeftAt()];
 	}
 }

@@ -18,14 +18,14 @@ final class StatusService {
 		private ConsentService $consent,
 		private TenantService $tenants,
 		private AccessPolicy $policy,
-		private AccessService $access,
 		private ITimeFactory $time,
+		private EntryService $entries,
 	) {
 	}
 
 	/**
 	 * The caller's status report. Only the fields sent change; `null`
-	 * clears a field.
+	 * clears a field (`projects` too).
 	 *
 	 * @param array<string,mixed> $in
 	 * @return array{seen_at:string}
@@ -53,24 +53,14 @@ final class StatusService {
 			if (array_key_exists('calendar_url', $in)) {
 				$s->setCalendarUrl($v['calendar_url']);
 			}
-			if (array_key_exists('calendar_shared', $in)) {
-				$s->setCalendarShared($v['calendar_shared'] === null ? null : (int)$v['calendar_shared']);
-			}
-			if (array_key_exists('applied_shares', $in)) {
-				$list = [];
-				$applied = $v['applied_shares'] ?? [];
-				foreach (array_map('strval', array_keys($applied)) as $uid) {
-					$list[] = ['uid' => $uid, 'access' => $applied[$uid]];
-				}
-				$s->setAppliedShares($v['applied_shares'] === null ? null : json_encode($list, JSON_THROW_ON_ERROR));
-				$s->setAppliedAt($v['applied_shares'] === null ? null : $now);
+			// Missing keeps the last report. Stored since 0.12.0; since 0.14.0 no right follows from it.
+			if (array_key_exists('projects', $in)) {
+				$s->setProjects($v['projects'] === null ? null : json_encode($v['projects'], JSON_THROW_ON_ERROR));
+				$s->setProjectsAt($v['projects'] === null ? null : $now);
 			}
 			$s->setSeenAt($now);
 			try {
 				$new ? $this->status->insert($s) : $this->status->update($s);
-				if (array_key_exists('applied_shares', $in)) {
-					$this->access->afterReport($m);
-				}
 				return ['seen_at' => (string)Time::iso($now)];
 			} catch (DbException $e) {
 				// Two status reports at the same time: the second updates.
@@ -86,13 +76,14 @@ final class StatusService {
 		$this->policy->requireTeamRead($m);
 		$byUid = $this->status->findByTenant($m->tenantId);
 		$consents = $this->consent->byTenant($m->tenantId);
+		$named = $this->entries->namedByUid($m->tenantId);
 		$out = [];
 		$roles = $this->tenants->memberRoles($m->tenantId);
 		foreach (array_map('strval', array_keys($roles)) as $uid) {
 			$role = $roles[$uid];
 			$s = $byUid[$uid] ?? null;
 			$c = ConsentService::present($consents[$uid] ?? null);
-			$shared = $s?->getCalendarShared();
+			$tc = $named[$uid] ?? null;
 			$out[] = [
 				'uid' => $uid,
 				'display_name' => $this->tenants->displayName($uid),
@@ -101,11 +92,14 @@ final class StatusService {
 				'last_sync' => Time::iso($s?->getLastSync()),
 				'last_backup' => $s?->getLastBackup(),
 				'calendar_url' => $s?->getCalendarUrl(),
-				'calendar_shared' => $shared === null ? null : $shared === 1,
 				'seen_at' => $s === null ? null : Time::iso($s->getSeenAt()),
 				'backup_consent' => $c['consent'],
 				'backup_consent_since' => $c['since'],
 				'backup_consent_notice' => $c['notice'],
+				// Since 0.17.0: the new “who is missing”.
+				'time_calendar' => $tc !== null,
+				'entries_read_at' => Time::iso($tc?->getLastReadAt()),
+				'entries_error' => $tc?->getLastError(),
 			];
 		}
 		return $out;
