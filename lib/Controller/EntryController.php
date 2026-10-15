@@ -1,0 +1,52 @@
+<?php
+
+declare(strict_types=1);
+
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+namespace OCA\TimeSister\Controller;
+
+use OCA\TimeSister\Service\EntryService;
+use OCA\TimeSister\Service\TenantService;
+use OCP\AppFramework\Http\Attribute\ApiRoute;
+use OCP\AppFramework\Http\Attribute\BruteForceProtection;
+use OCP\AppFramework\Http\Attribute\NoAdminRequired;
+use OCP\AppFramework\Http\Attribute\UserRateLimit;
+use OCP\AppFramework\Http\DataResponse;
+use OCP\IL10N;
+use OCP\IRequest;
+
+/** The time entries (0.17.0): the delta for the clients, the sources' state, a re-read. */
+final class EntryController extends BaseController {
+	public function __construct(
+		IRequest $request,
+		TenantService $tenants,
+		IL10N $l,
+		private EntryService $entries,
+	) {
+		parent::__construct($request, $tenants, $l);
+	}
+
+	/** GET /entries?since=&limit= – every member, filtered by role. */
+	#[ApiRoute(verb: 'GET', url: '/api/v1/entries')]
+	#[NoAdminRequired]
+	public function index(int $since = 0, int $limit = EntryService::PAGE): DataResponse {
+		return $this->run(fn () => $this->entries->page($this->tenants->current(), $since, $limit));
+	}
+
+	/** GET /entries/status – Team Admins: every named calendar and feed. */
+	#[ApiRoute(verb: 'GET', url: '/api/v1/entries/status')]
+	#[NoAdminRequired]
+	public function status(): DataResponse {
+		return $this->run(fn () => $this->entries->statusList($this->tenants->current()));
+	}
+
+	/** POST /entries/reread – Team Admins: a full read of every source on the next run. */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/entries/reread')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 30, period: 60)]
+	public function reread(): DataResponse {
+		return $this->run(fn () => $this->entries->markReread($this->tenants->current()));
+	}
+}

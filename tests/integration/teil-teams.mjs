@@ -11,7 +11,7 @@ export async function teams() {
 	}
 
 	// ---------------------------------------------------------------------------
-	head('GET /me – team from the team group, role from group admin and app role')
+	head('GET /me – team from the team group, role from group admin and project leads')
 	{
 		const expected = [
 			['pbadmin', 'pb', 'admin'], ['pbverw', 'pb', 'admin'], ['pblead', 'pb', 'lead'],
@@ -27,12 +27,8 @@ export async function teams() {
 				&& Number.isInteger(d.revision) && typeof d.display_name === 'string', r.text)
 		}
 		const lead = (await ocs(L, 'GET', '/me')).data
-		check('pblead: admins, leads and calendar_share (default on)', JSON.stringify(lead?.admins) === '["pbadmin","pbverw"]'
-			&& JSON.stringify(lead?.leads) === '["pblead"]' && lead?.calendar_share === true, lead)
-		check('pblead: share_targets from the matrix (default: the Team Admins edit), may_override off',
-			JSON.stringify(lead?.share_targets) === '[{"uid":"pbadmin","access":"write"},{"uid":"pbverw","access":"write"}]' && lead?.may_override === false, lead)
-		const at = (await ocs(AU, 'GET', '/me')).data
-		check('atuser1: admins and leads only from at', JSON.stringify(at?.admins) === '["atadmin"]' && JSON.stringify(at?.leads) === '["atlead"]', at)
+		// 0.17.0: nothing of the shares matrix in /me any more.
+		check('pblead: no admins, leads, calendar_share, share_targets or may_override', ['admins', 'leads', 'calendar_share', 'share_targets', 'may_override'].every((k) => !(k in (lead || {}))), Object.keys(lead || {}))
 		expect('Nextcloud admin without a team group', await ocs(ADMIN, 'GET', '/me'), 403, 'no_team')
 		expect('Nextcloud admin without a team group reads no records', await ocs(ADMIN, 'GET', '/records'), 403, 'no_team')
 	}
@@ -71,7 +67,9 @@ export async function teams() {
 		check('created team as in GET /team, with counts', made.data?.slug === `t-${RUN}` && JSON.stringify(made.data?.groups) === JSON.stringify(tmp) && made.data?.counts?.user === 0, made.text)
 		const upd = await ocs(ADMIN, 'PUT', `/admin/teams/${made.data?.id}`, { name: 'Temporary 2', slug: `t-${RUN}`, groups: tmp })
 		check('rename team', upd.status === 200 && upd.data?.name === 'Temporary 2', upd.text)
-		expect('delete team without records', await ocs(ADMIN, 'DELETE', `/admin/teams/${made.data?.id}`), 200)
+		// Since 0.10.1 deleting needs the team name as confirmation.
+		expect('delete team without confirm', await ocs(ADMIN, 'DELETE', `/admin/teams/${made.data?.id}`), 422, 'confirm')
+		expect('delete team without records', await ocs(ADMIN, 'DELETE', `/admin/teams/${made.data?.id}`, { confirm: 'Temporary 2' }), 200)
 		const after = await ocs(ADMIN, 'GET', '/admin/teams')
 		check('deleted team is missing from the list', !after.data?.some?.((t) => t.slug === `t-${RUN}`))
 		expect('change an unknown team', await ocs(ADMIN, 'PUT', '/admin/teams/999999', { name: 'T', slug: `t-${RUN}`, groups: tmp }), 404, 'not_found')
@@ -85,7 +83,7 @@ export async function teams() {
 		} else {
 			check('GroupDeletedEvent: team marked as “mapping broken”', broken === '1', broken)
 		}
-		expect('delete team with a deleted group', await ocs(ADMIN, 'DELETE', `/admin/teams/${again.data?.id}`), 200)
+		expect('delete team with a deleted group', await ocs(ADMIN, 'DELETE', `/admin/teams/${again.data?.id}`, { confirm: 'Broken' }), 200)
 		for (const gid of Object.values(tmp)) {
 			await ocs(ADMIN, 'DELETE', `/ocs/v2.php/cloud/groups/${gid}`)
 		}

@@ -15,7 +15,7 @@ use OCP\IGroupManager;
 use OCP\IUserManager;
 
 /**
- * Role, leaving date and “allow overriding” of a member. One service for
+ * Role and leaving date of a member. One service for
  * PUT /team/members/{uid} and the admin page. “Team Admin” is the group
  * admin of the team group in Nextcloud, set and withdrawn through ISubAdmin.
  */
@@ -23,7 +23,6 @@ final class MemberService {
 	public function __construct(
 		private MemberMapper $members,
 		private TenantService $tenants,
-		private AccessService $access,
 		private ISubAdmin $subAdmin,
 		private IGroupManager $groupManager,
 		private IUserManager $userManager,
@@ -33,8 +32,8 @@ final class MemberService {
 
 	/**
 	 * @param string $actorRole the caller's role in the team; `admin` for Nextcloud admins on the admin page
-	 * @param array<string,mixed> $in `role`, `left` and/or `may_override`
-	 * @return array{uid:string,display_name:string,role:string,left_at:?string,may_override:bool} the entry as in GET /team
+	 * @param array<string,mixed> $in `role` and/or `left`
+	 * @return array{uid:string,display_name:string,role:string,left_at:?string,lead_of:int,lead_projects:list<string>} the entry as in GET /team
 	 */
 	public function update(int $tenantId, string $actorUid, string $actorRole, string $uid, array $in): array {
 		MemberRules::requireTeamAdmin($actorRole);
@@ -44,7 +43,6 @@ final class MemberService {
 			throw ApiException::notFound('This account is not in the team group.');
 		}
 		MemberRules::authorize($actorUid, $actorRole, $uid, $current['role'], $change, count($this->tenants->adminsOf($tenantId)));
-		$before = $this->access->snapshot($tenantId);
 		if (isset($change['role']) && $change['role'] !== $current['role']) {
 			$this->setGroupAdmin($tenantId, $uid, $change['role'] === Role::ADMIN);
 		}
@@ -57,15 +55,12 @@ final class MemberService {
 				$m->setUid($uid);
 			}
 			if (array_key_exists('role', $change)) {
-				// Only lead is stored: user is null, admin lives in Nextcloud.
-				$m->setRole($change['role'] === Role::LEAD ? Role::LEAD : null);
+				// Nothing is stored any more: admin lives in Nextcloud, lead follows from the projects (0.11.0).
+				$m->setRole(null);
 			}
 			if (array_key_exists('left', $change)) {
 				// Already left: the first date stays.
 				$m->setLeftAt($change['left'] ? ($m->getLeftAt() ?? $now) : null);
-			}
-			if (array_key_exists('may_override', $change)) {
-				$m->setMayOverride($change['may_override'] ? 1 : 0);
 			}
 			$m->setUpdatedBy($actorUid);
 			$m->setUpdatedAt($now);
@@ -80,9 +75,7 @@ final class MemberService {
 			}
 		}
 		$this->tenants->reset();
-		// A role or leaving that withdraws shares: the owners are reminded.
-		$this->access->remindWithdrawals($tenantId, $before);
-		return $this->tenants->presentMember($uid, $this->tenants->members($tenantId)[$uid] ?? $current);
+		return $this->tenants->presentMember($tenantId, $uid, $this->tenants->members($tenantId)[$uid] ?? $current);
 	}
 
 	/**

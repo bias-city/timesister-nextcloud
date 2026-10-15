@@ -16,7 +16,7 @@ use PHPUnit\Framework\TestCase;
 class ProjectAccessTest extends TestCase {
 	private const PROJECT = '{"schema":2,"id":"P1","name":"Hafen","codes":["H"],"subprojects":[{"id":"a"}],"start":"2026-01-01","end":null,'
 		. '"status":"aktiv","mapping":{"rules":[]},"description":"geheim","cost_center":"KS-1","customer":"stadt","quote":"O-7",'
-		. '"leads":["lea","other"],"budget":[1],"milestones":[],"budgets":[{"amount":1000}],"neu_2027":"x"}';
+		. '"leads":["lea","other"],"budget":[1],"milestones":[],"budgets":[{"amount":1000}],"neu_2027":"x","never_billable":true}';
 
 	private static function project(): \stdClass {
 		$p = Json::decode(self::PROJECT);
@@ -26,12 +26,23 @@ class ProjectAccessTest extends TestCase {
 
 	public function testCatalogIsAllowList(): void {
 		$c = ProjectAccess::catalog(self::project());
-		$this->assertSame(['schema', 'id', 'name', 'codes', 'subprojects', 'start', 'end', 'status', 'mapping'], array_keys(get_object_vars($c)));
+		$this->assertSame(['schema', 'id', 'name', 'codes', 'subprojects', 'start', 'end', 'status', 'mapping', 'never_billable', 'led'], array_keys(get_object_vars($c)));
 		// A new, unknown field does not slip through.
 		$this->assertFalse(property_exists($c, 'neu_2027'));
 		$this->assertNull($c->end, 'null stays null');
 		$this->assertTrue(property_exists(self::project(), 'budgets'), 'the original stays');
-		$this->assertSame('{"id":"P2"}', Json::encode(ProjectAccess::catalog((object)['id' => 'P2', 'leads' => ['x']])));
+		$this->assertSame('{"id":"P2","led":true}', Json::encode(ProjectAccess::catalog((object)['id' => 'P2', 'leads' => ['x']])));
+		$this->assertSame('{"id":"P3"}', Json::encode(ProjectAccess::catalog((object)['id' => 'P3', 'leads' => []])));
+	}
+
+	/** Quotes (0.16.0): the budgets with their rates and the team stay out of the catalog. */
+	public function testCatalogWithoutRatesAndTeam(): void {
+		$p = Json::decode('{"id":"Q1","status":"quoted","team":["ann","bob"],"budgets":[{"id":"b1","currency":"CHF","rates":{"ann":150},'
+			. '"work_packages":[{"no":1,"rate":180}]}],"leads":["lea"]}');
+		self::assertInstanceOf(\stdClass::class, $p);
+		$c = ProjectAccess::catalog($p);
+		$this->assertSame('{"id":"Q1","status":"quoted","led":true}', Json::encode($c));
+		$this->assertStringNotContainsString('rate', Json::encode($c));
 	}
 
 	public function testIsLead(): void {

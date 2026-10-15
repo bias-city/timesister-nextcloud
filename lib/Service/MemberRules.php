@@ -8,7 +8,7 @@ namespace OCA\TimeSister\Service;
 
 /** Checking PUT /team/members/{uid}. Pure. */
 final class MemberRules {
-	/** Only Team Admins set roles, leaving and “allow overriding” (before any further check). */
+	/** Only Team Admins set roles and leaving (before any further check). */
 	public static function requireTeamAdmin(string $actorRole): void {
 		if (!Role::manages($actorRole)) {
 			throw ApiException::forbidden('Only Team Admins set roles and leaving.');
@@ -16,22 +16,25 @@ final class MemberRules {
 	}
 
 	/**
-	 * The body: `role` (admin, lead, user), `left` (bool) and/or
-	 * `may_override` (bool).
+	 * The body: `role` (admin, user) and/or `left` (bool). `lead` is not set
+	 * any more (0.11.0).
 	 *
 	 * @param array<string,mixed> $in
-	 * @return array{role?:string,left?:bool,may_override?:bool}
+	 * @return array{role?:string,left?:bool}
 	 */
 	public static function validate(array $in): array {
 		$out = [];
 		if (array_key_exists('role', $in)) {
 			$role = $in['role'];
+			if ($role === Role::LEAD || $role === Role::LEGACY_SUBADMIN) {
+				throw ApiException::invalid('Lead follows from the project leads and cannot be set.');
+			}
 			if (!is_string($role) || !in_array($role, Role::APP_ROLES, true)) {
-				throw ApiException::invalid('“role” must be admin, lead or user.');
+				throw ApiException::invalid('“role” must be admin or user.');
 			}
 			$out['role'] = $role;
 		}
-		foreach (['left', 'may_override'] as $field) {
+		foreach (['left'] as $field) {
 			if (array_key_exists($field, $in)) {
 				if (!is_bool($in[$field])) {
 					throw ApiException::notBool($field);
@@ -40,7 +43,7 @@ final class MemberRules {
 			}
 		}
 		if ($out === []) {
-			throw ApiException::badRequest('“role”, “left” or “may_override” is missing.');
+			throw ApiException::badRequest('“role” or “left” is missing.');
 		}
 		return $out;
 	}
@@ -51,7 +54,7 @@ final class MemberRules {
 	 * at least one Team Admin.
 	 *
 	 * @param string $targetRole the account's current role in the team
-	 * @param array{role?:string,left?:bool,may_override?:bool} $change
+	 * @param array{role?:string,left?:bool} $change
 	 * @param int $adminCount Team Admins of the team who have not left
 	 */
 	public static function authorize(string $actorUid, string $actorRole, string $uid, string $targetRole, array $change, int $adminCount): void {

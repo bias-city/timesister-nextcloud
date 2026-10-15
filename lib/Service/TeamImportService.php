@@ -8,8 +8,6 @@ namespace OCA\TimeSister\Service;
 
 use OCA\TimeSister\Db\Absence;
 use OCA\TimeSister\Db\AbsenceMapper;
-use OCA\TimeSister\Db\Access;
-use OCA\TimeSister\Db\AccessMapper;
 use OCA\TimeSister\Db\BackupConsent;
 use OCA\TimeSister\Db\BackupConsentMapper;
 use OCA\TimeSister\Db\ClientStatus;
@@ -39,7 +37,9 @@ use Psr\Log\LoggerInterface;
  * accounts of this Nextcloud, then import with a mapping of old to new
  * accounts, `merge` or `replace`. Reading and the rules: {@see ZipReader},
  * {@see ZipRules}. Calendars become backups per person, never calendar
- * events.
+ * events; the invoice template (0.16.0) the team's template; the named
+ * time calendars and the cutoff (0.17.0) are taken over, the book itself
+ * is read again from the calendars.
  */
 final class TeamImportService {
 	private const ACCOUNT_LIMIT = 500;
@@ -56,12 +56,14 @@ final class TeamImportService {
 		private RecordMapper $records,
 		private HistoryMapper $history,
 		private MemberMapper $members,
-		private AccessMapper $access,
 		private BackupConsentMapper $consents,
 		private AbsenceMapper $absences,
 		private ClientStatusMapper $status,
 		private TeamExportService $export,
 		private BackupService $backups,
+		private InvoiceTemplateStore $templates,
+		private InvoiceTemplateService $templateCheck,
+		private EntryService $entries,
 		private ITimeFactory $time,
 		private LoggerInterface $logger,
 	) {
@@ -129,7 +131,6 @@ final class TeamImportService {
 			try {
 				$counts = $this->writeRecords($tid, $plan, $actor, $now);
 				$counts['members'] = $this->writeMembers($tid, $b, $mapping, $mode, $actor, $now);
-				$counts['access'] = $this->writeAccess($tid, $b, $mapping, $mode, $now);
 				$counts['consents'] = $this->writeConsents($tid, $b, $mapping, $mode);
 				$counts['absences'] = $this->writeAbsences($tid, $b, $mapping, $mode, $now);
 				$counts['status'] = $this->writeStatus($tid, $b, $mapping, $mode, $now);
@@ -143,6 +144,9 @@ final class TeamImportService {
 			$this->tenants->reset();
 			$groups = $this->joinGroup($tid, $b, $mapping);
 			$calendars = $this->storeCalendars($tid, $zip, $b, $mapping);
+			$template = $this->storeTemplate($tid, $zip, $b, $mapping, $mode);
+			$since = $this->applySince($t, $b, $mode);
+			$named = $this->nameCalendars($tid, $b, $mapping, $mode);
 		} finally {
 			$zip->close();
 			@unlink($path);
@@ -162,12 +166,14 @@ final class TeamImportService {
 			'pre_backup' => $pre,
 			'records' => $counts['records'],
 			'members' => $counts['members'] + $groups,
-			'access' => $counts['access'],
 			'consents' => $counts['consents'],
 			'absences' => $counts['absences'],
 			'status' => $counts['status'],
 			'without_account' => $without,
 			'calendars' => $calendars,
+			'template' => $template,
+			'entries_since' => $since,
+			'time_calendars' => $named,
 		];
 	}
 
@@ -202,16 +208,19 @@ final class TeamImportService {
 			'persons' => $persons,
 			'calendars' => $b['calendars'],
 			'absences' => count($b['absences']),
+			'template' => $b['template']['meta'] ?? null,
+			'entries_since' => $b['team']['settings']['entries_since'],
+			'time_calendars' => count($b['team']['time_calendars']),
 			'target' => $t === null ? null : ['id' => $t->getId(), 'name' => $t->getName(), 'empty' => !$this->hasContent($t->getId())],
 			'accounts' => $accounts,
 		];
 	}
 
-	/** Records, rows or members: then a backup is taken first. */
+	/** Records, rows, members or an invoice template: then a backup is taken first. */
 	private function hasContent(int $tid): bool {
 		return $this->records->stats($tid)['all'] > 0
+			|| $this->templates->info($tid) !== null
 			|| $this->members->entriesByTenant($tid) !== []
-			|| $this->access->findByTenant($tid) !== []
 			|| $this->consents->findByTenant($tid) !== []
 			|| $this->absences->byTenant($tid) !== [];
 	}
@@ -477,45 +486,12 @@ final class TeamImportService {
 				$row->setTenantId($tid);
 				$row->setUid($uid);
 			}
-			$row->setRole($m['role'] === Role::LEAD ? Role::LEAD : null);
+			// The ZIP's role is only information: lead follows from the projects (0.11.0).
+			$row->setRole(null);
 			$row->setLeftAt($m['left_at']);
-			$row->setMayOverride($m['may_override'] ? 1 : 0);
 			$row->setUpdatedBy($actor);
 			$row->setUpdatedAt($now);
 			$found === null ? $this->members->insert($row) : $this->members->update($row);
-			$n++;
-		}
-		return ['rows' => $n];
-	}
-
-	/**
-	 * @param array<string,mixed> $b
-	 * @param array<string,?string> $mapping
-	 * @return array{rows:int}
-	 */
-	private function writeAccess(int $tid, array $b, array $mapping, string $mode, int $now): array {
-		if ($mode === ZipRules::MODE_REPLACE) {
-			$this->access->deleteByTenant($tid);
-		}
-		$n = 0;
-		foreach ($b['team']['access'] as $f) {
-			$viewer = ZipRules::mapUid($f['viewer'], $mapping);
-			$owner = ZipRules::mapUid($f['owner'], $mapping);
-			if ($viewer === null || $owner === null || $viewer === $owner) {
-				continue;
-			}
-			if ($mode === ZipRules::MODE_MERGE && $this->access->findOne($tid, $viewer, $owner, $f['source']) !== null) {
-				continue;
-			}
-			$a = new Access();
-			$a->setTenantId($tid);
-			$a->setViewer($viewer);
-			$a->setOwner($owner);
-			$a->setSource($f['source']);
-			$a->setLevel($f['level']);
-			$a->setUpdatedBy(ZipRules::keepUid($f['updated_by'], $mapping));
-			$a->setUpdatedAt($f['updated_at'] ?? $now);
-			$this->access->insert($a);
 			$n++;
 		}
 		return ['rows' => $n];
@@ -614,7 +590,6 @@ final class TeamImportService {
 			$row->setAppVersion($s['app_version']);
 			$row->setLastSync($s['last_sync']);
 			$row->setCalendarUrl($s['calendar_url']);
-			$row->setCalendarShared($s['calendar_shared']);
 			$row->setJobWeeks($s['job_weeks']);
 			$row->setJobWeeksAt($s['job_weeks_at']);
 			$found === null ? $this->status->insert($row) : $this->status->update($row);
@@ -687,6 +662,114 @@ final class TeamImportService {
 			} catch (\Throwable $e) {
 				$this->logger->error('TimeSister: imported calendar of {uid} not stored', ['app' => 'timesister', 'uid' => $uid, 'exception' => $e]);
 				$out[] = ['uid' => $uid, 'stored' => false, 'reason' => 'failed'];
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * The invoice template of the backup (0.16.0), after the transaction
+	 * like the calendars; null when the backup has none – then the team's
+	 * own stays, also with `replace`.
+	 *
+	 * @param array<string,mixed> $b
+	 * @param array<string,?string> $mapping
+	 * @return ?array<string,mixed>
+	 */
+	private function storeTemplate(int $tid, ZipFile $zip, array $b, array $mapping, string $mode): ?array {
+		$src = $b['template'] ?? null;
+		if (!is_array($src)) {
+			return null;
+		}
+		$meta = InvoiceTemplateRules::readMeta($src['meta'] ?? null);
+		if ($meta === null) {
+			return null;
+		}
+		try {
+			$decision = ZipRules::decideTemplate($this->templates->info($tid), $meta, $mode);
+			if ($decision !== 'store') {
+				return ['name' => $meta['name'], 'stored' => false, 'reason' => $decision === 'same' ? 'same' : 'kept_existing'];
+			}
+			$bytes = $zip->read((string)$src['path']);
+			try {
+				$this->templateCheck->check($bytes);
+			} catch (ApiException) {
+				return ['name' => $meta['name'], 'stored' => false, 'reason' => 'not_a_template'];
+			}
+			$meta['modified_by'] = ZipRules::keepUid($meta['modified_by'], $mapping);
+			$this->templates->put($tid, $meta, $bytes);
+			return ['name' => $meta['name'], 'stored' => true];
+		} catch (\Throwable $e) {
+			$this->logger->error('TimeSister: imported invoice template of team {team} not stored', ['app' => 'timesister', 'team' => $tid, 'exception' => $e]);
+			return ['name' => $meta['name'], 'stored' => false, 'reason' => 'failed'];
+		}
+	}
+
+	/**
+	 * The cutoff of the backup (0.17.0): `replace` takes it as it is,
+	 * `merge` only when the team has none stored. A change marks every
+	 * source for a full read.
+	 *
+	 * @param array<string,mixed> $b
+	 * @return array{value:?string,applied:bool}
+	 */
+	private function applySince(Tenant $t, array $b, string $mode): array {
+		/** @var ?string $value */
+		$value = $b['team']['settings']['entries_since'];
+		if ($mode === ZipRules::MODE_MERGE && $t->getEntriesSince() !== null) {
+			return ['value' => $value, 'applied' => false];
+		}
+		$this->entries->applySince($t, $value);
+		return ['value' => $value, 'applied' => true];
+	}
+
+	/**
+	 * The named time calendars of the backup (0.17.0), after the
+	 * transaction: for every mapped account the calendar with the named
+	 * URI, else `zeit-<uid>`, is named; `merge` keeps a calendar already
+	 * named here. One row failing is reported, the others go on.
+	 *
+	 * @param array<string,mixed> $b
+	 * @param array<string,?string> $mapping
+	 * @return list<array<string,mixed>>
+	 */
+	private function nameCalendars(int $tid, array $b, array $mapping, string $mode): array {
+		$out = [];
+		foreach ($b['team']['time_calendars'] as $c) {
+			$uid = ZipRules::mapUid((string)$c['uid'], $mapping);
+			if ($uid === null) {
+				$out[] = ['uid' => $c['uid'], 'named' => false, 'reason' => 'no_account'];
+				continue;
+			}
+			$have = $this->entries->namedByUid($tid)[$uid] ?? null;
+			if ($have !== null && $mode === ZipRules::MODE_MERGE) {
+				$out[] = ['uid' => $uid, 'named' => false, 'reason' => 'kept_existing', 'calendar_uri' => $have->getCalendarUri()];
+				continue;
+			}
+			$uris = array_values(array_unique([(string)$c['calendar_uri'], 'zeit-' . $uid]));
+			$row = null;
+			$failed = null;
+			foreach ($uris as $uri) {
+				try {
+					$row = $this->entries->nameCalendar($tid, $uid, $uri);
+					break;
+				} catch (ApiException $e) {
+					if ($e->getStatus() !== 404) {
+						$failed = $e;
+						break;
+					}
+				} catch (\Throwable $e) {
+					$failed = $e;
+					break;
+				}
+			}
+			if ($row !== null) {
+				$out[] = ['uid' => $uid, 'named' => true, 'calendar_uri' => (string)$row->getCalendarUri()];
+			} elseif ($failed === null) {
+				$out[] = ['uid' => $uid, 'named' => false, 'reason' => 'no_calendar'];
+			} else {
+				$this->logger->error('TimeSister: imported time calendar of {uid} not named', ['app' => 'timesister', 'uid' => $uid, 'exception' => $failed]);
+				$out[] = ['uid' => $uid, 'named' => false, 'reason' => 'failed'];
 			}
 		}
 		return $out;

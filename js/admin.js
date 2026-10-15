@@ -10,6 +10,8 @@
 
 	// One team group; Team Admin is whoever manages it in Nextcloud. Strongest first.
 	const ROLES = ['admin', 'lead', 'user']
+	// What can be set (0.11.0): Lead follows from the project leads and is only shown.
+	const SET_ROLES = ['admin', 'user']
 
 	/** Without OC globals: the token is in the page's head. */
 	function requestToken() {
@@ -37,6 +39,15 @@
 	// setting/privacy per team ID (0.10.2): { version, data }.
 	const PRIVACY = loadState('privacy') || {}
 	const roleName = (r) => ROLE_NAMES[r] || r
+	/** "Lead · 2 projects" for a derived Lead, otherwise the role word; the project names as a tooltip. */
+	const roleLabel = (m) => {
+		const n = m.lead_of || 0
+		if (m.role !== 'lead' || !n) {
+			return h('span', { text: roleName(m.role) })
+		}
+		const text = roleName('lead') + ' · ' + (n === 1 ? tr('one_project') : tr('n_projects', { n }))
+		return h('span', { class: 'ts-lead', title: (m.lead_projects || []).join('\n'), text })
+	}
 
 	/** Translated text for a key; {name} is replaced with vars.name. */
 	function tr(key, vars) {
@@ -187,7 +198,7 @@
 			// All members with role; those who left stay visible, marked.
 			const members = h('ul', { class: 'ts-list ts-members' }, ((st && st.members) || []).map((m) => h('li', { class: m.left_at ? 'ts-left' : '' },
 				h('span', { text: memberLabel(m) + ' ' }),
-				h('span', { class: 'ts-muted', text: roleName(m.role) + (m.left_at ? ' · ' + tr('left_on', { date: formatDay(m.left_at.slice(0, 10)) }) : '') }))))
+				h('span', { class: 'ts-muted' }, roleLabel(m), m.left_at ? ' · ' + tr('left_on', { date: formatDay(m.left_at.slice(0, 10)) }) : ''))))
 			const owner = h('div', { class: 'ts-owner' },
 				h('span', { class: 'ts-muted', text: tr('backups_stored_with') + ' ' }),
 				t.backup_owner ? h('span', { text: adminLabel(st, t.backup_owner) }) : h('span', { class: 'ts-bad', text: tr('owner_none') }))
@@ -237,7 +248,7 @@
 			if (!st) {
 				return h('tr', {}, h('td', { text: t.name }), h('td', { class: 'ts-muted', colspan: 6, text: tr('new_after_reload') }))
 			}
-			const calendars = h('span', { class: st.calendar_not_shared > 0 ? 'ts-bad' : '', text: tr('not_shared', { n: st.calendar_not_shared || 0 }) })
+			const calendars = h('span', { class: st.without_time_calendar > 0 ? 'ts-bad' : '', text: tr('without_calendar', { n: st.without_time_calendar || 0 }) })
 			const backups = h('ul', { class: 'ts-list' },
 				h('li', { text: tr('consent_count', { n: st.backup_consent, total: st.member_count }) }),
 				h('li', { class: st.without_backup_week > 0 ? 'ts-bad' : '', text: tr('without_week', { n: st.without_backup_week }) }),
@@ -332,10 +343,13 @@
 		}
 		const rows = st.members.map((m) => {
 			const name = memberLabel(m)
-			const role = h('select', { 'data-uid': m.uid, 'data-was': m.role, 'aria-label': tr('role_of', { name }) },
-				ROLES.map((r) => h('option', { value: r, text: roleName(r), selected: r === m.role })))
+			// The set role: a derived Lead is stored as User; the Lead itself is shown, not chosen (0.11.0).
+			const was = m.role === 'lead' ? 'user' : m.role
+			const role = h('select', { 'data-uid': m.uid, 'data-was': was, 'aria-label': tr('role_of', { name }) },
+				SET_ROLES.map((r) => h('option', { value: r, text: roleName(r), selected: r === was })))
 			const left = h('input', { type: 'checkbox', 'data-uid': m.uid, 'data-was': m.left_at ? '1' : '0', checked: Boolean(m.left_at), 'aria-label': tr('left_of', { name }) })
-			return h('tr', { class: m.left_at ? 'ts-left' : '' }, h('td', { text: name }), h('td', {}, role), h('td', {}, left))
+			const derived = m.role === 'lead' ? h('div', { class: 'ts-muted' }, roleLabel(m)) : null
+			return h('tr', { class: m.left_at ? 'ts-left' : '' }, h('td', { text: name }), h('td', {}, role, derived), h('td', {}, left))
 		})
 		box.append(h('table', {},
 			h('thead', {}, h('tr', {}, h('th', { text: tr('member') }), h('th', { text: tr('role') }), h('th', { text: tr('left') }))),

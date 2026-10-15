@@ -14,15 +14,14 @@ use OCP\DB\Exception as DbException;
 
 /**
  * The weekly numbers of the persons' Jobs (0.7.2): each client reports its
- * own ({@see JobWeeks}); the person, Team Admins and Leads who may at least
- * view the person's time calendar read them. The server checks with them
- * whether an accepted counter-proposal fits.
+ * own ({@see JobWeeks}); the person and Team Admins read them (since
+ * 0.14.0 no longer Leads). The server checks with them whether an accepted
+ * counter-proposal fits, and tells Leads per person only fits or not.
  */
 final class JobWeeksService {
 	public function __construct(
 		private ClientStatusMapper $status,
 		private TenantService $tenants,
-		private AccessService $access,
 		private RecordMapper $records,
 		private RecordService $recordService,
 		private JobAccess $jobAccess,
@@ -60,26 +59,16 @@ final class JobWeeksService {
 	}
 
 	/**
-	 * Whose numbers the caller reads: their own; Team Admins everyone's;
-	 * Leads those whose time calendar they may at least view.
+	 * Whose numbers the caller reads: their own; Team Admins everyone's
+	 * (0.14.0: Leads only their own too).
 	 *
 	 * @return list<string>
 	 */
 	public function readable(Membership $m): array {
-		$roles = $this->tenants->memberRoles($m->tenantId);
 		if ($m->manages()) {
-			return array_map('strval', array_keys($roles));
+			return array_map('strval', array_keys($this->tenants->memberRoles($m->tenantId)));
 		}
-		$out = [$m->uid];
-		if (($roles[$m->uid] ?? null) === Role::LEAD) {
-			$levels = $this->access->levelsOf($m);
-			foreach (array_map('strval', array_keys($levels)) as $owner) {
-				if (AccessRules::rank($levels[$owner]) >= AccessRules::rank(AccessRules::VIEW)) {
-					$out[] = $owner;
-				}
-			}
-		}
-		return $out;
+		return [$m->uid];
 	}
 
 	/**
@@ -93,7 +82,7 @@ final class JobWeeksService {
 		$readable = $this->readable($m);
 		if ($uid !== null && $uid !== '') {
 			if (!in_array($uid, $readable, true)) {
-				throw ApiException::forbidden(Message::of('Only your own numbers – or those of someone whose time calendar you may view.'));
+				throw ApiException::forbidden(Message::of('Only your own numbers; Team Admins read everyone’s.'));
 			}
 			$readable = [$uid];
 		}
@@ -161,11 +150,12 @@ final class JobWeeksService {
 
 	/**
 	 * Throws `422 invalid` with `rule: capacity` when the Job does not fit
-	 * the person's reported weeks. Without numbers it passes.
+	 * the person's reported weeks. Without numbers it passes. Whoever is no
+	 * Team Admin learns which weeks, not the hours (0.14.0).
 	 *
 	 * @param array<string,mixed> $job
 	 */
-	public function check(int $tenantId, array $job, string $uid): void {
+	public function check(int $tenantId, array $job, string $uid, bool $numbers = true): void {
 		$o = $this->over($tenantId, $job, $uid);
 		if ($o === null || $o['weeks'] === []) {
 			return;
@@ -174,8 +164,41 @@ final class JobWeeksService {
 		throw new ApiException(422, ApiException::INVALID, Message::plural(
 			'This counter-proposal does not fit the capacity of {user}: week {weeks} above the capacity line.',
 			'This counter-proposal does not fit the capacity of {user}: weeks {weeks} above the capacity line.',
-			$n, ['user' => $this->tenants->displayName($uid), 'weeks' => JobWeeks::weeksText($o['weeks'])]),
-			['rule' => 'capacity', 'user' => $uid, 'weeks' => $o['weeks'], 'reported_at' => $o['reported_at']]);
+			$n, ['user' => $this->tenants->displayName($uid), 'weeks' => JobWeeks::weeksText($o['weeks'], $numbers)]),
+			['rule' => 'capacity', 'user' => $uid, 'weeks' => $numbers ? $o['weeks'] : JobWeeks::withoutNumbers($o['weeks']), 'reported_at' => $o['reported_at']]);
+	}
+
+	/**
+	 * POST /jobs/fits (0.14.0): would a Job of these hours and days fit
+	 * each recipient? Per account true, false, or null without reported
+	 * numbers – never the numbers. Team Admins and Leads, only for members.
+	 *
+	 * @return array{fits:\stdClass} account → true|false|null, an object even for numeric accounts
+	 */
+	public function fits(Membership $m, \stdClass $body): array {
+		if (!$m->manages() && $m->role !== Role::LEAD) {
+			throw ApiException::forbidden(Message::of('Only Team Admins and Leads ask whether a {job} fits.', ['job' => JobWord::JOB]));
+		}
+		$f = JobRules::fits($body);
+		$roles = $this->tenants->memberRoles($m->tenantId);
+		foreach ($f['recipients'] as $uid) {
+			if (!array_key_exists($uid, $roles)) {
+				throw ApiException::invalid(Message::of('{user} is not in the team.', ['user' => $uid]));
+			}
+		}
+		// A Job being changed: its own hours do not count twice – only for whoever manages it.
+		if ($f['job'] !== null) {
+			$r = $this->records->findOne($m->tenantId, 'job', $f['job']);
+			if ($r === null || $r->isTombstone() || !$this->jobAccess->manages($m, JobAccess::decode($r), $this->recordService->ownKeys($m))) {
+				throw ApiException::notFound(Message::of('This {job} does not exist.', ['job' => JobWord::JOB]));
+			}
+		}
+		$probe = ['id' => $f['job'] ?? '', 'hours' => $f['hours'], 'start' => $f['start'], 'end' => $f['end']];
+		$out = new \stdClass();
+		foreach ($f['recipients'] as $uid) {
+			$out->{$uid} = JobWeeks::fitsOf($this->over($m->tenantId, $probe, $uid));
+		}
+		return ['fits' => $out];
 	}
 
 	/** @return ?array{pensum:?float,jobs:list<string>,weeks:list<array<string,mixed>>} */

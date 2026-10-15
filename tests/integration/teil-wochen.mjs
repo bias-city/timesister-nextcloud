@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // Weekly numbers of the Jobs (0.7.2, per day 0.7.3, non-billable 0.7.4, day weights to readers 0.7.5): each client reports its own weeks,
-// who reads them (the person, Team Admins, Leads with at least “view” in
-// the shares matrix), and the capacity check when a Lead accepts a
-// counter-proposal – with the person's reported weeks, a running Job the
-// report does not know yet, and without numbers (not blocked). Team “at”,
-// whose User has no client running; everything reset at the end.
+// who reads them (the person and Team Admins; since 0.14.0 Leads only their
+// own), the capacity check when a Lead accepts a counter-proposal – with the
+// person's reported weeks, a running Job the report does not know yet, and
+// without numbers (not blocked); Leads get the weeks without hours – and
+// POST /jobs/fits (0.14.0). Team “at”, whose User has no client running;
+// everything reset at the end.
 import { ADMIN, ocs, sql } from './lib.mjs'
 import { A, AA, AL, AU, RUN, check, expect, head } from './harness.mjs'
 
@@ -67,15 +68,17 @@ export async function wochen() {
 			&& JSON.stringify(me.weeks[0].days) === '[1,1,1,1,1,0,0]', JSON.stringify(me?.weeks?.[0]))
 		check('… non-billable (0.7.4): 0 where none was sent, merged into “other”', me?.weeks?.[0]?.jobs?.[key(1)]?.booked_nb === 0
 			&& me?.weeks?.[0]?.other?.booked_nb === 0.5, JSON.stringify(me?.weeks?.[0]))
+		// 0.14.0: Leads read only their own numbers.
 		const lead = await ocs(AL, 'GET', '/jobs/weeks')
-		check('a Lead without “view” reads only their own', lead.status === 200 && lead.data?.people?.length === 1 && lead.data.people[0].uid === 'atlead'
+		check('a Lead reads only their own', lead.status === 200 && lead.data?.people?.length === 1 && lead.data.people[0].uid === 'atlead'
 			&& lead.data.people[0].weeks === null, lead.text.slice(0, 300))
-		expect('… nor with ?uid=atuser1', await ocs(AL, 'GET', '/jobs/weeks?uid=atuser1'), 403, 'forbidden')
-		expect('the matrix: atlead views atuser1', await ocs(AA, 'PUT', '/team/access/atlead/atuser1', { level: 'view' }), 200)
-		const lead2 = await ocs(AL, 'GET', '/jobs/weeks?uid=atuser1')
-		const tim = lead2.data?.people?.[0]
-		check('then the Lead reads atuser1', lead2.status === 200 && tim?.uid === 'atuser1' && tim?.weeks?.[0]?.jobs?.[key(1)]?.planned === 5
-			&& tim?.weeks?.[0]?.other?.booked === 2 && tim?.weeks?.[0]?.other?.booked_nb === 0.5 && typeof tim?.reported_at === 'string', lead2.text.slice(0, 300))
+		const other = await ocs(AL, 'GET', '/jobs/weeks?uid=atuser1')
+		check('… not with ?uid=atuser1 → 403 forbidden', other.status === 403 && other.data?.error === 'forbidden'
+			&& other.data?.message === 'Only your own numbers; Team Admins read everyone’s.', other.text.slice(0, 300))
+		const adm = await ocs(AA, 'GET', '/jobs/weeks?uid=atuser1')
+		const tim = adm.data?.people?.[0]
+		check('a Team Admin reads atuser1', adm.status === 200 && adm.data?.people?.length === 1 && tim?.uid === 'atuser1' && tim?.weeks?.[0]?.jobs?.[key(1)]?.planned === 5
+			&& tim?.weeks?.[0]?.other?.booked === 2 && tim?.weeks?.[0]?.other?.booked_nb === 0.5 && typeof tim?.reported_at === 'string', adm.text.slice(0, 300))
 		const all = await ocs(AA, 'GET', '/jobs/weeks')
 		const uids = (all.data?.people || []).map((p) => p.uid)
 		check('a Team Admin reads everyone of the team', all.status === 200 && ['atadmin', 'atlead', 'atuser1'].every((u) => uids.includes(u))
@@ -83,15 +86,19 @@ export async function wochen() {
 		expect('another team does not', await ocs(A, 'GET', '/jobs/weeks?uid=atuser1'), 403, 'forbidden')
 
 		head('Job weeks: the capacity check of a counter-proposal')
-		const pre = await ocs(AL, 'GET', `${path(key(2))}/capacity`)
-		check('16 h in week +1 on top of 5 h: 1 h above the line', pre.status === 200 && pre.data?.reported === true && pre.data?.fits === false
+		const pre = await ocs(AA, 'GET', `${path(key(2))}/capacity`)
+		check('Team Admin: 16 h in week +1 on top of 5 h: 1 h above the line', pre.status === 200 && pre.data?.reported === true && pre.data?.fits === false
 			&& pre.data?.weeks?.length === 1 && pre.data.weeks[0].start === W(1) && pre.data.weeks[0].over === 1 && pre.data.weeks[0].available === 20, pre.text.slice(0, 300))
+		const preL = await ocs(AL, 'GET', `${path(key(2))}/capacity`)
+		const wL = preL.data?.weeks?.[0] || {}
+		check('Lead: the same week, without hours (0.14.0)', preL.status === 200 && preL.data?.fits === false && preL.data?.weeks?.length === 1
+			&& wL.start === W(1) && wL.week === isoWeek(W(1)) && !('load' in wL) && !('available' in wL) && !('over' in wL), preL.text.slice(0, 300))
 		expect('the User may not ask', await ocs(AU, 'GET', `${path(key(2))}/capacity`), 403, 'forbidden')
 		expect('by someone without a counter-proposal', await ocs(AL, 'GET', `${path(key(2))}/capacity?by=atadmin`), 409, 'conflict')
 		const no = await ocs(AL, 'POST', `${path(key(2))}/accept-counter`)
-		check('accepting it → 422 rule capacity with the week', no.status === 422 && no.data?.rule === 'capacity' && no.data?.user === 'atuser1'
-			&& no.data?.weeks?.[0]?.week === isoWeek(W(1)) && no.data?.weeks?.[0]?.over === 1
-			&& no.data?.message === `This counter-proposal does not fit the capacity of Tim Test: week ${isoWeek(W(1))} (+1 h) above the capacity line.`, no.text.slice(0, 300))
+		check('accepting it → 422 rule capacity with the week, no hours for the Lead', no.status === 422 && no.data?.rule === 'capacity' && no.data?.user === 'atuser1'
+			&& no.data?.weeks?.[0]?.week === isoWeek(W(1)) && !('over' in (no.data?.weeks?.[0] || {}))
+			&& no.data?.message === `This counter-proposal does not fit the capacity of Tim Test: week ${isoWeek(W(1))} above the capacity line.`, no.text.slice(0, 300))
 		check('… the Job still waits', (await ocs(AL, 'GET', `/records/job/${key(2)}`)).data?.data?.counters?.[0]?.answer === undefined)
 		expect('atuser1 counter-proposes 15 h', await ocs(AU, 'POST', `${path(key(2))}/counter`, { hours: 15 }), 200)
 		const fits = await ocs(AL, 'GET', `${path(key(2))}/capacity?by=atuser1`)
@@ -101,7 +108,7 @@ export async function wochen() {
 		expect('JA3 on the project code, week +1', await ocs(AL, 'PUT', path(key(3)), offer({ code: 'PA', hours: 1, start: W(1), end: addDays(W(1), 4) })), 200)
 		made.push(key(3))
 		expect('… atuser1 counter-proposes 1.5 h', await ocs(AU, 'POST', `${path(key(3))}/counter`, { hours: 1.5 }), 200)
-		const extra = await ocs(AL, 'GET', `${path(key(3))}/capacity`)
+		const extra = await ocs(AA, 'GET', `${path(key(3))}/capacity`)
 		check('JA2 counts although the report does not know it yet', extra.status === 200 && extra.data?.fits === false
 			&& extra.data?.weeks?.[0]?.load === 21.5, extra.text.slice(0, 300))
 		// The account language decides (Nextcloud keeps the first Accept-Language).
@@ -111,7 +118,7 @@ export async function wochen() {
 			await ocs(ADMIN, 'PUT', userPath, { key: 'language', value: 'de' })
 			const de = await ocs(AL, 'POST', `${path(key(3))}/accept-counter`, undefined, { lang: 'de' })
 			check('… accepting it answers in German', de.status === 422
-				&& de.data?.message === `Dieser Gegenvorschlag passt nicht in die Kapazität von Tim Test: KW ${isoWeek(W(1))} (+1.5 h) über der Pensum-Linie.`, de.data?.message)
+				&& de.data?.message === `Dieser Gegenvorschlag passt nicht in die Kapazität von Tim Test: KW ${isoWeek(W(1))} über der Pensum-Linie.`, de.data?.message)
 		} finally {
 			await ocs(ADMIN, 'PUT', userPath, { key: 'language', value: langBefore })
 		}
@@ -120,16 +127,38 @@ export async function wochen() {
 		expect('JA4 offered for week +2, 10 h', await ocs(AL, 'PUT', path(key(4)), offer({ start: W(2), end: addDays(W(2), 4) })), 200)
 		made.push(key(4))
 		expect('… atuser1 counter-proposes it all on the Monday', await ocs(AU, 'POST', `${path(key(4))}/counter`, { end: W(2) }), 200)
-		const oneDay = await ocs(AL, 'GET', `${path(key(4))}/capacity`)
+		const oneDay = await ocs(AA, 'GET', `${path(key(4))}/capacity`)
 		check('the week holds, the day not: 10 h against 20 h / 5 days', oneDay.status === 200 && oneDay.data?.fits === false
 			&& oneDay.data?.weeks?.length === 1 && oneDay.data.weeks[0].day === W(2) && oneDay.data.weeks[0].over === 6
 			&& oneDay.data.weeks[0].available === 4, oneDay.text.slice(0, 300))
 		const noDay = await ocs(AL, 'POST', `${path(key(4))}/accept-counter`)
-		check('accepting it → 422 with the day', noDay.status === 422 && noDay.data?.rule === 'capacity' && noDay.data?.weeks?.[0]?.day === W(2)
-			&& noDay.data?.message === `This counter-proposal does not fit the capacity of Tim Test: week ${isoWeek(W(2))} (+6 h, ${W(2)}) above the capacity line.`, noDay.text.slice(0, 300))
+		check('accepting it → 422 with the day, no hours for the Lead', noDay.status === 422 && noDay.data?.rule === 'capacity' && noDay.data?.weeks?.[0]?.day === W(2)
+			&& !('over' in (noDay.data?.weeks?.[0] || {}))
+			&& noDay.data?.message === `This counter-proposal does not fit the capacity of Tim Test: week ${isoWeek(W(2))} (${W(2)}) above the capacity line.`, noDay.text.slice(0, 300))
 		expect('atuser1 counter-proposes Monday to Wednesday', await ocs(AU, 'POST', `${path(key(4))}/counter`, { end: addDays(W(2), 2) }), 200)
 		const threeDays = await ocs(AL, 'GET', `${path(key(4))}/capacity?by=atuser1`)
 		check('3.3 h a day fit', threeDays.status === 200 && threeDays.data?.fits === true, threeDays.text.slice(0, 300))
+
+		head('Job weeks: POST /jobs/fits (0.14.0)')
+		{
+			const ask = (who, body) => ocs(who, 'POST', '/jobs/fits', { start: W(3), end: addDays(W(3), 4), recipients: ['atuser1', 'atadmin'], ...body })
+			const small = await ask(AL, { hours: 5 })
+			// atadmin's numbers depend on other checks (null when never reported).
+			check('Lead: 5 h in week +3 fit atuser1, keys in the order of recipients', small.status === 200 && small.data?.fits?.atuser1 === true
+				&& JSON.stringify(Object.keys(small.data?.fits || {})) === '["atuser1","atadmin"]' && [true, false, null].includes(small.data?.fits?.atadmin), small.text.slice(0, 300))
+			const big = await ask(AL, { hours: 30 })
+			check('… 30 h do not fit – only true/false/null, no numbers', big.status === 200 && big.data?.fits?.atuser1 === false
+				&& Object.values(big.data?.fits || {}).every((v) => v === true || v === false || v === null) && JSON.stringify(Object.keys(big.data || {})) === '["fits"]', big.text.slice(0, 300))
+			const adm = await ask(AA, { hours: 30 })
+			check('Team Admin asks too', adm.status === 200 && adm.data?.fits?.atuser1 === false, adm.text.slice(0, 300))
+			const withJob = await ask(AL, { hours: 5, start: W(2), end: addDays(W(2), 2), recipients: ['atuser1'], job: key(4) })
+			check('with job: its own hours do not count twice', withJob.status === 200 && typeof withJob.data?.fits?.atuser1 === 'boolean', withJob.text.slice(0, 300))
+			expect('a User asks', await ask(AU, { hours: 5 }), 403, 'forbidden')
+			expect('a recipient outside the team', await ask(AL, { hours: 5, recipients: ['pbuser1'] }), 422, 'invalid')
+			expect('hours 0', await ask(AL, { hours: 0 }), 422, 'invalid')
+			expect('end before start', await ask(AL, { hours: 5, end: addDays(W(3), -1) }), 422, 'invalid')
+			expect('an unknown job', await ask(AL, { hours: 5, job: `nie-${RUN}` }), 404, 'not_found')
+		}
 	} finally {
 		head('Job weeks: cleaning up')
 		for (const k of made) {
@@ -141,7 +170,6 @@ export async function wochen() {
 		if (p.status === 200) {
 			expect(`delete ${PJ}`, await ocs(AA, 'DELETE', `/records/project/${PJ}?version=${p.data.version}`), 200)
 		}
-		await ocs(AA, 'PUT', '/team/access/atlead/atuser1', { level: 'default' })
 		if (sql(`UPDATE oc_ts_client_status SET job_weeks = NULL, job_weeks_at = NULL WHERE uid = 'atuser1';`) === null) {
 			await ocs(AU, 'POST', '/jobs/weeks', { weeks: [] })
 		}

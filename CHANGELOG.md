@@ -1,5 +1,277 @@
 # Changes
 
+## 0.17.0 – 2026-10-15 (beta)
+
+API unchanged in form (`api: 2`); new capability `entries: 1`.
+
+- **Naming by convention.** Members who have not named a time calendar get `zeit-<uid>` as soon as it exists (before each run of the reader job).
+- **Immediate read.** `PUT /me/time-calendar` reads a newly named
+  calendar at once when the CalDAV backend is there and it has at most
+  3000 objects; the answer adds `read_now` and `count`. Larger ones wait
+  for the job.
+- **Members who left.** Their named calendar is neither read nor
+  followed by the listener (`last_error` «member left», `left: true` in
+  `GET /entries/status`); the entries stay in the book and are delivered
+  as before. Back in the team, the next run reads it in full.
+- **Team ZIP.** `team.json` carries `settings.entries_since` and the
+  named calendars (`time_calendars`); the import applies the cutoff
+  (`replace` always, `merge` only when none is stored) and names
+  `calendar_uri` or `zeit-<uid>` of the mapped account, one row failing
+  reported, not aborting. Preview and answer show both. The book itself
+  is not in the ZIP; older ZIPs import as before.
+- A feed that answers something other than an iCalendar file counts as
+  failing (`last_error`), its entries stay; `GET /entries` with `since`
+  beyond the current revision answers empty.
+- Fixed: a moved cutoff now reaches objects whose etag did not change –
+  the full read by etag skipped them, so entries before the new cutoff
+  stayed in the book.
+
+- **The app holds the team's time entries.** Every member names their
+  time calendar once (`PUT`/`DELETE /me/time-calendar`); the server
+  stores its calendar objects as received – one row per object, with the
+  `#code`s it found for the role filter – and reads the `.ics` feeds of
+  external persons itself. `GET /entries?since=&limit=` delivers them in
+  revision order: Team Admins everything, Leads their own and the entries
+  of their projects, Users their own. A vanished object becomes a
+  tombstone, or stays as `kept` when a `billing` record exists.
+- **Reading.** A listener on the calendar events stores the one object
+  that was written; the job `EntryReader` (every 5 minutes) does the full
+  reads – marked, never read or a day old – and the feeds (`If-None-Match`,
+  http(s) only, 20 MB, 20 s). Errors stay on the source and show in
+  `GET /status` (`time_calendar`, `entries_read_at`, `entries_error`) and
+  `GET /entries/status`; `POST /entries/reread` marks every source.
+- **Cutoff per team.** `entries_since` (`PUT /team/settings`, also
+  `settings` of `/admin/teams`): entries ending before it are not read;
+  default two years before the team was created. `GET /me` adds
+  `time_calendar`, `entries_revision` and the effective `entries_since`.
+- Tables `ts_time_calendars`, `ts_entries`; `ts_tenants` gets
+  `entries_revision` and `entries_since`. Additive migration.
+- **Shares matrix removed.** With the entries on the server nobody reads
+  another person's calendar: `/team/access` (all four routes) and
+  `/me/calendar-share` are gone (404); `/me` loses `share_targets`,
+  `may_override`, `calendar_share`, `admins` and `leads`; `POST /status`
+  ignores `calendar_shared` and `applied_shares`; `may_override` is no
+  member field, `leads_see_calendars` no team setting (unknown key, 422);
+  the notification `shares_changed` and the matrix in the privacy notice
+  are gone; the team ZIP carries no `access`, `may_override` or
+  `calendar_shared` (older ZIPs import, the parts are ignored). The admin
+  overview counts `without_time_calendar` instead of `calendar_not_shared`.
+  Table `ts_access` and the columns stay unused (no migration).
+
+## 0.16.0 – 2026-10-12 (beta)
+
+API unchanged in form (`api: 2`); new capabilities `quotes: 2`,
+`cost_rates: 1`, `invoices: 1` and `invoice_template: 1`.
+
+- **Quotes as projects.** The project record's `status` takes `draft`,
+  `quoted` and `declined` before `active` (in that order; `active`,
+  `running`, `paused`, `completed`, `archived` as before). A quote keeps
+  its Leads – they plan with it; `declined` does not end the Lead role,
+  only `completed` and `archived` do. Unknown status: `422`.
+- **Team of a project, with roles.** Optional `team`: a list of
+  `{ "user": uid, "role": role }` – the accounts assigned to the quote or
+  project, at most 100, every one an account of the team (`422` naming
+  the unknown ones; one who left the team stays allowed, an old record
+  keeps them). Roles: `member` (the default for a missing or `null`
+  role), `sparring`, `support`, `qa`; any other role: `422`. A plain
+  string entry is read as `member` and stored as an object; other fields
+  of an entry are dropped; a user twice: the first entry wins.
+- **No code while a quote.** The rule of 0.12.0 (exactly one code per
+  project) applies from `active` on – also to a record with no status.
+  In `draft`, `quoted` and `declined` `codes` may be empty or missing
+  (as may `subprojects`); more than one code is refused everywhere. A
+  project set to `active` without a code: `422` “An active project
+  needs a code.”
+- **`from_quote`.** Optional boolean on the project record: the project
+  began as a quote. It keeps it in every status, also `active`. Only the
+  shape is checked (`true`, `false` or `null`; otherwise `422`); no rights
+  hang on it.
+- **Rates in the budgets.** Per budget optional `currency` (three
+  letters, stored upper case), `cap`, the cost cap (number ≥ 0), and
+  `invoice_dates`, the planned invoice dates (days, each once, ≤ 200); per
+  work package optional `rate` (number ≥ 0). Both nullable; missing means nothing. Wrong shape: `422`. A
+  `rates` object per budget (account → hourly rate) is **not** part of
+  the record: with content it is refused (`422` “rates” is no longer
+  part of a budget …); `null` or `{}` – a client's empty default –
+  passes.
+- **Members do not see rates.** Unchanged in mechanism: whoever neither
+  manages the team nor leads the project reads only the booking catalog
+  (no `budgets`, no `team`) – single record, list, delta and history
+  alike. Team Admins and the project's Leads read everything and write
+  as before.
+- **Cost rates on the person.** Optional `cost_rates` on the person
+  record: a list of `{ "from": "YYYY-MM-DD", "rate": number ≥ 0 }`,
+  valid from the day on like `workload`, each day once; `null` or `[]`
+  mean nothing. Wrong shape or a day twice: `422`. Personnel cost, so
+  **Team Admins alone read it**: the person's own record, a Lead's name
+  card, the list, the delta and the history come without it. Written by
+  Team Admins only, as every person record. Capability `cost_rates: 1`.
+- **Invoices.** New kind `invoice`, key chosen by the client (e.g.
+  `inv-1a2b3c4d`): a draft of billable hours sent to accounting –
+  `project` and `budget` (both required – every invoice belongs to a
+  budget), `from` ≤ `to` (days), `status`
+  (`draft`, `issued`, `paid`, `cancelled`), `number` (`null` or 1–64
+  characters), `bookings` (at most 5000 `{ person, uid, start }`, `start`
+  a day or a local time `YYYY-MM-DDTHH:MM:SS`, each triple once), `note`
+  (≤ 2000), `created_by`, `created_on`, `issued_on`, `paid_on`, and as
+  issued `hours`, `amount` (numbers ≥ 0) and `currency` (three letters),
+  and `vat`, the VAT rate of the invoice in percent (0–100).
+  Other fields pass, as for projects. At most 768 KB (`413`); wrong shape
+  `422`.
+- **Who reads and writes invoices.** Team Admins everything. A Lead reads
+  the invoices of the active projects they lead (`/me.lead_of`) – list,
+  delta, single record, history, tombstone – and creates, changes,
+  deletes and restores only drafts without a number of these projects,
+  before and after the write; issuing, paying, cancelling and the number
+  stay with Team Admins (`403`). Members see none (`403`, not in the
+  delta). Checked against the stored state inside the write's
+  transaction; a Lead's batch may hold invoices. A deleted invoice keeps
+  its project on the server, so the Leads get the tombstone. A project
+  write that changes its leads delivers its invoices again.
+- **Quotes as records.** New kind `quote` (capability `quotes: 2`; the
+  project statuses `draft`, `quoted`, `declined`, `from_quote` and `team`
+  of `quotes: 1` stay): a quote no longer creates a project, it holds a
+  budget before acceptance and may be assigned to an existing project.
+  Key `q-` and 8 lowercase hex digits (`422` otherwise). `name` (1–200)
+  and `status` (`draft`, `quoted`, `accepted`, `declined`) required;
+  `customer` and `project` `null` or a key – `project` required once
+  `accepted`; `number` (1–64), the days `date`, `valid_until`,
+  `accepted_on`, `created_on`, `leads` (at most 20 accounts or person
+  keys), `contact` (≤ 200), `note` (≤ 2000), `pdf` (`null` or an
+  `http(s)://` address ≤ 2000), `budget` (`null` or an object with a text
+  `id`, checked as a project's budget: currency upper case, `cap` and
+  work package `rate` ≥ 0, no `rates`), `budget_id`, and as accepted
+  `hours`, `amount` (numbers ≥ 0) and `currency` (three letters).
+  Other fields pass. At most 768 KB (`413`); wrong shape `422`.
+  Accepting is two ordinary writes: the budget into the project, the
+  quote `accepted`.
+- **Who reads and writes quotes.** Team Admins everything. A Lead
+  (`/me.lead_of` not empty) reads the quotes whose `leads` name them – the
+  account or a person with it in `accounts`, as for a project's `leads` –
+  or whose `project` they lead, as single record, list, delta, history
+  and tombstone, and writes only these, before and after the write
+  (`403` otherwise). Members see none, also when named. A Lead's batch may
+  hold quotes. A deleted quote keeps its data on the server for the rule;
+  a project write that changes its leads delivers again its quotes and
+  those naming its old or new leads.
+- **Invoice number pattern.** `setting/settings` takes `invoice_number:
+  { pattern, per_year, start }`: `pattern` 1–64 characters with exactly
+  one of `{no}`, `{no:N}`, `{nr}`, `{nr:N}` (N 1–8) besides `{year}`,
+  `{jahr}`, `{yy}`, `{jj}`, `{project}`, `{projekt}`, `{customer}`,
+  `{kunde}`; any other placeholder or a stray brace `422`. `per_year`
+  boolean (default `true`), `start` integer ≥ 1 (default 1).
+- **Invoice issuer.** `setting/settings` takes `issuer`: name, address,
+  contact, `vat_id`, `foreign_note`, `qr` and `accounts` (one per currency,
+  IBAN and BIC) – for the sender block, the note on invoices abroad and the
+  payment part (Swiss QR for CHF, GiroCode for EUR, made by the client).
+  Wrong shape `422`. A customer may carry `vat_id`.
+- **`POST /invoices/next-number`** `{ "year": 2026 }` takes the next
+  number of the team's counter – per year or one across years –
+  atomically (two Macs never get the same), never below `start` (raised
+  later: continues there): `{ "number": 12, "year": 2026 }`. `GET
+  /invoices/next-number?year=2026` shows it without taking it. Team Admins
+  only (`403`); a year outside 1900–9999 `422`; missing: this year (UTC).
+- **Invoice template.** One Word file (`.docx`) per team, the source for
+  every Mac of the team: `GET /templates/invoice/info` (`{ name, size,
+  sha256, modified_at, modified_by }`), `GET /templates/invoice` (the same
+  plus `base64`), `PUT /templates/invoice` `{ name, base64 }` (replaces
+  it, answers the info) and `DELETE /templates/invoice` (`{ deleted }`).
+  None stored: `404 not_found`. Team Admins only, reading too (`403`).
+  Checked: `name` 1–200 characters ending in `.docx`, strict Base64, at
+  most 10 MB (`413` “A template may be at most 10 MB.”, also for a body
+  over 14 MB), a ZIP (`PK\x03\x04`) with `word/document.xml` (`422`).
+  Stored in the app data (`templates/t<team>/invoice.docx` and
+  `invoice.json`), no migration. The team ZIP carries it
+  (`templates/invoice.docx`, `templates/invoice.json`; preview and import
+  answer `template`; merge takes it when younger, replace when it
+  differs, a ZIP without one leaves the team's). A template counts as a
+  team's content (a ZIP is kept before importing or deleting); deleting
+  the team removes it. Capability `invoice_template: 1`.
+- **Migration 1011:** new table `ts_counters` (team, `invoice:2026` or
+  `invoice`, last number). Additive only. Deleting a team removes its
+  counters (`counts.counters`); the team ZIP does not carry them – after
+  moving a team, raise `start`. Team ZIP account mapping also maps
+  `created_by`.
+- Translations: an orphaned Job message dropped from `de`/`de_DE`; the
+  invoice, invoice template and quote messages added.
+
+## 0.15.0 – 2026-10-11 (beta)
+
+API unchanged in form (`api: 2`); the capability's `jobs` rises to 5.
+
+- **Reopen a Job.** `POST /jobs/{key}/reopen` takes a Done Job back to In
+  Progress – by the person who holds it or whoever manages it (Team Admin,
+  Lead of the project, sender). Not once paid, not when the hours are
+  booked in full (the next report would finish it again). The other side
+  is told (`job_reopened`); overlap is checked as on accepting.
+- **Members take Jobs themselves.** `PUT /jobs/{key}` with `recipients`
+  exactly the caller is open to every member of the team, on any project;
+  as before it is In Progress at once and nobody is notified. The sender
+  may change such a Job as long as it stays theirs (`recipients` other than
+  themselves: `403`) and delete it. Offering to others stays with Team
+  Admins and the project's Leads.
+- **Done by whoever manages.** `POST /jobs/{key}/done` is open to Team
+  Admins, the project's Leads and the sender at any time – also on a Job a
+  member took themselves; the assignee is told (`job_done`). Already Done:
+  the unchanged record for everyone who may call it; not In Progress:
+  `409`.
+
+## 0.14.1 – 2026-10-08 (beta)
+
+API unchanged (`api: 2`), narrower reads only.
+
+- **Market offers for Members.** Whoever does not manage a Job (Team Admin, Lead of its project, sender) reads `recipients` and `declined_by` trimmed to themselves, `names` only for themselves and the sender, and the offer entry in the log only `to` themselves. A Member learns neither who else was offered the Job nor who declined; a Job offered to several carries `market: true` instead.
+
+## 0.14.0 – 2026-10-07 (beta)
+
+API unchanged in form (`api: 2`), only additions and narrower rights; the capability drops `lead_reach` and gains `lead_scope: 1`, `booking_reports: 1` and `job_fits: 1`.
+
+- **Catalog flag `led`.** The booking catalog carries `led: true` when a project has a Lead, so every client knows which bookings to report.
+- **Visibility per role.** Members see themselves, Leads themselves and the data of the projects they lead, Team Admins everything – enforced in what the server hands out. Replaces the Lead reach of 0.12.0.
+- **Shares matrix: only Team Admins' rows.** A row whose viewer is a Lead or User is `none` whatever is stored; writing `view` or `edit` there is `422 invalid`. The owner's own entry may only lower a Team Admin's level (above it: `422`), so `overridden` is never `granted` any more. `GET /team/access` keeps `reason`, always `null`; `projects` is gone. External columns likewise: only Team Admins see a feed. `/me.share_targets` names Team Admins only; the owners' clients withdraw the other shares at their next sync.
+- **Person records of others** reach Leads as a name card: `schema`, `login`, `first_name`, `last_name`, `initials`, `accounts` – in the delta and single reads. Users still read only their own person; the full record (with `feed`) only Team Admins and the person.
+- **Customers for Leads:** only those named in `customer` of a project they lead – list, delta and single record (`403` otherwise).
+- **Booking reports.** New kind `booking-report`, key `{uid}+{project}+{YYYY-MM}`: an account reports its bookings on a project for one month (date, time, minutes, code, title, notes, billable, billed). Only the account writes it; it, Team Admins and the current Leads of the active project read it. Only the documented fields; at most 2000 bookings and 768 KB.
+- **Billable marks.** New kind `billable`, key `{uid}+{project}+{32 hex digits of the booking ID's SHA-256}`, data `{ person, project, uid, billable }`: written by Team Admins and the project's current Leads, read by them and the person, whose client applies it to its event.
+- A batch of someone who is no Team Admin may hold billing marks, booking reports and billable marks only; each write is checked on its own.
+- **Billing marks** (`billing`) are written by Team Admins only; Leads no longer read or write them (they see `billed` in the booking reports).
+- **Delivered again:** a project write that changes `leads`, `customer` or the active state gives the customers it names and its booking reports and billable marks a new revision, so whoever may now read them finds them in the next delta.
+- **`GET /jobs/weeks`:** Leads read only their own numbers. `GET /jobs/{key}/capacity` and the `422` with `rule: capacity` give Leads the weeks and days without hours.
+- **`POST /jobs/fits`** (Team Admins and Leads): `{ hours, start, end, recipients, job? }` → `{ fits: { uid: true|false|null } }`, the capacity check of `accept-counter` per recipient; `null` without reported numbers; no numbers in the answer.
+- **Privacy notice:** Leads see the bookings on their projects (with title and notes) and names and initials of the people – no time calendars, master data, balances or vacation of others; Users only their own data; new data category “Booking reports”.
+- **Migration 1010:** every stored level in `ts_access` whose viewer is no Team Admin of the team becomes `none`, logged per team; nothing is deleted. A team whose Team Admins cannot be read is left as is (the server reads those rows as `none` anyway).
+- `POST /status` still takes `projects`; no right follows from it any more.
+
+## 0.13.0 – 2026-10-07 (beta)
+
+API unchanged (`api: 2`), only additions.
+
+- **Never billable.** A project record may carry `never_billable: true`; bookings on it never count as open for billing (vacation, absences, internal work). The field is part of the booking catalog, so users' clients see it too.
+
+## 0.12.0 – 2026-10-06 (beta)
+
+API unchanged (`api: 2`), only additions; the capability gains `lead_reach: 1`.
+
+- **One project, one code.** A project record with more than one entry in `codes` is refused with `422 invalid`; parts belong in `subprojects` (`D200.1`, `D200.2`). Clients read only the code the parts belong to; bookings on former extra codes show up as suggestions.
+
+- **Leads reach the people on their projects.** User's decision: Leads are like small Team Admins. In the shares matrix, the default of a Lead's row is `edit` for every active member who contributes to an active project the Lead leads; everything else stays as before (Team Admins `edit`, the rest `none`). A Team Admin's entry replaces the default, the owner's own entry wins while `may_override` is on. A person contributes when their client reports the project in `POST /status` (`projects`) or when they are a recipient (not declined) or the assignee of a Job in it. The reach is read once per request (`LeadReach`); `/me.share_targets`, `GET /team/access`, the withdrawal reminders, billing marks, weekly numbers and the privacy notice follow it.
+- **`POST /status`** takes `projects`: the project keys the person booked on in the last 12 months (at most 500, each 1–64 bytes without control characters, otherwise `400 invalid`); duplicates removed, sorted, stored with the time. Missing keeps the last report, `null` clears it.
+- **`GET /team/access`:** every member field carries `reason` – `contributes` when the Team Admin level is this default, then also `projects` (the shared project keys); otherwise `null`.
+- **Privacy notice:** the Leads' line says they see and edit the time calendars of the people who book on their projects.
+- **Migration 1009:** `ts_client_status` gains `projects` (JSON) and `projects_at`. Additive only.
+
+## 0.11.0 – 2026-10-06 (beta)
+
+API unchanged (`api: 2`), only additions; the capability gains `derived_lead: 1`.
+
+- **The role Lead is derived.** Set roles are only User and Team Admin. Whoever is in `leads` of at least one active project (status not `completed`/`archived`, nor the old `abgeschlossen`/`archiviert`) is Lead; project ended or lead removed, the rights fall away. One derivation (`MembershipResolver::roleOf`, fed by the new `LeadResolver`) serves `/me`, `/team`, `/team/access`, `/status`, the privacy notice, Jobs, billing marks and the admin page; read once per request, no new table. A lead key names a person record (key or an account in `accounts`) or an account; a person without an account leads nothing.
+- **`/me`** names the derived `role` and new `lead_of: [{ kind: "project", key, code, name }]`; **`/team`** and the admin page carry `lead_of` (count) and `lead_projects` (names) per member.
+- **`PUT /team/members/{uid}`** and **`PUT /admin/teams/{id}/members/{uid}`**: `role: "lead"` is `422` with “Lead follows from the project leads and cannot be set.”
+- **Leads read customers** – list, delta and single record, contact persons included; writing stays Team Admin.
+- **Admin page:** the role choice offers only User and Team Admin; a derived Lead shows “Lead · 2 projects” with the project names as a tooltip, in the team list and under Members.
+- **Migration 1008:** every stored Lead in `ts_members` becomes User (stored as empty) and is logged per team. On the test server 8081 before the migration: one stored Lead in each of the teams muster (bruno), pb (pblead), at (atlead), kleinbasel (kb-lhuber), ds (ds-jan), zzk (zzneu) – six in all; pblead keeps Lead through four active projects, the others only if they lead one.
+- Team ZIPs keep `role` per member as information; an import no longer stores it.
+
 ## 0.10.2 – 2026-10-05 (beta)
 
 API unchanged (`api: 2`), only additions; the capability gains `privacy_notice: 1`.

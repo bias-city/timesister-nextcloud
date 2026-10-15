@@ -23,9 +23,9 @@ final class TeamDeleteRules {
 		return mb_strtolower(trim($given)) === mb_strtolower(trim($teamName));
 	}
 
-	/** Records (including tombstones) or backups: then a ZIP is stored first. */
-	public static function hasContent(int $records, int $backups): bool {
-		return $records > 0 || $backups > 0;
+	/** Records (including tombstones), backups or an invoice template: then a ZIP is stored first. */
+	public static function hasContent(int $records, int $backups, int $templates = 0): bool {
+		return $records > 0 || $backups > 0 || $templates > 0;
 	}
 
 	/**

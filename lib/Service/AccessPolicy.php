@@ -10,20 +10,22 @@ namespace OCA\TimeSister\Service;
  * The rights matrix from API.md. Pure: knows only role, identifier, kind,
  * key and the accounts of a person record.
  *
- * |                              | user   | lead   | admin            |
- * |------------------------------|--------|--------|------------------|
- * | setting, region, project     | read   | read   | read, write      |
- * | person, own                  | read   | read   | read, write      |
- * | person, others'              | –      | read   | read, write      |
- * | customer                     | –      | read   | read, write      |
- * | history                      | own person       | all    |
- * | calendar backups             | own              | all    |
- * | report status                | own     | own     | own     |
- * | read status, team            | –      | –      | yes              |
+ * |                              | user   | lead              | admin       |
+ * |------------------------------|--------|-------------------|-------------|
+ * | setting, region, project     | read   | read              | read, write |
+ * | person, own                  | read   | read              | read, write |
+ * | person, others'              | –      | name card         | read, write |
+ * | customer                     | –      | of their projects | read, write |
+ * | history                      | own person                 | all         |
+ * | calendar backups             | own                        | all         |
+ * | report status                | own     | own              | own         |
+ * | read status, team            | –      | –                 | yes         |
  *
  * Only Team Admins and this project's leads (`data.leads`) see full
  * projects, including in the history; everyone else sees the booking
- * catalog. See ProjectAccess.
+ * catalog. See ProjectAccess. The narrowing for Leads (name card,
+ * customers of their projects) and the per-record kinds (billing marks,
+ * booking reports, billable marks) are in {@see RecordRights} (0.14.0).
  */
 final class AccessPolicy {
 	/** Kinds every team member may read. */

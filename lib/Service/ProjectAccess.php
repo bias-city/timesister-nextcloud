@@ -14,7 +14,7 @@ namespace OCA\TimeSister\Service;
  */
 final class ProjectAccess {
 	/** Allowlist: what is missing here is visible only in the full view. */
-	public const CATALOG = ['schema', 'id', 'name', 'codes', 'subprojects', 'start', 'end', 'status', 'mapping'];
+	public const CATALOG = ['schema', 'id', 'name', 'codes', 'subprojects', 'start', 'end', 'status', 'mapping', 'never_billable'];
 	public const LEADS = 'leads';
 
 	/** 403 when someone else changes or creates a project. */
@@ -41,7 +41,9 @@ final class ProjectAccess {
 		return false;
 	}
 
-	/** The booking catalog: only the fields from CATALOG that exist. */
+	/** The booking catalog: only the fields from CATALOG that exist, plus
+	 *  `led` (the project has a Lead) - so a client knows which bookings to
+	 *  report (`booking-report`), without learning who leads it. */
 	public static function catalog(\stdClass $data): \stdClass {
 		$out = new \stdClass();
 		foreach (self::CATALOG as $field) {
@@ -49,6 +51,67 @@ final class ProjectAccess {
 				$out->{$field} = $data->{$field};
 			}
 		}
+		$leads = $data->{self::LEADS} ?? null;
+		if (is_array($leads) && $leads !== []) {
+			$out->led = true;
+		}
 		return $out;
+	}
+
+	/** The customer key a project names (`customer`, older records `kunde`), or null. */
+	public static function customerOf(mixed $data): ?string {
+		if (!($data instanceof \stdClass)) {
+			return null;
+		}
+		$c = $data->customer ?? $data->kunde ?? null;
+		return is_string($c) && $c !== '' ? $c : null;
+	}
+
+	/**
+	 * The customers a Lead reads (0.14.0): those named by a project they
+	 * lead (as for the full project, whatever its status).
+	 *
+	 * @param list<mixed> $projects the live projects' data
+	 * @param list<string> $ownKeys
+	 * @return array<string,true>
+	 */
+	public static function customersLedBy(array $projects, array $ownKeys): array {
+		$out = [];
+		foreach ($projects as $d) {
+			$c = self::customerOf($d);
+			if ($c !== null && self::isLead($d, $ownKeys)) {
+				$out[$c] = true;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * What a project write changes for the Leads' view (0.14.0): the
+	 * customers to deliver again (old and new, when leads, customer or the
+	 * active state change) and whether the project's booking reports and
+	 * marks go out again (leads or active state). Null data: none or a
+	 * tombstone.
+	 *
+	 * @return array{customers:list<string>,bookings:bool}
+	 */
+	public static function scopeChange(?\stdClass $old, ?\stdClass $new): array {
+		$leads = static function (?\stdClass $d): array {
+			$l = $d === null ? [] : array_values(array_filter((array)($d->{self::LEADS} ?? []), 'is_string'));
+			sort($l, SORT_STRING);
+			return array_values(array_unique($l));
+		};
+		$active = static fn (?\stdClass $d): bool => $d !== null && LeadResolver::isActive($d);
+		$leadsChanged = $leads($old) !== $leads($new);
+		$activeChanged = $active($old) !== $active($new);
+		$customers = [];
+		if ($leadsChanged || $activeChanged || self::customerOf($old) !== self::customerOf($new)) {
+			foreach ([self::customerOf($old), self::customerOf($new)] as $c) {
+				if ($c !== null && !in_array($c, $customers, true)) {
+					$customers[] = $c;
+				}
+			}
+		}
+		return ['customers' => $customers, 'bookings' => $leadsChanged || $activeChanged];
 	}
 }

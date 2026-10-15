@@ -47,8 +47,10 @@ final class JobService {
 		if ($project === null) {
 			throw ApiException::invalid(Message::of('The project {project} does not exist.', ['project' => $f['project']]));
 		}
-		if (!$this->canManage($m, $f['project'])) {
-			throw ApiException::forbidden(Message::of('Only Team Admins and the project’s Leads offer a {job} for it.', ['job' => JobWord::JOB]));
+		// Members offer a Job only to themselves (0.15.0); to others, Team
+		// Admins and the project's Leads.
+		if ($f['recipients'] !== [$m->uid] && !$this->canManage($m, $f['project'])) {
+			throw ApiException::forbidden(Message::of('Members offer a {job} only to themselves – Team Admins and the project’s Leads offer it to others.', ['job' => JobWord::JOB]));
 		}
 		$this->requireMembers($m, $f['recipients']);
 		$target = JobRules::target($project, $f['code'], $f['budget'], $f['work_package']);
@@ -98,7 +100,9 @@ final class JobService {
 			$this->requireMembers($m, array_values(array_map('strval', $c['recipients'])));
 		}
 		return $this->transition($m, $key, function (array $job, ?array $project, string $now) use ($m, $c): array {
-			$this->requireManage($m, $job);
+			if (!self::ownSelfJob($m, $job, $c)) {
+				$this->requireManage($m, $job);
+			}
 			if ($project === null) {
 				throw ApiException::invalid(Message::of('The project {project} does not exist.', ['project' => (string)$job['project']]));
 			}
@@ -155,7 +159,7 @@ final class JobService {
 			}
 			// The person cannot check it here: the server does, with their reported weeks (0.7.2).
 			if ($accept && $new !== $job && ($new['state'] ?? '') === JobRules::IN_PROGRESS) {
-				$this->weeks->check($m->tenantId, ['id' => $key] + $new, (string)$new['assignee']);
+				$this->weeks->check($m->tenantId, ['id' => $key] + $new, (string)$new['assignee'], $m->manages());
 			}
 			return [$new, function () use ($m, $job, $new, $accept): void {
 				$who = (string)(self::lastLog($new)['from'] ?? '');
@@ -199,13 +203,15 @@ final class JobService {
 		$uid = (string)($c['by'] ?? '');
 		$probe = ['id' => $key, 'hours' => $c['hours'] ?? $job['hours'] ?? 0, 'start' => $c['start'] ?? $job['start'] ?? '', 'end' => $c['end'] ?? $job['end'] ?? ''];
 		$o = $this->weeks->over($m->tenantId, $probe, $uid);
+		$weeks = $o['weeks'] ?? [];
 		return [
 			'user' => $uid,
 			'display_name' => $this->name($uid),
 			'reported' => $o !== null,
 			'reported_at' => $o['reported_at'] ?? null,
 			'fits' => $o === null || $o['weeks'] === [],
-			'weeks' => $o['weeks'] ?? [],
+			// Leads learn which weeks, not the hours (0.14.0).
+			'weeks' => $m->manages() ? $weeks : JobWeeks::withoutNumbers($weeks),
 		];
 	}
 
@@ -241,9 +247,43 @@ final class JobService {
 		});
 	}
 
-	/** @return array<string,mixed> */
+	/**
+	 * Done: the assignee, or whoever manages the Job (0.15.0 – Team Admin,
+	 * Lead of the project, sender), at any time; then the assignee is told.
+	 *
+	 * @return array<string,mixed>
+	 */
 	public function done(Membership $m, string $key): array {
-		return $this->transition($m, $key, fn (array $job, ?array $project, string $now): array => [JobFlow::done($job, $m->uid, $now), null]);
+		return $this->transition($m, $key, function (array $job, ?array $project, string $now) use ($m): array {
+			$holder = (string)($job['assignee'] ?? '');
+			if ($holder !== $m->uid && !$this->access->manages($m, $job, $this->recordService->ownKeys($m))) {
+				throw ApiException::forbidden(Message::of('Only the person who holds this {job}, Team Admins and the project’s Leads finish it.', ['job' => JobWord::JOB]));
+			}
+			$new = JobFlow::done($job, $m->uid, $now);
+			$tell = $holder !== $m->uid && $new !== $job;
+			return [$new, $tell ? fn () => $this->notify->send(Notifier::JOB_DONE, $new, [$holder], $m->uid) : null];
+		});
+	}
+
+	/**
+	 * Done back to In Progress (0.15.0): the assignee or whoever manages the
+	 * Job; the other side is told. Overlap is checked as on accepting.
+	 *
+	 * @return array<string,mixed>
+	 */
+	public function reopen(Membership $m, string $key): array {
+		return $this->transition($m, $key, function (array $job, ?array $project, string $now) use ($m): array {
+			$holder = (string)($job['assignee'] ?? '');
+			if ($holder !== $m->uid && !$this->access->manages($m, $job, $this->recordService->ownKeys($m))) {
+				throw ApiException::forbidden(Message::of('Only the person who holds this {job}, Team Admins and the project’s Leads reopen it.', ['job' => JobWord::JOB]));
+			}
+			$new = JobFlow::reopen($job, $m->uid, $now);
+			if ($new !== $job) {
+				$this->checkRules($m, $new);
+			}
+			$other = $holder === $m->uid ? [(string)($job['sender'] ?? '')] : [$holder];
+			return [$new, fn () => $this->notify->send(Notifier::JOB_REOPENED, $new, $other, $m->uid)];
+		});
 	}
 
 	/** @return array<string,mixed> */
@@ -465,6 +505,18 @@ final class JobService {
 		if (!$this->canManage($m, (string)($job['project'] ?? ''))) {
 			throw ApiException::forbidden(Message::of('Only Team Admins and the project’s Leads change a {job}.', ['job' => JobWord::JOB]));
 		}
+	}
+
+	/**
+	 * A Job the caller offered to themselves (0.15.0): they may change it as
+	 * long as it stays theirs – `recipients`, if sent, only themselves.
+	 *
+	 * @param array<string,mixed> $job
+	 * @param array<string,mixed> $c from JobRules::change()
+	 */
+	private static function ownSelfJob(Membership $m, array $job, array $c): bool {
+		return ($job['sender'] ?? null) === $m->uid && ($job['assignee'] ?? null) === $m->uid
+			&& (!isset($c['recipients']) || $c['recipients'] === [$m->uid]);
 	}
 
 	private function canManage(Membership $m, string $project): bool {

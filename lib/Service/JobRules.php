@@ -103,6 +103,32 @@ final class JobRules {
 		return array_map('strval', array_keys($out));
 	}
 
+	/**
+	 * The body of POST /jobs/fits (0.14.0): `hours`, `start`, `end`,
+	 * `recipients` as for an offer; optional `job`, the key of a Job being
+	 * changed (its own hours do not count twice).
+	 *
+	 * @return array{hours:float,start:string,end:string,recipients:list<string>,job:?string}
+	 */
+	public static function fits(\stdClass $b): array {
+		foreach (['hours', 'start', 'end', 'recipients'] as $field) {
+			if (!property_exists($b, $field)) {
+				throw ApiException::missing($field);
+			}
+		}
+		$start = self::day($b->start, 'start');
+		$end = self::day($b->end, 'end');
+		self::period($start, $end);
+		$job = $b->job ?? null;
+		if ($job !== null) {
+			if (!is_string($job)) {
+				throw ApiException::invalidField('job');
+			}
+			self::checkKey($job);
+		}
+		return ['hours' => self::hours($b->hours), 'start' => $start, 'end' => $end, 'recipients' => self::recipients($b->recipients), 'job' => $job];
+	}
+
 	/** A key or code from the body: text, 1–128 characters. */
 	private static function name(mixed $v, string $field): string {
 		if (!is_string($v) || trim($v) === '' || strlen($v) > 128) {
@@ -534,6 +560,29 @@ final class JobRules {
 	 */
 	public static function trimView(\stdClass $job, string $uid): \stdClass {
 		$j = clone $job;
+		// Members see only themselves (0.14.1): of a market offer only their own
+		// place among the recipients, no one who declined, names only for
+		// themselves and the sender.
+		$keep = static fn (mixed $v): array => is_array($v) ? array_values(array_filter($v, static fn (mixed $u): bool => $u === $uid)) : [];
+		if (is_array($j->recipients ?? null)) {
+			// Only that it is a market (whoever accepts first), never who else.
+			if (count($j->recipients) > 1) {
+				$j->market = true;
+			}
+			$j->recipients = $keep($j->recipients);
+		}
+		if (is_array($j->declined_by ?? null)) {
+			$j->declined_by = $keep($j->declined_by);
+		}
+		if (($j->names ?? null) instanceof \stdClass) {
+			$names = new \stdClass();
+			foreach ([$uid, (string)($j->sender ?? '')] as $who) {
+				if ($who !== '' && property_exists($j->names, $who)) {
+					$names->{$who} = $j->names->{$who};
+				}
+			}
+			$j->names = $names;
+		}
 		$counters = $j->counters ?? null;
 		if (is_array($counters)) {
 			$out = [];
@@ -567,12 +616,16 @@ final class JobRules {
 				$lapsed = $e->lapsed ?? null;
 				if (is_array($lapsed)) {
 					$e = clone $e;
-					$mine = array_values(array_filter($lapsed, static fn (mixed $u): bool => $u === $uid));
+					$mine = $keep($lapsed);
 					if ($mine === []) {
 						unset($e->lapsed);
 					} else {
 						$e->lapsed = $mine;
 					}
+				}
+				if (is_array($e->to ?? null)) {
+					$e = clone $e;
+					$e->to = $keep($e->to);
 				}
 				$log[] = $e;
 			}

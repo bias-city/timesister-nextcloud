@@ -79,7 +79,7 @@ async function restOhneSicherungen() {
 		check('pbuser1 with their data', by.pbuser1?.app_version === '0.2.0' && by.pbuser1?.last_sync === '2026-09-26T08:15:00Z'
 			&& by.pbuser1?.last_backup === '2026-09-22' && by.pbuser1?.role === 'user' && by.pbuser1?.display_name === 'Mia Muster', by.pbuser1)
 		check('new account without a heartbeat: everything null', by[still] && by[still].seen_at === null && by[still].app_version === null && by[still].calendar_url === null && by[still].role === 'user', by[still])
-		check('roles from group admin and app role', by.pbadmin?.role === 'admin' && by.pbverw?.role === 'admin' && by.pblead?.role === 'lead')
+		check('roles from group admin and project leads', by.pbadmin?.role === 'admin' && by.pbverw?.role === 'admin' && by.pblead?.role === 'lead')
 		const part = await ocs(U1, 'POST', '/status', { app_version: '0.2.1' })
 		const after = Object.fromEntries(((await ocs(V, 'GET', '/status')).data || []).map((x) => [x.uid, x]))
 		check('missing fields stay as they were', part.status === 200 && after.pbuser1?.app_version === '0.2.1' && after.pbuser1?.last_backup === '2026-09-22', after.pbuser1)

@@ -104,6 +104,7 @@ increases with every write in the team.
 | Read status reports, read team | – | – | yes |
 
 Unreadable items do not appear in lists; direct access gives `403 forbidden`.
+A person's `cost_rates` (0.16.0) are read only by subadmin and admin – not even on the own person; see Cost rates on the person.
 
 ## Endpoints
 
@@ -870,6 +871,9 @@ assignee reads `counters` with only their own counter-proposal; of the
 others only those still waiting, as `{ "other": true }` (no person, no
 values, no note). The `log` leaves out the others' `counter`,
 `accept_counter` and `reject_counter`, and `lapsed` names only the caller.
+Since 0.14.1 also `recipients`, `declined_by` and the offer's `to` trimmed
+to the caller, `names` only for the caller and the sender; a Job offered to
+several carries `market: true` instead.
 The same in the delta, `GET /records/job/{key}`, the answers of `/jobs`
 and the `current` of a `409`.
 
@@ -889,7 +893,7 @@ with the unchanged record (a resent request is not an error).
 | POST | `/jobs/{key}/reject-counter` | Team Admin, Lead of the project | `{ by? }` |
 | POST | `/jobs/{key}/decline` | a recipient | – |
 | POST | `/jobs/{key}/return` | the assignee | `{ note? }` |
-| POST | `/jobs/{key}/done` | the assignee | – |
+| POST | `/jobs/{key}/done` | the assignee; Team Admin, Lead of the project, sender (0.15.0) | – |
 | POST | `/jobs/{key}/paid` | Team Admin | `{ paid?: bool }` (default true), only when Done |
 | DELETE | `/jobs/{key}` | whoever created it (`sender`) | – |
 | POST | `/jobs/progress` | the assignee's client | `{ jobs: { <key>: { hours, invoiced? } } }` |
@@ -958,6 +962,8 @@ Job (a new one replaces the older):
 | `job_counter_lapsed` | who proposed | someone else got the Job first (0.7.0) |
 | `job_changed` | open recipients or the assignee | changed |
 | `job_returned` | the sender | returned |
+| `job_reopened` | the other side | reopened (0.15.0) |
+| `job_done` | the assignee | declared Done by someone else (0.15.0) |
 | `job_deleted` | open recipients or the assignee | deleted |
 
 Accepting (the offer or a counter-proposal) withdraws the offer
@@ -1169,3 +1175,817 @@ the public API cannot delete. A Team Admin's Mac deletes cancelled marked
 events in this calendar when it syncs; every Mac hides them. Events without
 the `X-TIMESISTER-*` marks are never touched. An account deletion drops the
 person's rows; the next run cancels their events.
+
+## Reopen and self-assigned Jobs, 0.15.0 (2026-10-11)
+
+Capability `jobs: 5`; the record and the other endpoints are unchanged.
+
+### `POST /jobs/{key}/reopen`
+
+A Done Job goes back to In Progress with the same person; `done` becomes
+`null`, `progress` stays, the log gets `reopen`. Who: the assignee, or
+whoever manages the Job (Team Admin, Lead of the project, sender). Not
+once `paid` (`409`), not when `progress.hours` reaches `hours` (`409` –
+the next progress report would finish it again; offer a new Job instead).
+Overlap is checked as on accepting (`422`, `rule: "overlap"`). Sent again
+while In Progress: the unchanged record. The other side is told:
+`job_reopened` to the sender when the assignee reopens, to the assignee
+when a manager does.
+
+### Members offer a Job to themselves
+
+`PUT /jobs/{key}` with `recipients` exactly `[caller]` is open to every
+member of the team, on any project of the team (the booking catalog). As
+since 0.7.5 it is In Progress at once and nobody is notified. Such a Job
+has `sender` = `assignee` = the member:
+
+- `POST /jobs/{key}/change` by the sender is allowed as long as the Job
+  stays theirs – `recipients`, if sent, only themselves (`403` otherwise);
+  `DELETE` by the sender as before.
+- Offering to others, or with several recipients, stays with Team Admins
+  and the project's Leads (`403` with a message naming the rule).
+- Visibility is unchanged: the member, Team Admins and the project's Leads
+  see it; the history only those who manage it.
+
+### `POST /jobs/{key}/done` by whoever manages
+
+Done is declared by the assignee or by whoever manages the Job (Team
+Admin, Lead of the project, sender), at any time – so a Lead or Team Admin
+ends a Job a member took themselves. `done.by` names who did; the assignee
+is told (`job_done`) when it was someone else. Already Done: the unchanged
+record; not In Progress: `409`. Anyone else: `403`, or `404` when they do
+not see the Job.
+
+## Quotes, 0.16.0 (2026-10-12)
+
+Capability `quotes: 1`. A quote is a project record (`kind: project`)
+with a status before `active`; no new kind, no new endpoint. The record
+and its rights are checked as before (`PUT /records/project/{key}` by
+Team Admins and the project's Leads, `POST /records/batch` by Team
+Admins).
+
+> Since 2026-10-14 (`quotes: 2`) a quote is a record of its own, kind
+> `quote`, see “Quotes as records, 0.16.0”. What follows still holds for
+> the project record; nothing of it is removed.
+
+### The record
+
+| Field | Content |
+|---|---|
+| `status` | `draft` → `quoted` → `declined` \| `active`, then `running`, `paused`, `completed`, `archived`. Missing, `null` or empty: the client's default. Older German values are still accepted. Anything else: `422` “Unknown project status …”. |
+| `codes` | While a quote (`draft`, `quoted`, `declined`) it may be empty or missing – as may `subprojects`. From `active` on (also with no status) exactly one code, as since 0.12.0: none → `422` “An active project needs a code.”; more than one → `422` “A project has exactly one code …” in every status. |
+| `from_quote` | Optional boolean: the project began as a quote. It keeps it in every status, also `active`. `true`, `false` or `null`; anything else `422`. No rights hang on it. |
+| `team` | Optional list of `{ "user": uid, "role": role }`: the accounts assigned to the quote or project and their role (see “The team and its roles”). At most 100, each an account of the team – also one who left (`422` “Not members of this team: …” otherwise). |
+| `budgets[].currency` | Optional, three letters (`CHF`), stored upper case; `422` otherwise. |
+| `budgets[].work_packages[].rate` | Optional number ≥ 0; `422` otherwise. |
+| `budgets[].cap` | Optional cost cap in the budget's currency, a number ≥ 0; `null` or missing: the sum of hours × rate counts. `422` ““cap” must be null or a number ≥ 0.” otherwise. |
+| `budgets[].invoice_dates` | Optional list of at most 200 days `YYYY-MM-DD`, each once: the planned invoice dates (forecast invoices – the client computes the ideal line of the burndown between them). `null` or `[]` mean none; otherwise `422` ““invoice_dates” must be a list of at most 200 days (YYYY-MM-DD), each once.” |
+| `budgets[].rates` | **Not part of the record.** Rates per person are the person's `cost_rates` (see below). With content it is refused: `422` (““rates” is no longer part of a budget; cost rates live on the person.”) `null` or `{}` (a client's empty default) passes. |
+
+Everything is nullable; what is missing means nothing. The server does
+not compute with it. The Lead role follows from `leads` as since 0.11.0,
+for a quote as for a running project: `draft`, `quoted` and `declined`
+keep the Leads (they plan with the quote and keep reading it), only
+`completed` and `archived` end the role.
+
+### The team and its roles
+
+Each entry of `team` is an object with `user` (the uid, required) and
+`role`:
+
+| `role` | Meaning |
+|---|---|
+| `member` | works on the project (the default) |
+| `sparring` | sparring partner |
+| `support` | supports the project |
+| `qa` | quality assurance |
+
+- A missing or `null` `role` is stored as `member`. Any other role:
+  `422` ““role” in “team” is member, sparring, support or qa.”
+- Strings are read as `member`: an entry `"pbuser1"` (the earlier format
+  of 0.16.0) is stored as `{ "user": "pbuser1", "role": "member" }`.
+  Records written before keep their strings until the next write, so a
+  client reads a string entry as a member.
+- Only `user` and `role` are stored; other fields of an entry are
+  dropped without an error (the server keeps the shape it checks; a
+  client's display fields cost nothing).
+- A user twice: the first entry wins, later ones are dropped without an
+  error.
+- `user` missing, empty or not a string: `422` ““user” in “team” must be
+  a user ID.” Not a list, or an entry neither string nor object: `422`
+  ““team” must be a list of entries with “user” and “role”.”
+- Members (role `user`) still do not see `team`: it is not part of the
+  booking catalog (below).
+
+```json
+"team": [
+  { "user": "pbuser1", "role": "member" },
+  { "user": "pbuser2", "role": "qa" },
+  { "user": "pbverw", "role": "support" }
+]
+```
+
+### Who sees what
+
+Unchanged in mechanism: Team Admins and the project's Leads read the full
+record. Everyone else reads only the booking catalog (`schema`, `id`,
+`name`, `codes`, `subprojects`, `start`, `end`, `status`, `mapping`,
+`never_billable`, `led`) – without `budgets`, so without `currency` and
+`rate`, and without `team` – in the single record, the list,
+the delta and the history (which members may not read at all).
+
+```json
+{ "kind": "project", "key": "Q-7", "data": {
+  "id": "Q-7", "name": "Harbour quote", "status": "quoted", "from_quote": true, "codes": [],
+  "leads": ["pblead"], "team": [{ "user": "pbuser1", "role": "member" }, { "user": "pbuser2", "role": "qa" }],
+  "budgets": [{ "id": "b1", "currency": "CHF",
+                "work_packages": [{ "no": 1, "name": "Concept", "rate": 180 }] }]
+} }
+```
+
+## Cost rates on the person, 0.16.0 (2026-10-12)
+
+Capability `cost_rates: 1`. The person's hourly cost – personnel cost,
+not a price – sits on the person record (`kind: person`), not on a
+budget. No new kind, no new endpoint; written by Team Admins only, as
+every person record.
+
+| Field | Content |
+|---|---|
+| `cost_rates` | Optional list of `{ "from": "YYYY-MM-DD", "rate": number ≥ 0 }`: the rate valid from that day on, like `workload`. Each day once. `null` or `[]` mean nothing; any order, stored as sent. A non-list, an entry without a real day `from` or a number `rate` ≥ 0, or a day twice: `422`. Other fields of an entry pass. |
+
+```json
+{ "kind": "person", "key": "pbuser1", "data": {
+  "login": "pbuser1", "first_name": "Mia", "workload": [{ "from": "2026-01-01", "percent": 80 }],
+  "cost_rates": [{ "from": "2026-01-01", "rate": 95 }, { "from": "2026-07-01", "rate": 110 }]
+} }
+```
+
+**Admin only, never in the member catalog.** Team Admins read
+`cost_rates`; nobody else does – not the person on their own record, not
+a Lead on the name card of others (an allowlist, which never held it).
+The single record, the list, the delta and the history come without the
+field for everyone who does not manage the team. The server does not
+compute with it.
+
+## Invoices, 0.16.0 (2026-10-13)
+
+Capability `invoices: 1`. A Lead (or Team Admin) sends billable, not yet
+billed hours of a budget to accounting; that makes an **invoice draft**,
+which the Team Admin checks and issues. The status is set by hand. The
+number follows a pattern of the team and comes from the server, so two
+clients never give the same one. The server stores and checks; it does
+not compute amounts.
+
+### The record (`invoice`)
+
+- **Key:** chosen by the client, any record key (at most 128 characters
+  from `A–Z a–z 0–9 @ . _ + -`), e.g. `inv-1a2b3c4d`. The key says
+  nothing about the project.
+- **Data** (`schema: 1`):
+
+```json
+{ "schema": 1, "project": "d200", "budget": "b1", "from": "2026-09-01", "to": "2026-09-30",
+  "status": "draft", "number": null,
+  "bookings": [ { "person": "alice", "uid": "7f3a-1@example.test", "start": "2026-10-13T09:00:00" } ],
+  "note": null, "created_by": "pblead", "created_on": "2026-10-13", "issued_on": null, "paid_on": null }
+```
+
+| Field | Rule |
+|---|---|
+| `schema` | optional integer 1–1000 |
+| `project` | required, a project key (record key pattern); the rights hang on it |
+| `budget` | **required**, the budget's id, 1–128 characters: every invoice belongs to a budget. Missing, `null`, empty or blank: `422` ““budget” is required: every invoice belongs to a budget.” |
+| `from`, `to` | required days `YYYY-MM-DD`, `from` ≤ `to` |
+| `status` | required: `draft`, `issued`, `paid` or `cancelled` |
+| `number` | `null` or text of 1–64 characters (no empty string), no control characters |
+| `bookings` | required list, at most **5000** (may be empty) |
+| `bookings[].person` | required, 1–64 characters: the account whose event it is |
+| `bookings[].uid` | required, 1–1024 characters: the event's UID |
+| `bookings[].start` | required: a day `YYYY-MM-DD` (all day) or a local time `YYYY-MM-DDTHH:MM:SS` (no zone) – with `uid` it tells the occurrences of a series apart |
+| `note` | `null` or text up to 2000 characters; tab and line breaks allowed |
+| `created_by` | `null` or text up to 64 characters |
+| `created_on`, `issued_on`, `paid_on` | `null` or a day `YYYY-MM-DD` |
+| `hours`, `amount` | optional, `null` or a number ≥ 0: frozen by the client when issuing – the hours and the amount as issued |
+| `currency` | optional, `null` or three letters, stored upper case: the currency of `amount` |
+| `vat` | optional, `null` or a percentage 0–100: the VAT rate of this invoice (it can change during a budget; amounts are net) |
+
+  The same (`person`, `uid`, `start`) twice: `422`. Other fields – of the
+  invoice and of a booking – pass and are stored as sent, as for projects
+  and billing marks. An invoice may be at most **768 KB** (other kinds 256
+  KB); larger: `413 too_large`. Every error is `422 invalid` with a message
+  naming the field, inside a booking with its number (“Booking 2: The same
+  booking (person, uid, start) is there twice.”).
+
+### Who reads and writes
+
+| | user | lead | admin |
+|---|---|---|---|
+| read (list, delta, `GET`, history) | – | **of the active projects they lead** | all |
+| create, change, delete, restore | – | **drafts without a number** of these projects | all |
+
+- “The projects they lead” as for booking reports: the active projects in
+  `/me.lead_of`. A Lead's write must hold before **and** after: the stored
+  invoice (if any) and the new one (if not deleted) are both of a project
+  they lead, both `status: "draft"`, both `number: null`. So a Lead
+  creates, changes and deletes their drafts, but cannot issue, pay, cancel,
+  number, move to another project or touch an invoice once a Team Admin
+  issued it. The check runs against the stored state inside the write's
+  transaction.
+- `403 forbidden`: “Only Team Admins and the project’s Leads write
+  invoices.” (not a Lead of the project, or a Member) and “A Lead writes
+  only drafts without a number; issuing, payment and cancelling are for
+  Team Admins.”
+- A single read of an invoice the caller may not read is `403` – also
+  when no such record exists; a Team Admin gets `404` for a missing one.
+- `POST /records/batch` of a Lead may hold invoices (with billing marks,
+  booking reports, billable marks); each write is checked on its own, all
+  or none. An error names the write (“Write 2: …”, `index`).
+- **Tombstones:** a deleted invoice keeps its project on the server (not
+  handed out), so Team Admins and the project's Leads get the tombstone in
+  their delta and may read its history; Members never see one.
+- **Gaining sight:** a project write that changes `leads` (or whether the
+  project is active) gives the project's invoices a new `revision`, as for
+  booking reports; a new Lead finds them in the next delta. Nothing is sent
+  as deleted to someone who loses sight; a Lead's client drops invoices of
+  projects no longer in `/me.lead_of`.
+
+### The number pattern (`setting/settings`, `invoice_number`)
+
+```json
+"invoice_number": { "pattern": "RE-{year}-{no:4}", "per_year": true, "start": 1 }
+```
+
+- `pattern`: 1–64 characters with **exactly one** number placeholder –
+  `{no}`, `{no:N}`, `{nr}` or `{nr:N}` (N 1–8, the width with leading
+  zeros) – and any of `{year}`, `{jahr}`, `{yy}`, `{jj}`, `{project}`,
+  `{projekt}`, `{customer}`, `{kunde}`. Another placeholder: `422`
+  “Unknown placeholder {month} in the invoice number pattern.”; none or two
+  number placeholders: `422`; a brace outside a placeholder: `422`.
+- `per_year`: optional boolean, default `true` – a counter per year;
+  `false` – one counter across years.
+- `start`: optional integer 1–999999999, default 1 – the first number.
+- `invoice_number` missing or `null`: no pattern; the counter still works
+  with the defaults. Other fields inside pass. Written by Team Admins, as
+  every setting. The client fills the pattern; the server only counts.
+
+### The invoice issuer (`setting/settings`, `issuer`)
+
+Who issues the team's invoices – for the sender block, the note on invoices
+abroad and the payment part with a QR code:
+
+```json
+"issuer": { "name": "Denkstatt sàrl", "street": "Dornacherstrasse 192", "postcode": "4053", "city": "Basel",
+            "country": "CH", "email": "info@example.org", "phone": "+41 61 000 00 00", "vat_id": "CHE-123.456.789 MWST",
+            "foreign_note": "…", "qr": true,
+            "accounts": [{ "currency": "CHF", "iban": "CH9300762011623852957", "bic": "" },
+                         { "currency": "EUR", "iban": "DE89370400440532013000", "bic": "COBADEFFXXX" }] }
+```
+
+- Texts: `name` ≤ 70, `street` ≤ 70, `postcode` ≤ 16, `city` ≤ 35,
+  `country` ≤ 2 (ISO code), `email` ≤ 254, `phone` ≤ 40, `vat_id` ≤ 32,
+  `foreign_note` ≤ 500 (line breaks allowed); no control characters.
+- `qr`: boolean. The client puts a Swiss QR bill on CHF invoices and an EPC
+  GiroCode on EUR invoices; other currencies get none.
+- `accounts`: at most 10, one per `currency` (three letters); `iban` without
+  spaces, `bic` empty or 8/11 characters. Otherwise `422`.
+- `issuer` missing or `null`: none. Written by Team Admins, as every setting.
+- A customer record may carry `vat_id` (text); it passes like other fields.
+
+### `POST /invoices/next-number`
+
+```json
+POST /invoices/next-number
+{ "year": 2026 }
+→ { "number": 12, "year": 2026 }
+```
+
+- Takes the next number of the team's counter and returns it. **Atomic:**
+  two calls at the same time – from two Macs – never get the same number,
+  and none is skipped. A number taken stays taken, also if the client
+  never uses it.
+- `per_year: true`: one counter per `year`; `false`: one counter for all
+  years (`year` only comes back as sent).
+- The first number is `start`; never below `start` – raised later, the
+  counter continues at `start`; lowered later, it continues where it was.
+- `year`: integer (or digits) 1900–9999, otherwise `422` (““year” must be
+  a year from 1900 to 9999.”); missing: the current year (UTC).
+- Team Admins only; anyone else `403` (“Only Team Admins assign invoice
+  numbers.”).
+
+### `GET /invoices/next-number?year=2026`
+
+The number the next `POST` would give, without taking it (preview for
+the settings): `{ "number": 12, "year": 2026 }`. Same rules and rights.
+Between the preview and the `POST` another client may take it.
+
+### Stored
+
+`Version1011Date20261013120000` adds the table `ts_counters` (team,
+`name` – `invoice:2026` per year or `invoice` –, `last_no` the last number
+given, `modified_at`), unique per team and name. Additive only. Invoices
+live in `ts_records`/`ts_history` like every record and travel in the team
+ZIP; the counters do not – after moving a team to another server, raise
+`start` above the last number. Deleting a team removes its counters
+(`counts.counters` in the answer of `DELETE /admin/teams/{id}`).
+
+### Capability
+
+```json
+"timesister": { "api": 2, "version": "0.16.0", "jobs": 5, "billing": 1, "absences": 1,
+  "team_backup": 1, "privacy_notice": 1, "derived_lead": 1, "lead_scope": 1,
+  "booking_reports": 1, "job_fits": 1, "quotes": 1, "cost_rates": 1, "invoices": 1 }
+```
+
+`invoices: 1`: the kind `invoice`, `invoice_number` in `setting/settings`
+and `/invoices/next-number`.
+
+## Invoice template, 0.16.0 (2026-10-13)
+
+Capability `invoice_template: 1`. The Mac app fills invoices into a Word
+template (`.docx`). Without a server it keeps the template locally; in a
+team, a Team Admin uploads it and the server copy is the source for every
+Mac of the team: a Mac reads `/info` and downloads the file when `sha256`
+differs from its copy. One template per team. The server checks that the
+file is a Word document and stores it; it never opens or fills it.
+
+### Endpoints
+
+| Method | Path | Body / answer |
+|---|---|---|
+| GET | `/templates/invoice/info` | `{ name, size, sha256, modified_at, modified_by }`; none stored: `404 not_found` |
+| GET | `/templates/invoice` | the same plus `base64` (the file); none stored: `404 not_found` |
+| PUT | `/templates/invoice` | `{ "name": "Rechnung.docx", "base64": "…" }` → the info object; replaces the stored one |
+| DELETE | `/templates/invoice` | `{ "deleted": true }`; `{ "deleted": false }` when none was stored |
+
+```json
+GET /templates/invoice/info
+→ { "name": "Rechnung.docx", "size": 48213, "sha256": "9f2c…", "modified_at": "2026-10-13T12:00:00Z", "modified_by": "pbadmin" }
+
+GET /templates/invoice
+→ { "name": "Rechnung.docx", "size": 48213, "sha256": "9f2c…", "modified_at": "2026-10-13T12:00:00Z", "modified_by": "pbadmin", "base64": "UEsDBBQ…" }
+
+GET /templates/invoice/info   (none stored)
+→ 404 { "error": "not_found", "message": "The team has no invoice template." }
+```
+
+- **Team Admins only, reading too.** Leads and Members get `403 forbidden`
+  “Only Team Admins manage the invoice template.” (a refused `PUT` or
+  `DELETE` counts for brute-force throttling, as every refused write).
+  Every account reaches only its own team's template.
+- `size`: bytes of the file; `sha256`: hex of the file; `modified_at`:
+  UTC, when it was uploaded; `modified_by`: the account that uploaded it.
+- Rate limits per account: `PUT` and `DELETE` 30, `GET /templates/invoice`
+  60 per minute.
+
+### Checks on `PUT`
+
+In this order: rights, body size, `name`, `base64`, file size, Word.
+
+| Case | Answer |
+|---|---|
+| `name` missing | `422 invalid` ““name” is missing.” |
+| `name` not 1–200 characters ending in `.docx` (any case), or with `/`, `\` or control characters | `422 invalid` ““name” must be a file name of 1 to 200 characters ending in .docx.” |
+| `base64` missing | `422 invalid` ““base64” is missing.” |
+| `base64` not a string or not Base64 (strict; line breaks pass) | `422 invalid` ““base64” is not valid Base64.” |
+| the file over 10 MB (10 485 760 bytes), or the body over 14 MB (14 680 064 bytes) | `413 too_large` “A template may be at most 10 MB.” |
+| not starting with the ZIP signature `PK\x03\x04`, or not a readable ZIP | `422 invalid` “The template must be a Word document (.docx).” |
+| a ZIP without the entry `word/document.xml` | `422 invalid` “The template is not a Word document: “word/document.xml” is missing.” |
+| body empty, not JSON or not an object | `400 invalid`, as everywhere |
+
+- Only the ZIP's directory is read, nothing is unpacked. A refused `PUT`
+  leaves the stored template as it was.
+- **Size.** 10 MB as Base64 is about 13.4 MB of JSON. A body over 14 MB is
+  refused without reading the rest. `PUT` bodies are not limited by PHP's
+  `post_max_size`; the test Nextcloud (Apache, `LimitRequestBody` 1 GB)
+  takes a template of just under 10 MB. A reverse proxy with a smaller
+  limit (nginx `client_max_body_size`; Nextcloud's sample configuration
+  sets 512 MB, nginx's default is 1 MB) answers `413` itself, before the
+  app and without the OCS envelope.
+
+### Stored
+
+In the app's data folder (`IAppData`): `templates/t<team>/invoice.docx`
+and `templates/t<team>/invoice.json` (the info object). No table, no
+migration. The JSON is written after the file; a template with only one of
+the two counts as none (`404`).
+
+### Team ZIP and deleting a team
+
+- The team ZIP (`GET /admin/teams/{id}/export`) carries the template as
+  `templates/invoice.docx` and `templates/invoice.json` (the info object),
+  both listed in the manifest with their checksums. ZIPs from before
+  0.16.0 have none; older app versions ignore the two entries. Only one of
+  the two, or a JSON that does not match the file: `422` ““templates/invoice.json”
+  in the backup is malformed.”
+- Preview: `template` – the info object of the ZIP's template, or `null`.
+- Import, after the transaction like the calendars: `merge` stores the
+  ZIP's template when the team has none or the ZIP's `modified_at` is
+  younger; `replace` whenever it differs. A ZIP without a template leaves
+  the team's own, also with `replace`. `modified_by` follows the account
+  mapping. Answer: `template: null` (none in the ZIP), `{ name, stored:
+  true }` or `{ name, stored: false, reason }` with `reason` `same`,
+  `kept_existing`, `not_a_template` (fails the Word check) or `failed`.
+- A template counts as a team's content: importing into the team and
+  deleting it keep a team ZIP first (`pre_backup`, `backup`), also when
+  the team has nothing else.
+- `DELETE /admin/teams/{id}` removes `templates/t<id>/` after the commit,
+  with the protected calendar backups.
+
+### Capability
+
+```json
+"timesister": { "api": 2, "version": "0.16.0", "jobs": 5, "billing": 1, "absences": 1,
+  "team_backup": 1, "privacy_notice": 1, "derived_lead": 1, "lead_scope": 1,
+  "booking_reports": 1, "job_fits": 1, "quotes": 1, "cost_rates": 1, "invoices": 1,
+  "invoice_template": 1 }
+```
+
+`invoice_template: 1`: `/templates/invoice` and the template in the team
+ZIP.
+
+## Quotes as records, 0.16.0 (2026-10-14)
+
+Capability `quotes: 2`. A quote no longer creates a project: it is a
+record of its own, kind `quote`, holding a budget before anyone accepted
+it, optionally assigned to an existing project. On acceptance the client
+writes the budget into an existing project (an ordinary project `PUT`) and
+sets the quote `accepted` – two ordinary record writes, no new endpoint.
+Everything of “Quotes, 0.16.0” above (project statuses `draft`, `quoted`,
+`declined`, `from_quote`, `team`) stays as it is; nothing is removed.
+
+### The record (`quote`)
+
+- **Key:** chosen by the client, `q-` and 8 lowercase hex digits, e.g.
+  `q-1a2b3c4d`. Any other key: `422` “The key of a quote is “q-” and 8
+  lowercase hex digits.” (outside the general record key pattern: `400`,
+  as for every kind).
+- **Data** (`schema: 1`):
+
+```json
+{ "schema": 1, "name": "Harbour study", "status": "quoted", "customer": "kanton", "project": null,
+  "number": "OF-2026-007", "date": "2026-10-14", "valid_until": "2026-11-30", "accepted_on": null,
+  "created_on": "2026-10-14", "leads": ["pblead"], "contact": "Ms. Example", "note": null,
+  "pdf": "https://cloud.example.test/s/offerte-hafen.pdf",
+  "budget": { "id": "b-q1", "name": "Study", "currency": "CHF", "cap": 24000,
+              "work_packages": [{ "no": 1, "name": "Concept", "hours": 40, "rate": 180 }] },
+  "budget_id": null, "hours": null, "amount": null, "currency": null, "created_by": "pbadmin" }
+```
+
+| Field | Rule |
+|---|---|
+| `schema` | optional integer 1–1000 |
+| `name` | **required**, text of 1–200 characters, no control characters |
+| `status` | **required**: `draft`, `quoted`, `accepted` or `declined` |
+| `customer` | `null` or a customer's key (record key pattern) |
+| `project` | `null` or a project's key (record key pattern); **required** once `status` is `accepted`: `422` “An accepted quote needs “project”: the project that took over its budget.” |
+| `number` | `null` or text of 1–64 characters, no control characters: the quote number |
+| `date`, `valid_until`, `accepted_on`, `created_on` | `null` or a day `YYYY-MM-DD` |
+| `leads` | optional, `null` or a list of at most 20 entries of 1–128 characters: accounts or person keys, as in a project's `leads`. Informative and for the rights (below); unknown accounts pass, no check against the team |
+| `contact` | `null` or text up to 200 characters, no control characters |
+| `note` | `null` or text up to 2000 characters; tab and line breaks allowed |
+| `pdf` | `null` or an `http://` or `https://` address of at most 2000 characters, without spaces or control characters; anything else `422` |
+| `budget` | `null` or an object with a text `id` of 1–128 characters (not blank). Its content is checked as a project's budget: `currency` three letters, stored upper case; `cap` `null` or a number ≥ 0; `work_packages[].rate` `null` or a number ≥ 0; `rates` with content refused (`null` or `{}` pass) – the same messages as for projects. Other fields of the budget pass |
+| `budget_id` | `null` or text of 1–128 characters: the id of the budget in the project after acceptance |
+| `hours`, `amount` | `null` or a number ≥ 0: frozen by the client at acceptance |
+| `currency` | `null` or three letters, stored upper case: the currency of `amount` |
+| `created_by` | `null` or text up to 64 characters |
+
+  Other fields pass and are stored as sent, as for invoices and projects.
+  A quote may be at most **768 KB** (a budget can be large; other kinds
+  256 KB); larger: `413 too_large` (“A quote may be at most 768 KB.”).
+  Every other error is `422 invalid` with a message naming the field.
+
+An accepted quote:
+
+```json
+{ "schema": 1, "name": "Harbour study", "status": "accepted", "project": "d200", "number": "OF-2026-007",
+  "accepted_on": "2026-10-20", "leads": ["pblead"], "budget": { "id": "b-q1", "currency": "CHF", "cap": 24000 },
+  "budget_id": "b7", "hours": 40, "amount": 7200, "currency": "CHF", "created_by": "pbadmin" }
+```
+
+### Who reads and writes
+
+| | user | lead | admin |
+|---|---|---|---|
+| read (list, delta, `GET`, history) | – | **quotes whose `leads` name them, or of a project they lead** | all |
+| create, change, delete, restore | – | **these quotes, before and after the write** | all |
+
+- A Lead is an account that leads at least one active project
+  (`/me.lead_of`). A Member sees no quotes – not even one naming them in
+  `leads` – until they lead a project.
+- `leads` names a Lead the way a project's `leads` does: their account, or
+  the key of a person whose `accounts` hold it. “A project they lead”: one
+  of the active projects in `/me.lead_of`.
+- A Lead's write must hold before **and** after: the stored quote (if any,
+  also a tombstone) and the new one (if not deleted) are both quotes they
+  read. So a Lead creates quotes naming themselves or on a project they
+  lead, changes, accepts and deletes them, but cannot give one away (out
+  of their `leads` and off their projects) nor take over or delete one
+  they do not read. The check runs against the stored state inside the
+  write's transaction. `403 forbidden`: “Only Team Admins and the quote’s
+  or project’s Leads write quotes.”
+- A single read of a quote the caller may not read is `403` – also when
+  no such record exists; a Team Admin gets `404` for a missing one.
+- `POST /records/batch` of a Lead may hold quotes (with invoices, billing
+  marks, booking reports, billable marks), not projects; each write is
+  checked on its own, all or none. An error names the write.
+- **Tombstones:** a deleted quote keeps its last data on the server (not
+  handed out), so whoever read it gets the tombstone in their delta and
+  may read its history; Members never see one.
+- **Gaining sight:** a project write that changes `leads` (or whether the
+  project is active) gives a new `revision` to the project's quotes and
+  to the quotes naming one of its old or new leads (account or person
+  key) – a new Lead finds them in the next delta. Nothing is sent as
+  deleted to someone who loses sight; a Lead's client drops the quotes it
+  no longer reads by the rule above (all of them once `/me.lead_of` is
+  empty).
+
+### Accepting a quote
+
+Two ordinary writes, no new endpoint:
+
+1. `PUT /records/project/{key}` – the quote's budget into the project's
+   `budgets` (with the `id` the project shall use), with the rights of
+   every project write (Team Admins and the project's Leads).
+2. `PUT /records/quote/{key}` – `status: "accepted"`, `project`,
+   `budget_id`, `accepted_on` and the frozen `hours`, `amount`, `currency`.
+
+The server does not link the two: if the second fails, the client repeats
+it. A Team Admin may send both in one `POST /records/batch` (all or none).
+
+### Stored
+
+In `ts_records`/`ts_history` like every record; no migration. The team
+ZIP carries quotes; moving to other accounts maps `leads` and
+`created_by`.
+
+### Capability
+
+```json
+"timesister": { "api": 2, "version": "0.16.0", "jobs": 5, "billing": 1, "absences": 1,
+  "team_backup": 1, "privacy_notice": 1, "derived_lead": 1, "lead_scope": 1,
+  "booking_reports": 1, "job_fits": 1, "quotes": 2, "cost_rates": 1, "invoices": 1,
+  "invoice_template": 1 }
+```
+
+`quotes: 2`: the kind `quote`; what `quotes: 1` meant (project statuses
+`draft`, `quoted`, `declined`, `from_quote`, `team`, currency and rates in
+the budgets) holds as before. A server with `quotes: 1` knows no kind
+`quote` (`400` “Unknown kind”).
+
+## Time entries, 0.17.0 (2026-10-15) – the app holds the team's hours
+
+Decided 2026-10-15 (`PLAN-ZEITDATEN.md`): the app is the one book of time
+entries. Every person **names** their time calendar once; the app reads it
+on the server (also the person's own entries – the client shows the same
+truth as everyone else) and reads the `.ics` feeds of external persons
+itself. Clients no longer read other members' calendars; the calendar
+shares matrix becomes obsolete (removed from the clients in a later step,
+the endpoints stay until then). Still `api: 2`; new capability
+`entries: 1`.
+
+### What is stored
+
+The app stores **calendar objects**, not occurrences: one row per object
+(one VEVENT with its exceptions, as CalDAV stores it; for a feed, all
+components sharing one UID). The client expands recurrences and reads
+codes with its own parser, exactly as it does for its own calendar. The
+server parses only what it needs to filter by role: the project codes.
+
+```text
+ts_time_calendars  tenant_id, uid, source (calendar|feed), calendar_id, calendar_uri,
+                   feed_url?, named_at, last_read_at, last_full_read_at, last_error,
+                   reread (0|1), etag?                              UNIQUE(tenant_id, uid, source)
+ts_entries         id, tenant_id, uid, source, event_uid, object_uri, etag, ics,
+                   summary, codes, first_start, last_end, cancelled, kept, deleted,
+                   revision, modified_at                            UNIQUE(tenant_id, uid, source, event_uid)
+ts_tenants         + entries_revision, entries_since
+```
+
+- `uid`: the account of the member; for an external person the person's
+  `login` (the key of the person record).
+- `codes`: the `#code`s found in SUMMARY, LOCATION and DESCRIPTION and
+  the values of `X-TIMESISTER-CODE`, lower-cased, comma-separated. The
+  rule is the client's `buchung::codes_finden`: a `#` not preceded by a
+  letter or digit, then one or more of letters, digits, `.`, `-`, `_`,
+  `/`; an optional share after `:` (`60%`, `1.5h`) is dropped; trailing
+  `.`, `-`, `_`, `/` are stripped.
+- `first_start`/`last_end`: the object's first start and last end as
+  dates; `last_end` is `null` while the recurrence has no end (or a
+  `COUNT`, which the server does not expand). An object is stored when
+  `last_end` is `null` or on/after the team's `entries_since`.
+- `cancelled`: `STATUS:CANCELLED` on the master component.
+- `kept`: the object vanished from the calendar or feed, but a `billing`
+  record (`person` = `uid`, `uid` = `event_uid`) exists – the book keeps
+  it; the client shows it as the book's copy, read-only. A restored object
+  clears `kept`.
+- `deleted`: tombstone (no `billing` record); `ics` is empty then.
+- `revision`: a counter per team, separate from the records' revision,
+  increased by every change; `GET /entries?since=` reads by it.
+
+### Naming the time calendar
+
+- `PUT /me/time-calendar` `{ "calendar_url": "<CalDAV URL or calendar URI>" }`
+  (any member, own account only). The server takes the last path segment
+  as the calendar URI, finds it among the account's own calendars
+  (`IManager::getCalendarsForPrincipal`), stores its key and answers
+  `{ "uid", "calendar_uri", "calendar_id", "named_at" }`. `404 not_found`
+  when the account has no such calendar; `422 invalid` for an empty or
+  malformed value. Naming again with the same calendar changes nothing;
+  with another one, the old calendar's entries become tombstones and the
+  new one is read in full.
+- `DELETE /me/time-calendar`: un-names; the person's entries become
+  tombstones, kept ones stay.
+- **Naming by convention** (added 2026-10-15): before each run of the job,
+  every active member without a named calendar gets `zeit-<uid>` – the
+  calendar the Mac app creates – as soon as that calendar exists. The
+  person can still name another one; nothing else of the account's
+  calendars is looked at. A team whose members never opened the Mac app
+  (or whose calendars were imported) is read without anyone naming.
+- **Immediate read** (added 2026-10-15): `PUT /me/time-calendar` reads a
+  newly named calendar at once when the CalDAV backend is available and
+  the calendar has at most 3000 objects; larger ones, or without the
+  backend, wait for the job (minutes). The answer adds `read_now` (bool:
+  read in this request) and `count` (objects of this calendar in the book
+  now, tombstones not counted). Naming the same calendar again: `read_now`
+  false, `count` as it stands. A failing immediate read is no error for
+  the client: `read_now` false, the message in `last_error`, the job
+  tries again.
+- `GET /me` adds `time_calendar`: `{ "calendar_uri", "calendar_id", "named_at", "last_read_at", "last_error" }`
+  or `null`, `entries_revision` (the team's current counter) and
+  `entries_since` (the effective cutoff date).
+- `GET /status` rows add `time_calendar` (bool: named), `entries_read_at`,
+  `entries_error` – this is the new “who is missing”.
+- External persons: the feed from the person record (`feed`) is read by
+  the server; nothing to name. `GET /entries/status` lists them too.
+
+### Cutoff per team
+
+- Team setting `entries_since` (`"YYYY-MM-DD"` or `null`): entries older
+  than this are not read. `null` means the default, **two years before
+  the team was created** (first of that month). The effective value is
+  returned as `entries_since` in `/me`; the stored value in
+  `settings.entries_since` of `GET /team` and `GET /admin/teams`.
+  When the cutoff moves, the next run reads every source in full: entries
+  ending before the new cutoff vanish from the book – a tombstone, or
+  `kept` when a `billing` record exists –, entries now inside it are read
+  (again), a tombstoned one comes back as a new revision.
+- `PUT /team/settings` `{ "entries_since": "YYYY-MM-DD" | null }` – Team
+  Admins; only this key for now (`422 invalid` for anything else or a
+  malformed date). Nextcloud admins may also set it through
+  `POST`/`PUT /admin/teams` `settings`. A change marks every named calendar
+  and feed for a full re-read.
+
+### Reading
+
+- **Main path: calendar events.** The app listens to
+  `OCP\Calendar\Events\CalendarObjectCreatedEvent`, `…UpdatedEvent`,
+  `…DeletedEvent`, `…MovedToTrashEvent`, `…RestoredEvent` and
+  `…MovedEvent`. The listener does one cheap thing: if the event's
+  calendar id is a named time calendar, it stores **that one object** from
+  the event's object data (`calendardata`, `uri`, `etag`); otherwise it
+  returns at once. Never a full read in the listener.
+- **Net: the job `EntryReader`**, every 5 minutes (`TimedJob`):
+  1. named calendars marked `reread`, never read, or whose last full read
+     is older than a day: a full read (all objects; what is no longer
+     there becomes a tombstone or `kept`); with the CalDAV backend
+     available (optional, as `AbsenceService` does it) by comparing etags,
+     otherwise through `ICalendarExport` by comparing the objects' hashes;
+  2. feeds: `GET` with `If-None-Match` (`OCP\Http\Client`), only `http(s)`,
+     at most 20 MB, 20 s; `304` ends it; otherwise the feed is split per
+     UID and stored like a calendar; UIDs no longer in the feed become
+     tombstones or `kept`;
+  3. one calendar or feed failing does not stop the others; the error is
+     kept in `last_error` and shown in `/status` and `/entries/status`
+     (a feed that answers something other than an iCalendar file – a
+     login page, say – counts as failing; its entries stay);
+  4. **members who left** (added 2026-10-15): the named calendar of a
+     member with `left_at` is not read and not followed by the listener;
+     the row stays with `last_error` «member left», the entries stay in
+     the book and are delivered by `GET /entries` as before (billed
+     hours). Back in the team (`left: false`), the next run reads it in
+     full. Feeds of external persons are not affected.
+- `POST /entries/reread` (Team Admins): marks every named calendar and
+  feed for a full read on the next run. Answer `{ "marked": n }`.
+- `GET /entries/status` (Team Admins): `[{ uid, source, calendar_uri?, named_at, last_read_at, last_full_read_at, last_error, count, left }]`
+  – `left` (added 2026-10-15): the member left the team, always false
+  for a feed.
+
+
+### Reading the entries (clients)
+
+`GET /entries?since=<revision>&limit=<n>` (default and maximum 2000; a
+`limit` outside 1–2000 is refused by Nextcloud itself with `400` before
+the app runs) – every member, filtered by role:
+
+- Team Admin: everything;
+- Lead: own entries, and entries whose `codes` contain a code of a
+  project the Lead leads (`/me.lead_of`, including subproject codes; a
+  part of such a code counts too – `d196.4.1` belongs to `D196`);
+- User: own entries only.
+
+With `since=0` tombstones are left out, as for the records; from any
+later revision on they are delivered. A `since` beyond the current
+revision is not an error: `entries` is empty, `more` false.
+
+
+Answer `{ "revision": <current>, "entries": [ … ], "more": bool }`, entries
+in `revision` order, each
+`{ "uid", "source", "event_uid", "object_uri", "etag", "ics", "codes": [ … ], "cancelled", "kept", "deleted", "revision", "modified_at" }`
+(`ics` empty on a tombstone). Clients remember the highest `revision`
+they applied and ask with it next time; with `more` they ask again at
+once. The filter is applied when reading: a Lead whose projects change
+(`/me.lead_of` differs from last time) starts over with `since=0` and
+drops the entries it no longer receives – the server sends nothing as
+deleted to someone who merely loses sight.
+
+### Rules
+
+- Objects are stored as received; the server does not rewrite the iCal.
+  The client's own calendar stays its editing surface; the server never
+  writes into a named calendar.
+- `kept` is decided from the `billing` records at the moment an object
+  vanishes; a `billing` record written later does not revive an already
+  tombstoned object.
+- Limits: 256 KB per object (`ics`), larger objects are skipped with the
+  error kept in `last_error`; at most 100 000 objects per calendar or
+  feed in one full read.
+- Team boundary in every query, as everywhere.
+
+### Team ZIP (added 2026-10-15)
+
+`team.json` carries `settings.entries_since` (the stored cutoff, or
+`null`) and `time_calendars: [{ uid, calendar_uri, named_at }]` – the
+named time calendars of the members. The book itself is not in the ZIP:
+it is read again from the calendars. ZIPs from before 0.17.0 have neither
+and import as before.
+
+- Preview adds `entries_since` (the ZIP's stored cutoff) and
+  `time_calendars` (how many are named). Accounts named only in
+  `time_calendars` count for the `mapping`.
+- Import, after the transaction: `replace` stores the ZIP's cutoff as it
+  is (also `null`); `merge` only when the team has none stored. A changed
+  cutoff marks every source for a full read. For every named calendar the
+  mapped account's calendar is looked for – first the ZIP's `calendar_uri`,
+  then `zeit-<uid>` – and named; `merge` keeps a calendar already named
+  here; `replace` names the ZIP's (the old entries become tombstones when
+  it is another calendar). One row failing does not stop the others.
+- Answer: `entries_since: { value, applied }` and
+  `time_calendars: [{ uid, named: true, calendar_uri } | { uid, named: false, reason }]`
+  with `reason` `no_account` (mapped to `null`), `kept_existing`,
+  `no_calendar` (the account has neither calendar) or `failed`.
+
+### Capability
+
+```json
+"timesister": { … , "entries": 1 }
+```
+
+
+## Shares removed, 0.17.0 (2026-10-15)
+
+With the time entries in the app (section above), nobody reads another
+person's calendar any more: Team Admins, Leads and Users get the team's
+hours from `GET /entries`, filtered by role on the server. The shares
+matrix of 0.5.0 and everything that hung on it is gone – removed, not
+switched off. The sections above describe it as it was; nothing of it
+answers any more.
+
+Gone:
+
+- Endpoints: `GET /team/access`, `PUT /team/access`,
+  `PUT /team/access/{viewer}/{owner}`, `POST /team/access/remind` (404),
+  `GET`/`PUT /me/calendar-share` (404).
+- `GET /me`: `share_targets`, `may_override`, `calendar_share`, `admins`,
+  `leads`. `lead_of` stays.
+- `POST /status`: `calendar_shared`, `applied_shares` are ignored (no
+  error, nothing stored). `GET /status`: `calendar_shared`.
+- `PUT /team/members/{uid}` and `PUT /admin/teams/{id}/members/{uid}`:
+  `may_override` is no field any more (a body with nothing else: `400`);
+  the member entries in `GET /team`, `GET /admin/teams` and the team ZIP
+  carry no `may_override`.
+- Team setting `leads_see_calendars` (`settings` of `/admin/teams`,
+  `/team`, `/me`): gone; sending it is an unknown key (`422`). The column
+  in `ts_tenants` stays unused.
+- The Nextcloud notification `shares_changed` ("your calendar shares have
+  changed"); the Job notifications stay.
+- Externals as columns: the feed of an external person is read by the
+  server (time entries), the person record carries `feed` for Team Admins
+  only, as since 0.14.0. The admin overview counts
+  `without_time_calendar` (members without a named time calendar) instead
+  of `calendar_not_shared`.
+- Team ZIP: `team.json` has no `access` list, members no `may_override`,
+  `status.json` no `calendar_shared`; older ZIPs with them import fine
+  (ignored). The import result has no `access` count.
+
+Stays: the table `ts_access` (unused; rows go with the team or the
+account), the columns `may_override`, `calendar_shared`, `applied_shares`,
+`applied_at` and `leads_see_calendars` – the schema only grows. The
+privacy notice (`GET /team/privacy`) names no matrix any more. No
+capability announced the matrix, so none changes; `entries: 1` marks the
+state.
+
+Where it went: the named time calendar (`PUT /me/time-calendar`),
+`GET /entries?since` by role, `time_calendar`/`entries_read_at`/
+`entries_error` in `GET /status` as the new "who is missing".

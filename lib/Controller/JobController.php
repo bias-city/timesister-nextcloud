@@ -24,8 +24,8 @@ use OCP\IRequest;
  * counter-propose, decline, return and declare Done (the person), answer a
  * counter-proposal, paid (Team Admin), and the booked hours from the
  * person's client; the weekly numbers of each person and the capacity
- * check of a counter-proposal (0.7.2). Reading goes through /records
- * (kind `job`).
+ * check of a counter-proposal (0.7.2), and whether a Job would fit each
+ * recipient (0.14.0). Reading goes through /records (kind `job`).
  */
 final class JobController extends BaseController {
 	public function __construct(
@@ -128,6 +128,15 @@ final class JobController extends BaseController {
 		return $this->run(fn () => $this->jobs->done($this->tenants->current(), $key));
 	}
 
+	/** POST /jobs/{key}/reopen – Done back to In Progress (0.15.0). */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/{key}/reopen')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 300, period: 60)]
+	public function reopen(string $key): DataResponse {
+		return $this->run(fn () => $this->jobs->reopen($this->tenants->current(), $key));
+	}
+
 	/** POST /jobs/{key}/paid – `{ paid: bool }`, default true; Team Admins. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/{key}/paid')]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
@@ -160,6 +169,15 @@ final class JobController extends BaseController {
 	#[NoAdminRequired]
 	public function weeks(?string $uid = null): DataResponse {
 		return $this->run(fn () => $this->weeks->list($this->tenants->current(), $uid));
+	}
+
+	/** POST /jobs/fits – `{ hours, start, end, recipients }`: fits or not per person, no numbers (0.14.0). */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/jobs/fits')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 300, period: 60)]
+	public function fits(): DataResponse {
+		return $this->run(fn () => $this->weeks->fits($this->tenants->current(), $this->body(self::MAX_RECORD_BODY)));
 	}
 
 	/** GET /jobs/{key}/capacity?by= – does the counter-proposal fit its person? */

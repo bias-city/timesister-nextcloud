@@ -59,8 +59,16 @@
 				<!-- Per OCP, ICalendarExport::export() returns Sabre VCalendar;
 				     Sabre isn't part of nextcloud/ocp. Only serialize() is used. -->
 				<referencedClass name="Sabre\VObject\Component\VCalendar" />
+				<referencedClass name="OCA\DAV\CalDAV\CalDavBackend" />
 			</errorLevel>
 		</UndefinedDocblockClass>
+		<!-- The dav app's CalDavBackend: OCP has no way to replace a calendar
+		     object (createFromString only creates). Only the vacation mirror. -->
+		<UndefinedClass>
+			<errorLevel type="suppress">
+				<referencedClass name="OCA\DAV\CalDAV\CalDavBackend" />
+			</errorLevel>
+		</UndefinedClass>
 		<!-- IRootFolder inherits OC\Hooks\Emitter, which nextcloud/ocp doesn't ship.
 		     The app calls nothing from it. Only the file that uses IRootFolder. -->
 		<MissingDependency>

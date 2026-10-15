@@ -1,0 +1,280 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// The team's invoice template (0.16.0): /templates/invoice for Team Admins
+// only – info, download, upload and delete –, the Word check, the 10 MB
+// limit and the template in the team ZIP. Leaves pb as it found it: a
+// template that was there is put back (with a new modified_at).
+import { ADMIN, API, NC, ocs, sql } from './lib.mjs'
+import { A, AA, L, RUN, U1, V, check, expect, head, isObj, ISO, sha256 } from './harness.mjs'
+
+const BASE = '/templates/invoice'
+const MB10 = 10 * 1024 * 1024
+const TOO_LARGE = 'A template may be at most 10 MB.'
+const NOT_WORD = 'The template must be a Word document (.docx).'
+const NOT_ADMIN = 'Only Team Admins manage the invoice template.'
+
+const CRC = Array.from({ length: 256 }, (_, n) => {
+	let c = n
+	for (let k = 0; k < 8; k++) {
+		c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+	}
+	return c >>> 0
+})
+function crc32(buf) {
+	let c = 0xffffffff
+	for (const b of buf) {
+		c = CRC[(c ^ b) & 0xff] ^ (c >>> 8)
+	}
+	return (c ^ 0xffffffff) >>> 0
+}
+
+/** A ZIP with stored (uncompressed) entries – enough for a Word document; node has no ZIP writer. */
+export function storedZip(entries) {
+	const parts = []
+	const central = []
+	let offset = 0
+	for (const [name, content] of Object.entries(entries)) {
+		const n = Buffer.from(name)
+		const data = Buffer.isBuffer(content) ? content : Buffer.from(content)
+		const crc = crc32(data)
+		const local = Buffer.alloc(30)
+		local.writeUInt32LE(0x04034b50, 0)
+		local.writeUInt16LE(20, 4)
+		local.writeUInt32LE(crc, 14)
+		local.writeUInt32LE(data.length, 18)
+		local.writeUInt32LE(data.length, 22)
+		local.writeUInt16LE(n.length, 26)
+		const dir = Buffer.alloc(46)
+		dir.writeUInt32LE(0x02014b50, 0)
+		dir.writeUInt16LE(20, 4)
+		dir.writeUInt16LE(20, 6)
+		dir.writeUInt32LE(crc, 16)
+		dir.writeUInt32LE(data.length, 20)
+		dir.writeUInt32LE(data.length, 24)
+		dir.writeUInt16LE(n.length, 28)
+		dir.writeUInt32LE(offset, 42)
+		parts.push(local, n, data)
+		central.push(dir, n)
+		offset += 30 + n.length + data.length
+	}
+	const cd = Buffer.concat(central)
+	const end = Buffer.alloc(22)
+	end.writeUInt32LE(0x06054b50, 0)
+	end.writeUInt16LE(Object.keys(entries).length, 8)
+	end.writeUInt16LE(Object.keys(entries).length, 10)
+	end.writeUInt32LE(cd.length, 12)
+	end.writeUInt32LE(offset, 16)
+	return Buffer.concat([...parts, cd, end])
+}
+
+/** A minimal Word document; `pad` bytes more make it large. */
+export function docx(text = 'Invoice {number}', pad = 0) {
+	const entries = {
+		'[Content_Types].xml': '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+		'word/document.xml': `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`,
+	}
+	if (pad > 0) {
+		entries['word/media/pad.bin'] = Buffer.alloc(pad, 7)
+	}
+	return storedZip(entries)
+}
+
+const put = (who, name, bytes) => ocs(who, 'PUT', BASE, { name, base64: Buffer.from(bytes).toString('base64') })
+const auth = (who) => ({ 'OCS-APIRequest': 'true', Accept: 'application/json', Authorization: 'Basic ' + Buffer.from(`${who.user}:${who.pass}`).toString('base64') })
+
+/** The team ZIP as bytes (ocs() reads text). */
+async function exportZip(id) {
+	const res = await fetch(`${NC}${API}/admin/teams/${id}/export`, { headers: auth(ADMIN) })
+	return { status: res.status, zip: Buffer.from(await res.arrayBuffer()) }
+}
+
+/** Preview of a team ZIP for team `id`: multipart field `file`. */
+async function preview(id, zip) {
+	const form = new FormData()
+	form.append('file', new Blob([zip], { type: 'application/zip' }), 'team.zip')
+	const res = await fetch(`${NC}${API}/admin/teams/${id}/import/preview`, { method: 'POST', headers: auth(ADMIN), body: form })
+	const json = await res.json().catch(() => null)
+	return { status: res.status, data: json?.ocs?.data ?? null }
+}
+
+/**
+ * A team of its own: export with the template, import with merge (the
+ * younger one here stays) and replace (the backup's wins), delete (the
+ * template goes, a ZIP is kept first).
+ */
+async function teamZip() {
+	head('Invoice template: team ZIP and deleting the team (own test team)')
+	const group = `tv-${RUN}-t`
+	const uid = `tv${RUN}`
+	const TA = { user: uid, pass: `Test-2026-${uid}!` }
+	const older = docx('From the backup')
+	const younger = docx('Changed since')
+	await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/groups', { groupid: group })
+	await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/users', { userid: uid, password: TA.pass, groups: [group] })
+	await ocs(ADMIN, 'POST', `/ocs/v2.php/cloud/users/${uid}/subadmins`, { groupid: group })
+	const name = `Template Test ${RUN}`
+	let id
+	try {
+		const made = await ocs(ADMIN, 'POST', '/admin/teams', { name, slug: `tv-${RUN}`, groups: { team: group } })
+		id = made.data?.id
+		expect('team created', made, 200)
+		expect('its Team Admin uploads a template', await put(TA, 'Backup.docx', older), 200)
+		const exp = await exportZip(id)
+		check('export → 200', exp.status === 200, exp.zip.toString('utf8', 0, 200))
+		check('… holds templates/invoice.docx and templates/invoice.json',
+			exp.zip.includes('templates/invoice.docx') && exp.zip.includes('templates/invoice.json'))
+		await new Promise((r) => setTimeout(r, 1100))
+		expect('… then a younger one', await put(TA, 'Younger.docx', younger), 200)
+
+		const p1 = await preview(id, exp.zip)
+		check('preview names the template', p1.status === 200 && p1.data?.template?.name === 'Backup.docx' && p1.data?.template?.sha256 === sha256(older), p1.data?.template ?? p1.data)
+		const merge = await ocs(ADMIN, 'POST', `/admin/teams/${id}/import`, { token: p1.data?.token, mode: 'merge', mapping: {} })
+		expect('import with merge', merge, 200)
+		check('… keeps the younger one here', JSON.stringify(merge.data?.template) === JSON.stringify({ name: 'Backup.docx', stored: false, reason: 'kept_existing' }), merge.data?.template)
+		check('… info unchanged', (await ocs(TA, 'GET', `${BASE}/info`)).data?.sha256 === sha256(younger))
+
+		const p2 = await preview(id, exp.zip)
+		const replace = await ocs(ADMIN, 'POST', `/admin/teams/${id}/import`, { token: p2.data?.token, mode: 'replace', mapping: {} })
+		expect('import with replace', replace, 200)
+		check('… stores the backup’s', JSON.stringify(replace.data?.template) === JSON.stringify({ name: 'Backup.docx', stored: true }), replace.data?.template)
+		check('… a ZIP of the team kept first (the template counts as content)', typeof replace.data?.pre_backup?.protected === 'string', replace.data?.pre_backup)
+		const info = await ocs(TA, 'GET', `${BASE}/info`)
+		check('… info: the backup’s file, name and author', info.data?.sha256 === sha256(older) && info.data?.name === 'Backup.docx' && info.data?.modified_by === uid, info.data)
+
+		const del = await ocs(ADMIN, 'DELETE', `/admin/teams/${id}`, { confirm: name })
+		expect('deleting the team', del, 200)
+		check('… keeps a ZIP first (only a template is content too)', typeof del.data?.backup?.protected === 'string', del.data)
+		if (del.status === 200) {
+			const files = sql(`SELECT COUNT(*) FROM oc_filecache WHERE path LIKE 'appdata\_%/timesister/templates/t${id}/%'`)
+			if (files === null) {
+				console.log('    (without TS_SQL the template folder of the deleted team is not looked at)')
+			} else {
+				check('… and its template folder is gone (TS_SQL)', files === '0', files)
+			}
+			id = undefined
+		}
+	} finally {
+		if (id) {
+			await ocs(ADMIN, 'DELETE', `/admin/teams/${id}`, { confirm: name })
+		}
+		await ocs(ADMIN, 'DELETE', `/ocs/v2.php/cloud/users/${uid}`)
+		await ocs(ADMIN, 'DELETE', `/ocs/v2.php/cloud/groups/${group}`)
+	}
+}
+
+export async function vorlagen() {
+	const before = await ocs(A, 'GET', BASE)
+	const first = docx('Rechnung {number}')
+	const second = docx('Invoice {nr} v2')
+	try {
+		head('Invoice template: capability and rights')
+		{
+			const cap = await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')
+			check('capability invoice_template: 1', cap.data?.capabilities?.timesister?.invoice_template === 1, cap.data?.capabilities?.timesister)
+			check('the team’s template read before (200 or 404)', [200, 404].includes(before.status), before.text.slice(0, 200))
+			for (const [who, role] of [[U1, 'Member'], [L, 'Lead']]) {
+				const info = await ocs(who, 'GET', `${BASE}/info`)
+				expect(`${role} reads the info`, info, 403, 'forbidden')
+				check('… with the message', info.data?.message === NOT_ADMIN, info.data)
+				expect(`${role} downloads it`, await ocs(who, 'GET', BASE), 403, 'forbidden')
+				expect(`${role} uploads one`, await put(who, 'Rechnung.docx', first), 403, 'forbidden')
+				expect(`${role} deletes it`, await ocs(who, 'DELETE', BASE), 403, 'forbidden')
+			}
+			// The account language decides.
+			const userPath = '/ocs/v2.php/cloud/users/pbuser1'
+			const langBefore = (await ocs(ADMIN, 'GET', userPath)).data?.language || 'en'
+			try {
+				await ocs(ADMIN, 'PUT', userPath, { key: 'language', value: 'de' })
+				const de = await ocs(U1, 'GET', `${BASE}/info`, undefined, { lang: 'de' })
+				check('… in German', de.data?.message === 'Die Rechnungsvorlage verwalten nur Team Admins.', de.data)
+			} finally {
+				await ocs(ADMIN, 'PUT', userPath, { key: 'language', value: langBefore })
+			}
+		}
+
+		head('Invoice template: upload, info, download, replace')
+		{
+			expect('Team Admin starts without one', await ocs(A, 'DELETE', BASE), 200)
+			const none = await ocs(A, 'GET', `${BASE}/info`)
+			expect('info without a template', none, 404, 'not_found')
+			check('… with the message', none.data?.message === 'The team has no invoice template.', none.data)
+			expect('download without a template', await ocs(A, 'GET', BASE), 404, 'not_found')
+
+			const r = await put(A, 'Rechnung.docx', first)
+			expect('Team Admin uploads Rechnung.docx', r, 200)
+			check('… answers name, size, sha256, modified_at, modified_by',
+				r.data?.name === 'Rechnung.docx' && r.data?.size === first.length && r.data?.sha256 === sha256(first)
+				&& ISO.test(r.data?.modified_at || '') && r.data?.modified_by === 'pbadmin' && Object.keys(r.data).length === 5, r.data)
+			const info = await ocs(A, 'GET', `${BASE}/info`)
+			expect('info', info, 200)
+			check('… the same as the upload answered', JSON.stringify(info.data) === JSON.stringify(r.data), [info.data, r.data])
+			const got = await ocs(V, 'GET', BASE)
+			expect('the second Team Admin downloads it', got, 200)
+			const bytes = Buffer.from(got.data?.base64 || '', 'base64')
+			check('… the same bytes', bytes.equals(first) && got.data?.sha256 === sha256(bytes), got.data?.sha256)
+			check('… with the info fields', got.data?.name === 'Rechnung.docx' && got.data?.modified_by === 'pbadmin', isObj(got.data) ? Object.keys(got.data) : got.data)
+			expect('another team has none', await ocs(AA, 'GET', `${BASE}/info`), 404, 'not_found')
+
+			const r2 = await put(V, 'Rechnung V2.DOCX', second)
+			expect('the second Team Admin replaces it (.DOCX)', r2, 200)
+			const info2 = await ocs(A, 'GET', `${BASE}/info`)
+			check('info shows the new one', info2.data?.name === 'Rechnung V2.DOCX' && info2.data?.sha256 === sha256(second) && info2.data?.modified_by === 'pbverw', info2.data)
+		}
+
+		head('Invoice template: refused')
+		{
+			const bad = async (name, r, status, error, message) => {
+				expect(name, r, status, error)
+				check(`… “${message}”`, r.data?.message === message, r.data?.message)
+			}
+			await bad('not ending in .docx', await put(A, 'Rechnung.pdf', first), 422, 'invalid', '“name” must be a file name of 1 to 200 characters ending in .docx.')
+			await bad('a name of 201 characters', await put(A, `${'a'.repeat(196)}.docx`, first), 422, 'invalid', '“name” must be a file name of 1 to 200 characters ending in .docx.')
+			await bad('a text file named .docx', await put(A, 'Rechnung.docx', Buffer.from('Dear customer, …')), 422, 'invalid', NOT_WORD)
+			await bad('a PDF named .docx', await put(A, 'Rechnung.docx', Buffer.from('%PDF-1.7\n%âãÏÓ\n')), 422, 'invalid', NOT_WORD)
+			await bad('a ZIP without word/document.xml', await put(A, 'Rechnung.docx', storedZip({ 'xl/workbook.xml': '<workbook/>' })), 422, 'invalid',
+				'The template is not a Word document: “word/document.xml” is missing.')
+			await bad('base64 not Base64', await ocs(A, 'PUT', BASE, { name: 'Rechnung.docx', base64: 'not base64!' }), 422, 'invalid', '“base64” is not valid Base64.')
+			await bad('base64 missing', await ocs(A, 'PUT', BASE, { name: 'Rechnung.docx' }), 422, 'invalid', '“base64” is missing.')
+			await bad('name missing', await ocs(A, 'PUT', BASE, { base64: first.toString('base64') }), 422, 'invalid', '“name” is missing.')
+			await bad('10 MB and one byte', await put(A, 'Big.docx', Buffer.concat([first, Buffer.alloc(MB10 + 1 - first.length)])), 413, 'too_large', TOO_LARGE)
+			await bad('11 MB (beyond the body limit)', await put(A, 'Big.docx', Buffer.concat([first, Buffer.alloc(11 * 1024 * 1024 - first.length)])), 413, 'too_large', TOO_LARGE)
+			const still = await ocs(A, 'GET', `${BASE}/info`)
+			check('the stored one unchanged', still.data?.sha256 === sha256(second), still.data)
+		}
+
+		head('Invoice template: nearly 10 MB')
+		{
+			const big = docx('Big', MB10 - 1200)
+			check('the test file is just under 10 MB', big.length <= MB10 && big.length > MB10 - 2000, big.length)
+			const r = await put(A, 'Gross.docx', big)
+			expect('Team Admin uploads it (≈ 13.4 MB of JSON)', r, 200)
+			check('… size and checksum', r.data?.size === big.length && r.data?.sha256 === sha256(big), r.data)
+			const got = await ocs(A, 'GET', BASE)
+			expect('download', got, 200)
+			check('… the same bytes', Buffer.from(got.data?.base64 || '', 'base64').equals(big))
+			expect('back to the small one', await put(A, 'Rechnung V2.DOCX', second), 200)
+		}
+
+		await teamZip()
+
+		head('Invoice template: delete')
+		{
+			const d = await ocs(A, 'DELETE', BASE)
+			expect('Team Admin deletes it', d, 200)
+			check('… { deleted: true }', d.data?.deleted === true, d.data)
+			expect('info afterwards', await ocs(A, 'GET', `${BASE}/info`), 404, 'not_found')
+			expect('download afterwards', await ocs(A, 'GET', BASE), 404, 'not_found')
+			const again = await ocs(A, 'DELETE', BASE)
+			check('deleting again → 200 { deleted: false }', again.status === 200 && again.data?.deleted === false, again.data)
+		}
+	} finally {
+		head('Invoice template: cleaning up')
+		if (before.status === 200) {
+			const back = await ocs(A, 'PUT', BASE, { name: before.data.name, base64: before.data.base64 })
+			expect('the team’s template put back', back, 200)
+			check('… the same bytes', back.data?.sha256 === before.data.sha256, back.data)
+		} else {
+			expect('no template left', await ocs(A, 'DELETE', BASE), 200)
+		}
+	}
+}

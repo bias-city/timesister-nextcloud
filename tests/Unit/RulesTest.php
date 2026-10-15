@@ -71,16 +71,9 @@ class RulesTest extends TestCase {
 		]);
 		$this->assertSame(gmmktime(8, 15, 0, 9, 26, 2026), $v['last_sync']);
 		$this->assertSame('0.2.0', $v['app_version']);
-		$this->assertSame(['app_version' => null, 'last_sync' => null, 'last_backup' => null, 'calendar_url' => null, 'calendar_shared' => null, 'applied_shares' => null], StatusRules::validate([]));
-		$this->assertSame(['lea' => 'read', 'petra' => 'write'], StatusRules::validate(['applied_shares' => [['uid' => 'petra', 'access' => 'write'], ['uid' => 'lea', 'access' => 'read']]])['applied_shares']);
-		$this->assertSame([], StatusRules::validate(['applied_shares' => []])['applied_shares']);
-		foreach ([['uid' => 'lea'], [['uid' => 'lea', 'access' => 'admin']], [['uid' => '', 'access' => 'read']], 'lea', ['x' => ['uid' => 'lea', 'access' => 'read']]] as $bad) {
-			$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['applied_shares' => $bad])), json_encode($bad));
-		}
-		$this->assertTrue(StatusRules::validate(['calendar_shared' => true])['calendar_shared']);
-		$this->assertFalse(StatusRules::validate(['calendar_shared' => false])['calendar_shared']);
-		$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['calendar_shared' => 1])));
-		$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['calendar_shared' => 'true'])));
+		$this->assertSame(['app_version' => null, 'last_sync' => null, 'last_backup' => null, 'calendar_url' => null, 'projects' => null], StatusRules::validate([]));
+		// 0.17.0: `calendar_shared` and `applied_shares` (shares matrix) are no longer fields; unknown keys are ignored.
+		$this->assertNull(StatusRules::validate(['calendar_shared' => 1, 'applied_shares' => 'x'])['app_version']);
 		$this->assertSame(gmmktime(6, 15, 0, 9, 26, 2026), StatusRules::validate(['last_sync' => '2026-09-26T08:15:00+02:00'])['last_sync']);
 		$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['calendar_url' => 'javascript:alert(1)'])));
 		$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['calendar_url' => 'file:///etc/passwd'])));
@@ -89,6 +82,22 @@ class RulesTest extends TestCase {
 		$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['last_backup' => '2026-13-01'])));
 		$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['app_version' => str_repeat('1', 33)])));
 		$this->assertSame('422 invalid', self::code(fn () => StatusRules::validate(['app_version' => '<b>'])));
+	}
+
+	/** `projects` (0.12.0): a list of keys, without duplicates and sorted; anything else 400. */
+	public function testStatusProjects(): void {
+		$this->assertSame(['P-1', 'P-2', 'P10'], StatusRules::validate(['projects' => ['P10', 'P-2', 'P-1', 'P-2']])['projects']);
+		$this->assertSame([], StatusRules::validate(['projects' => []])['projects']);
+		$this->assertNull(StatusRules::validate(['projects' => null])['projects']);
+		$this->assertSame([str_repeat('k', 64)], StatusRules::validate(['projects' => [str_repeat('k', 64)]])['projects']);
+		$this->assertCount(500, StatusRules::validate(['projects' => array_map(static fn (int $i) => "p$i", range(1, 500))])['projects']);
+		$bad = [
+			'P-1', ['P-1' => 'x'], [''], [str_repeat('k', 65)], ["a\nb"], ["tab\t"], ["del\x7F"], [1], [null], [['P-1']],
+			array_map(static fn (int $i) => "p$i", range(1, 501)),
+		];
+		foreach ($bad as $i => $in) {
+			$this->assertSame('400 invalid', self::code(fn () => StatusRules::validate(['projects' => $in])), "case $i");
+		}
 	}
 
 	public function testTeam(): void {
@@ -114,14 +123,13 @@ class RulesTest extends TestCase {
 	}
 
 	public function testTeamSettings(): void {
-		$this->assertSame(['leads_see_calendars' => true, 'backup_required' => false], TeamRules::SETTINGS, 'default values');
+		$this->assertSame(['backup_required' => false], TeamRules::SETTINGS, 'default values');
 		$this->assertSame([], TeamRules::settings(['name' => 'x']), 'missing: unchanged');
 		$this->assertSame([], TeamRules::settings(['settings' => null]));
 		$this->assertSame([], TeamRules::settings(['settings' => []]));
 		$this->assertSame(['backup_required' => true], TeamRules::settings(['settings' => ['backup_required' => true]]));
-		$this->assertSame(['leads_see_calendars' => false, 'backup_required' => false],
-			TeamRules::settings(['settings' => ['leads_see_calendars' => false, 'backup_required' => false]]));
-		$this->assertSame('422 invalid', self::code(fn () => TeamRules::settings(['settings' => ['leads_see_calendars' => 1]])));
+		// 0.17.0: `leads_see_calendars` (shares matrix) is no longer a setting.
+		$this->assertSame('422 invalid', self::code(fn () => TeamRules::settings(['settings' => ['leads_see_calendars' => false]])));
 		$this->assertSame('422 invalid', self::code(fn () => TeamRules::settings(['settings' => ['backup_required' => 'true']])));
 		$this->assertSame('422 invalid', self::code(fn () => TeamRules::settings(['settings' => ['unbekannt' => true]])));
 		$this->assertSame('422 invalid', self::code(fn () => TeamRules::settings(['settings' => [true]])));

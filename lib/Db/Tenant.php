@@ -24,10 +24,12 @@ use OCP\DB\Types;
  * @method void setBrokenAt(?int $brokenAt)
  * @method string|null getBackupOwner()
  * @method void setBackupOwner(?string $backupOwner)
- * @method int getLeadsSeeCalendars()
- * @method void setLeadsSeeCalendars(int $leadsSeeCalendars)
  * @method int getBackupRequired()
  * @method void setBackupRequired(int $backupRequired)
+ * @method int getEntriesRevision()
+ * @method void setEntriesRevision(int $entriesRevision)
+ * @method string|null getEntriesSince()
+ * @method void setEntriesSince(?string $entriesSince)
  */
 final class Tenant extends Entity {
 	protected string $name = '';
@@ -37,9 +39,13 @@ final class Tenant extends Entity {
 	protected ?int $brokenAt = null;
 	/** Chosen backup owner; null: the first admin by identifier. */
 	protected ?string $backupOwner = null;
-	/** Team settings (API version 1.2), 0 or 1. */
+	/** Column of the former setting `leads_see_calendars` (shares matrix, removed in 0.17.0); unused, kept because the table keeps it. */
 	protected int $leadsSeeCalendars = 1;
+	/** Team setting (API version 1.2), 0 or 1. */
 	protected int $backupRequired = 0;
+	/** Time entries (0.17.0): the revision counter and the stored cutoff (null: default). */
+	protected int $entriesRevision = 0;
+	protected ?string $entriesSince = null;
 
 	public function __construct() {
 		$this->addType('name', Types::STRING);
@@ -50,5 +56,7 @@ final class Tenant extends Entity {
 		$this->addType('backupOwner', Types::STRING);
 		$this->addType('leadsSeeCalendars', Types::SMALLINT);
 		$this->addType('backupRequired', Types::SMALLINT);
+		$this->addType('entriesRevision', Types::INTEGER);
+		$this->addType('entriesSince', Types::STRING);
 	}
 }

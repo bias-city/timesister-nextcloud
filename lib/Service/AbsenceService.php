@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
+use OCA\DAV\CalDAV\CalDavBackend;
 use OCA\TimeSister\AppInfo\Application;
 use OCA\TimeSister\Db\AbsenceMapper;
 use OCA\TimeSister\Db\Record;
@@ -133,17 +134,47 @@ final class AbsenceService {
 		}
 		$plan = AbsenceRules::plan($rows, AbsenceRules::kinds($settings), $names, $optedOut, $existing, $labels);
 		$stamp = gmdate('Ymd\THis\Z', $this->time->getTime());
-		foreach ($plan['write'] as $r) {
-			$name = $names[$r['uid']] ?? AbsenceRules::personName($this->personOf($r['uid'], $persons), $r['uid']);
-			$cal->createFromString(AbsenceRules::objectName(AbsenceRules::eventUid($r['uid'], $r['source_uid'], $r['kind'])),
-				AbsenceRules::ics($r, $labels[$r['kind']] ?? $r['kind'], $name, $stamp));
+		$n = ['written' => 0, 'cancelled' => 0];
+		foreach (['write' => false, 'cancel' => true] as $part => $cancelled) {
+			foreach ($plan[$part] as $r) {
+				$name = $names[$r['uid']] ?? AbsenceRules::personName($this->personOf($r['uid'], $persons), $r['uid']);
+				$object = AbsenceRules::objectName(AbsenceRules::eventUid($r['uid'], $r['source_uid'], $r['kind']));
+				// One entry that fails must not stop the others.
+				try {
+					$this->put($cal, $object, AbsenceRules::ics($r, $labels[$r['kind']] ?? $r['kind'], $name, $stamp, $cancelled));
+					$n[$cancelled ? 'cancelled' : 'written']++;
+				} catch (\Throwable $e) {
+					$this->logger->warning('TimeSister: vacation calendar entry {object} of team {team} not written', [
+						'app' => 'timesister', 'team' => $tenantId, 'object' => $object, 'exception' => $e,
+					]);
+				}
+			}
 		}
-		foreach ($plan['cancel'] as $r) {
-			$name = AbsenceRules::personName($this->personOf($r['uid'], $persons), $r['uid']);
-			$cal->createFromString(AbsenceRules::objectName(AbsenceRules::eventUid($r['uid'], $r['source_uid'], $r['kind'])),
-				AbsenceRules::ics($r, $labels[$r['kind']] ?? $r['kind'], $name, $stamp, true));
+		return $n;
+	}
+
+	/**
+	 * Create or replace one object. `createFromString` only creates – an
+	 * existing object (a changed span, a cancellation) is a conflict there –
+	 * so an existing one is updated through the CalDAV backend.
+	 */
+	private function put(ICreateFromString&ICalendarExport $cal, string $object, string $ics): void {
+		$backend = $this->backend();
+		$id = (int)$cal->getKey();
+		if ($backend !== null && $id > 0 && $backend->getCalendarObject($id, $object) !== null) {
+			$backend->updateCalendarObject($id, $object, $ics);
+			return;
 		}
-		return ['written' => count($plan['write']), 'cancelled' => count($plan['cancel'])];
+		$cal->createFromString($object, $ics);
+	}
+
+	/** The CalDAV backend of the dav app, or null if it is not there. */
+	private function backend(): ?CalDavBackend {
+		try {
+			return \OCP\Server::get(CalDavBackend::class);
+		} catch (\Throwable) {
+			return null;
+		}
 	}
 
 	/** The owner's calendar by URI – writable and exportable, or null. */

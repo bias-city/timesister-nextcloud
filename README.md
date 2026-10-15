@@ -3,8 +3,9 @@
 Server side of the TimeSister time tracker (macOS): master data as
 versioned records, separate teams via one Nextcloud group each (roles
 Team Admin, Lead and User; Team Admins are that group's group admins),
-a shares matrix for the time calendars, Jobs (shares of a project or work
-package offered to people of the team), permission checks on the server, history, calendar backups and status
+the team's time entries read from the members' named calendars and feeds
+(0.17.0; no calendar shares), Jobs (shares of a project or work package
+offered to people of the team), permission checks on the server, history, calendar backups and status
 reports from clients. No UI apart from an admin settings section.
 API: [`docs/API.md`](docs/API.md).
 
@@ -16,6 +17,9 @@ API: [`docs/API.md`](docs/API.md).
 | Team, role, permissions, checks, conflicts | `lib/Service` (pure classes without Nextcloud: `AccessPolicy`, `MembershipResolver`, `ProjectAccess`, `RecordValidator`, `VersionCheck`, `*Rules`) |
 | App roles and leaving (API version 2) | `MemberService`, table `ts_members` |
 | Jobs: rules, transitions, who sees, notifications | `JobRules`, `JobFlow` (pure), `JobAccess`, `JobService`, `JobNotifications`, `JobMessages`, `JobWord`; records of kind `job` |
+| Invoices: content, Lead rule, number pattern, counter | `InvoiceRules`, `InvoiceNumbering` (pure), `InvoiceService`, `CounterMapper` (table `ts_counters`); records of kind `invoice` |
+| Quotes: content with budget, Lead rule (`leads` or led project) | `QuoteRules` (pure); records of kind `quote` |
+| Invoice template (one Word file per team) | `InvoiceTemplateRules` (pure), `InvoiceTemplateService`, `InvoiceTemplateStore` (app data `templates/t<team>/`), `TemplateController` |
 | Tables `ts_*`, mappers | `lib/Db`, `lib/Migration` |
 | Admin page | `lib/Settings`, `templates/admin.php`, `js/admin.js`, `css/admin.css` |
 | Translations (admin page, API messages) | `l10n/de.json` (informal German, "du"), `l10n/de_DE.json` (formal, "Sie") |

@@ -53,7 +53,7 @@ class TeamDeleteTest extends TestCase {
 
 			protected function countContent(int $id): array {
 				$this->steps->append('count');
-				return $this->content ? ['records' => 57, 'backups' => 1] : ['records' => 0, 'backups' => 0];
+				return $this->content ? ['records' => 57, 'backups' => 1, 'templates' => 0] : ['records' => 0, 'backups' => 0, 'templates' => 0];
 			}
 
 			protected function keep(Tenant $t): array {
@@ -131,6 +131,7 @@ class TeamDeleteTest extends TestCase {
 		$this->assertFalse(TeamDeleteRules::hasContent(0, 0));
 		$this->assertTrue(TeamDeleteRules::hasContent(1, 0), 'a tombstone counts');
 		$this->assertTrue(TeamDeleteRules::hasContent(0, 1), 'a backup counts');
+		$this->assertTrue(TeamDeleteRules::hasContent(0, 0, 1), 'an invoice template counts');
 		$this->assertSame(
 			['id' => 3, 'deleted' => true, 'backup' => null, 'counts' => ['records' => 0]],
 			TeamDeleteRules::answer(3, null, ['records' => 0]),

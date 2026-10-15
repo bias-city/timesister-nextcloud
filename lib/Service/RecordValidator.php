@@ -14,7 +14,7 @@ namespace OCA\TimeSister\Service;
  * of identifiers, size.
  */
 final class RecordValidator {
-	public const KINDS = ['person', 'region', 'project', 'customer', 'setting', 'job', 'billing'];
+	public const KINDS = ['person', 'region', 'project', 'customer', 'setting', 'job', 'billing', BookingRules::REPORT, BookingRules::MARK, InvoiceRules::KIND, QuoteRules::KIND];
 	/** Jobs (0.6.0): readable as records, written only through /jobs. */
 	public const JOB = 'job';
 	/** Billing marks (0.7.6): rights per person, see {@see BillingRules}. */
@@ -71,16 +71,33 @@ final class RecordValidator {
 		if ($kind === 'setting' && $key === PrivacyRules::KEY) {
 			PrivacyRules::validate($data);
 		}
+		if ($kind === 'setting' && $key === 'settings' && property_exists($data, InvoiceNumbering::FIELD)) {
+			InvoiceNumbering::validate($data->{InvoiceNumbering::FIELD});
+		}
+		if ($kind === 'setting' && $key === 'settings' && property_exists($data, IssuerRules::FIELD)) {
+			IssuerRules::validate($data->{IssuerRules::FIELD});
+		}
 		if ($kind === 'person') {
 			if (!isset($data->login) || !is_string($data->login) || $data->login !== $key) {
 				throw ApiException::invalid('For a person, “login” must equal the key.');
 			}
+			PersonRules::validate($data);
 		} elseif (in_array($kind, self::ID_KINDS, true)) {
 			if (!isset($data->id) || !is_string($data->id) || $data->id !== $key) {
 				throw ApiException::invalid('The field “id” must equal the key.');
 			}
+			// Codes (one per project, none for a quote), status, team, currency, rate.
+			if ($kind === 'project') {
+				ProjectRules::validate($data);
+			}
 		} elseif ($kind === self::BILLING) {
 			BillingRules::validate($key, $data);
+		} elseif (BookingRules::isKind($kind)) {
+			BookingRules::validate($kind, $key, $data);
+		} elseif ($kind === InvoiceRules::KIND) {
+			InvoiceRules::validate($data);
+		} elseif ($kind === QuoteRules::KIND) {
+			QuoteRules::validate($key, $data);
 		}
 		$accounts = [];
 		if ($kind === 'person' && property_exists($data, 'accounts') && $data->accounts !== null) {
@@ -91,8 +108,19 @@ final class RecordValidator {
 		} catch (\JsonException) {
 			throw ApiException::invalid('“data” cannot be stored as JSON.');
 		}
-		if (strlen($json) > self::MAX_DATA_BYTES) {
-			throw ApiException::tooLarge('A record may be at most 256 KB.');
+		$max = match ($kind) {
+			BookingRules::REPORT => BookingRules::MAX_BYTES,
+			InvoiceRules::KIND => InvoiceRules::MAX_BYTES,
+			QuoteRules::KIND => QuoteRules::MAX_BYTES,
+			default => self::MAX_DATA_BYTES,
+		};
+		if (strlen($json) > $max) {
+			throw match ($kind) {
+				BookingRules::REPORT => ApiException::tooLarge('A booking report may be at most 768 KB.'),
+				InvoiceRules::KIND => ApiException::tooLarge('An invoice may be at most 768 KB.'),
+				QuoteRules::KIND => ApiException::tooLarge('A quote may be at most 768 KB.'),
+				default => ApiException::tooLarge('A record may be at most 256 KB.'),
+			};
 		}
 		return ['json' => $json, 'accounts' => $accounts];
 	}

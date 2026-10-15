@@ -34,7 +34,8 @@ export const TEAMS = [
 ]
 /**
  * Account, display name, team, role. All are in the team group; admin
- * (Team Admin) is the team group's group admin, lead is an app role.
+ * (Team Admin) is the team group's group admin, lead follows from the
+ * team's seed project (0.11.0, {@link seedProjectOf}).
  * pbverw, until 0.4.0 the Manager, is pb's second Team Admin.
  */
 export const ACCOUNTS = [
@@ -50,6 +51,8 @@ export const ACCOUNTS = [
 
 /** A team's team group. */
 export const teamGroupOf = (prefix) => `${prefix}-team`
+/** The seed project whose `leads` make the team's Leads (seed.mjs). */
+export const seedProjectOf = (prefix) => `seed-lead-${prefix}`
 /** `groups` as in /me, /team and /admin/teams. */
 export const groupsOf = (prefix) => ({ team: teamGroupOf(prefix) })
 
@@ -120,4 +123,50 @@ export async function dav(who, method, path, body, headers = {}) {
 		body,
 	})
 	return { status: res.status, text: await res.text() }
+}
+
+/** Path of an account's calendar `zeit-<uid>` under /remote.php/dav. */
+export const timeCalendarPath = (uid) => `calendars/${encodeURIComponent(uid)}/zeit-${encodeURIComponent(uid)}/`
+
+/**
+ * Makes sure the time calendar `zeit-<uid>` exists (MKCALENDAR when it is
+ * missing – the Mac app creates it otherwise). Returns true when it is there.
+ */
+export async function ensureTimeCalendar(who) {
+	const cal = timeCalendarPath(who.user)
+	if ((await dav(who, 'PROPFIND', cal, undefined, { Depth: '0' })).status === 207) {
+		return true
+	}
+	return (await dav(who, 'MKCALENDAR', cal)).status === 201
+}
+
+/**
+ * Writes one VEVENT into the account's time calendar through CalDAV
+ * (object `<uid>.ics`). `lines` are the properties after UID and DTSTAMP.
+ * @returns {Promise<number>} HTTP status (201 created, 204 updated)
+ */
+export async function putEvent(who, uid, lines) {
+	const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//TimeSister//Integration//EN', 'BEGIN:VEVENT',
+		`UID:${uid}`, 'DTSTAMP:20260901T080000Z', ...lines, 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n')
+	const r = await dav(who, 'PUT', `${timeCalendarPath(who.user)}${encodeURIComponent(uid)}.ics`, ics, { 'Content-Type': 'text/calendar; charset=utf-8' })
+	return r.status
+}
+
+/** Deletes the object `<uid>.ics` from the account's time calendar. @returns {Promise<number>} HTTP status */
+export async function deleteEvent(who, uid) {
+	return (await dav(who, 'DELETE', `${timeCalendarPath(who.user)}${encodeURIComponent(uid)}.ics`)).status
+}
+
+/** Forces one run of an app job by class name; false without TS_OCC. */
+export function runJob(name) {
+	const list = occ('background-job:list', `--class=OCA\\TimeSister\\BackgroundJob\\${name}`, '--output=json')
+	if (list === null) {
+		return false
+	}
+	const id = JSON.parse(list)[0]?.id
+	if (id === undefined) {
+		return false
+	}
+	occ('background-job:execute', String(id), '--force-execute')
+	return true
 }

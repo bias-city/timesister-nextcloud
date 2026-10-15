@@ -15,8 +15,8 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * The privacy notice (0.10.2): the nine sections, placeholders for empty
- * fields, escaping in the HTML, Leads with their projects, the shares
- * matrix, the legal basis by selection and the modules.
+ * fields, escaping in the HTML, Leads with their projects, the legal basis
+ * by selection and the modules.
  */
 class PrivacyNoticeTest extends TestCase {
 	/** @return array<string,mixed> facts as PrivacyFacts::collect() returns them */
@@ -33,11 +33,6 @@ class PrivacyNoticeTest extends TestCase {
 			],
 			'admins' => ['Petra Brunner'],
 			'leads' => [['uid' => 'pblead', 'name' => 'Lea Planer', 'projects' => ['Jobprobe', 'Teamkapazität']]],
-			'matrix' => [
-				['uid' => 'pbadmin', 'name' => 'Petra Brunner', 'role' => 'admin', 'sees' => ['Lea Planer', 'Mia Muster'], 'edits' => ['Lea Planer', 'Mia Muster']],
-				['uid' => 'pblead', 'name' => 'Lea Planer', 'role' => 'lead', 'sees' => ['Mia Muster'], 'edits' => []],
-				['uid' => 'pbuser1', 'name' => 'Mia Muster', 'role' => 'user', 'sees' => [], 'edits' => []],
-			],
 			'backup_owner' => ['uid' => 'pbadmin', 'name' => 'Petra Brunner'],
 			'consents' => ['yes' => 2, 'no' => 1],
 			'modules' => ['jobs' => true, 'budgets' => false, 'customers' => true],
@@ -126,23 +121,32 @@ class PrivacyNoticeTest extends TestCase {
 	}
 
 	public function testMarkdownTableCellsEscapePipesAndLineBreaks(): void {
-		$md = PrivacyFormat::markdown(self::doc(['matrix' => [
-			['uid' => 'x', 'name' => "Max | Moritz\nZwei", 'role' => 'user', 'sees' => [], 'edits' => []],
+		$md = PrivacyFormat::markdown(self::doc(['leads' => [
+			['uid' => 'x', 'name' => "Max | Moritz\nZwei", 'projects' => []],
 		]]));
-		$this->assertStringContainsString('| Max \\| Moritz Zwei | User | – | – |', $md);
+		$this->assertStringContainsString('| Max \\| Moritz Zwei | – |', $md);
 	}
 
-	public function testLeadsAndMatrixAreListed(): void {
+	public function testLeadsAreListed(): void {
 		$md = PrivacyFormat::markdown(self::doc());
 		$this->assertStringContainsString('| Lead | Projects |', $md);
 		$this->assertStringContainsString('| Lea Planer | Jobprobe, Teamkapazität |', $md);
-		$this->assertStringContainsString('| Person | Role | sees the time calendar of | edits the time calendar of |', $md);
-		$this->assertStringContainsString('| Petra Brunner | Team Admin | Lea Planer, Mia Muster | Lea Planer, Mia Muster |', $md);
-		$this->assertStringContainsString('| Lea Planer | Lead | Mia Muster | – |', $md);
-		$this->assertStringContainsString('| Mia Muster | User | – | – |', $md);
+		// 0.17.0: no shares matrix any more – no table of who sees whose calendar.
+		$this->assertStringNotContainsString('sees the time calendar of', $md);
 		$this->assertStringContainsString('Currently: Petra Brunner', $md);
 		$this->assertStringContainsString('Consents: 2 given, 1 not given', $md);
 		$this->assertStringContainsString('Currently 1.', $md); // externals: count only
+	}
+
+	/** 0.14.0: Leads see the bookings on their projects, no calendars or master data of others; Users only themselves. */
+	public function testWhatEachRoleSees(): void {
+		$md = PrivacyFormat::markdown(self::doc());
+		$this->assertStringContainsString('Leads: their projects, the bookings on these projects as the people report them (date, time, person, code, duration, title, notes, billable, billed)', $md);
+		$this->assertStringContainsString('no time calendars, master data, balances or vacation of others. Currently: Lea Planer', $md);
+		$this->assertStringContainsString('- Users: only their own data', $md);
+		$this->assertStringNotContainsString('see and edit the time calendars of the people who book', $md);
+		$this->assertStringContainsString('| Booking reports | Per person, project with Leads and month:', $md);
+		$this->assertStringContainsString('| The Mac app of the person; the marks: Leads | App tables of the Nextcloud (record with history) |', $md);
 	}
 
 	public function testOnlyEnabledModulesAreNamed(): void {

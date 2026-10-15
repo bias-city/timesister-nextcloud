@@ -8,10 +8,9 @@ namespace OCA\TimeSister\Controller;
 
 use OCA\TimeSister\AppInfo\Application;
 use OCA\TimeSister\Service\AbsenceService;
-use OCA\TimeSister\Service\AccessService;
-use OCA\TimeSister\Service\CalendarShareService;
+use OCA\TimeSister\Service\EntryFetcher;
+use OCA\TimeSister\Service\EntryService;
 use OCA\TimeSister\Service\RecordService;
-use OCA\TimeSister\Service\Role;
 use OCA\TimeSister\Service\TenantService;
 use OCA\TimeSister\Service\Time;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
@@ -29,15 +28,15 @@ final class MeController extends BaseController {
 		TenantService $tenants,
 		IL10N $l,
 		private RecordService $records,
-		private CalendarShareService $calendarShare,
-		private AccessService $access,
 		private ITimeFactory $time,
 		private AbsenceService $absences,
+		private EntryService $entries,
+		private EntryFetcher $fetcher,
 	) {
 		parent::__construct($request, $tenants, $l);
 	}
 
-	/** GET /me – team, role, team group, share targets, own person, revision. */
+	/** GET /me – team, role, team group, settings, own person, revision, time calendar. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/me')]
 	#[NoAdminRequired]
 	public function show(): DataResponse {
@@ -50,40 +49,37 @@ final class MeController extends BaseController {
 				'display_name' => $this->tenants->displayName($m->uid),
 				'team' => ['id' => $t->getId(), 'name' => $t->getName(), 'slug' => $t->getSlug()],
 				'role' => $m->role,
+				// Since 0.11.0: the active projects that make the caller a Lead.
+				'lead_of' => $this->tenants->leadOf($m->tenantId, $m->uid),
 				'groups' => $this->tenants->groupsOf($m->tenantId),
 				'settings' => TenantService::settingsOf($t),
-				// Clients before 0.5.0 shared with admins and leads.
-				'admins' => $this->tenants->withRole($m->tenantId, Role::ADMIN),
-				'leads' => $this->tenants->withRole($m->tenantId, Role::LEAD),
-				'calendar_share' => $this->calendarShare->enabled($m->uid),
-				// Since 0.5.0: whom the own time calendar goes to, from the shares matrix.
-				'share_targets' => $this->access->shareTargets($m),
-				'may_override' => $this->access->mayOverride($m),
 				'person_key' => $this->records->personKey($m),
 				'revision' => $t->getRevision(),
+				// Since 0.17.0: the named time calendar, the entries' counter and the effective cutoff.
+				'time_calendar' => $this->entries->mine($m),
+				'entries_revision' => $t->getEntriesRevision(),
+				'entries_since' => EntryService::since($t),
 				'server_time' => Time::iso($this->time->getTime()),
 			];
 		});
 	}
 
-	/** GET /me/calendar-share – the "share time calendar with the team" switch. */
-	#[ApiRoute(verb: 'GET', url: '/api/v1/me/calendar-share')]
-	#[NoAdminRequired]
-	public function calendarShare(): DataResponse {
-		return $this->run(fn () => $this->calendarShare->get($this->tenants->current()->uid));
-	}
-
-	/** PUT /me/calendar-share – own account only. */
-	#[ApiRoute(verb: 'PUT', url: '/api/v1/me/calendar-share')]
+	/** PUT /me/time-calendar – names the own time calendar (0.17.0) and reads a small one at once. */
+	#[ApiRoute(verb: 'PUT', url: '/api/v1/me/time-calendar')]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
-	#[UserRateLimit(limit: 300, period: 60)]
-	public function setCalendarShare(): DataResponse {
-		return $this->run(function () {
-			$m = $this->tenants->current();
-			$in = array_intersect_key($this->request->getParams(), array_flip(['enabled', 'uid']));
-			return $this->calendarShare->set($m->uid, $in);
-		});
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function setTimeCalendar(): DataResponse {
+		return $this->run(fn () => $this->fetcher->name($this->tenants->current(), $this->body(self::MAX_RECORD_BODY)));
+	}
+
+	/** DELETE /me/time-calendar – un-names it; the entries become tombstones, kept ones stay. */
+	#[ApiRoute(verb: 'DELETE', url: '/api/v1/me/time-calendar')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function unsetTimeCalendar(): DataResponse {
+		return $this->run(fn () => $this->entries->unname($this->tenants->current()));
 	}
 
 	/**

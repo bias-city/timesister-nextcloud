@@ -139,6 +139,10 @@ final class PrivacyDocument {
 				$this->l->t('Events of the time calendar (start, end, title with project code, notes), bookings per project, billable and billed marks'),
 				$this->l->t('The person (Mac app, Apple Calendar, phone)'),
 				$this->l->t('CalDAV calendar “TimeSister – name” in the person’s account')],
+			[$this->l->t('Booking reports'),
+				$this->l->t('Per person, project with Leads and month: date, time, code, duration, title, notes, billable and billed of the bookings; the Leads’ billable marks'),
+				$this->l->t('The Mac app of the person; the marks: Leads'),
+				$this->l->t('App tables of the Nextcloud (record with history)')],
 			[$this->l->t('Absences and vacation'),
 				$this->fill($this->l->t('Events with an absence code; {mirror}'), ['mirror' => $mirror]),
 				$this->l->t('The person'),
@@ -152,7 +156,7 @@ final class PrivacyDocument {
 				RoleName::TEAM_ADMIN,
 				$this->l->t('App tables; the feed address only for those who may see it')],
 			[$this->l->t('Technical data'),
-				$this->fill($this->l->t('Sign of life of the Mac app (version, last sync, calendar address), consent to backups, notifications ({jobs}, shares)'), ['jobs' => JobWord::JOB . 's']),
+				$this->fill($this->l->t('Sign of life of the Mac app (version, last sync, calendar address), consent to backups, notifications ({jobs})'), ['jobs' => JobWord::JOB . 's']),
 				$this->l->t('The Mac app'),
 				$this->l->t('App tables; Nextcloud notifications')],
 		];
@@ -171,7 +175,7 @@ final class PrivacyDocument {
 			['type' => 'list', 'items' => [
 				$this->fill($this->l->t('Nextcloud of the team: {hosting}'), ['hosting' => $this->value($hosting)]),
 				$this->l->t('Time calendars in each person’s Nextcloud account (CalDAV)'),
-				$this->l->t('App tables of TimeSister (ts_*) for master data with history, roles, shares, status, absences, consents'),
+				$this->l->t('App tables of TimeSister (ts_*) for master data with history, roles, time entries, status, absences, consents'),
 				$this->l->t('Protected app storage of the Nextcloud for backups'),
 				$this->l->t('On every Mac a local copy: SQLite under ~/Library/Application Support/TimeSister, the app password in the keychain, backups in the folder “Backups”'),
 				$this->l->t('Transport only over https (plain text only to localhost)'),
@@ -185,20 +189,16 @@ final class PrivacyDocument {
 		$admins = $f['admins'];
 		/** @var list<array{uid:string,name:string,projects:list<string>}> $leads */
 		$leads = $f['leads'];
-		/** @var list<array{uid:string,name:string,role:string,sees:list<string>,edits:list<string>}> $matrix */
-		$matrix = $f['matrix'];
 		$leadRows = array_map(fn (array $ld) => [$ld['name'], $this->join($ld['projects'])], $leads);
-		$matrixRows = array_map(fn (array $m) => [$m['name'], RoleName::of($m['role']), $this->join($m['sees']), $this->join($m['edits'])], $matrix);
 		return ['title' => $this->l->t('Who has access'), 'blocks' => [
 			['type' => 'list', 'items' => [
 				$this->l->t('Nextcloud admins: everything, including the accounts and this notice'),
-				$this->fill($this->l->t('Team Admins (group admins of the team group): all master data, all time calendars according to the shares matrix, backups, export, deletion. Currently: {names}'), ['names' => $this->join($admins)]),
-				$this->fill($this->l->t('Leads: their projects, the bookings of everyone on these projects, time calendars according to the shares matrix, the customer book. Currently: {names}'), ['names' => $this->join(array_map(static fn (array $ld) => $ld['name'], $leads))]),
-				$this->l->t('Users: their own data; the team’s capacity with the initials of everyone'),
+				$this->fill($this->l->t('Team Admins (group admins of the team group): all master data, all time entries, backups, export, deletion. Currently: {names}'), ['names' => $this->join($admins)]),
+				$this->fill($this->l->t('Leads: their projects, the bookings on these projects as the people report them (date, time, person, code, duration, title, notes, billable, billed), the customers of these projects, names and initials of the people; no time calendars, master data, balances or vacation of others. Currently: {names}'), ['names' => $this->join(array_map(static fn (array $ld) => $ld['name'], $leads))]),
+				$this->l->t('Users: only their own data'),
 				$this->l->t('External persons: nothing – their feed is only read'),
 			]],
 			['type' => 'table', 'head' => [RoleName::LEAD, $this->l->t('Projects')], 'rows' => $leadRows],
-			['type' => 'table', 'head' => [$this->l->t('Person'), $this->l->t('Role'), $this->l->t('sees the time calendar of'), $this->l->t('edits the time calendar of')], 'rows' => $matrixRows],
 		]];
 	}
 
@@ -240,7 +240,7 @@ final class PrivacyDocument {
 			['type' => 'p', 'text' => $period],
 			['type' => 'p', 'text' => $this->l->t('What can be deleted, and how:')],
 			['type' => 'list', 'items' => [
-				$this->l->t('Leaving: the person stays as a record, the share of the time calendar is withdrawn'),
+				$this->l->t('Leaving: the person stays as a record, the role ends'),
 				$this->l->t('Events: the person deletes them in their own time calendar'),
 				$this->l->t('Account: only a Nextcloud admin deletes it'),
 				$this->l->t('Team: a Nextcloud admin deletes it – a ZIP is stored first, then everything goes from the app tables; calendars and accounts stay'),

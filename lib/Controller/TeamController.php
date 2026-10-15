@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Controller;
 
 use OCA\TimeSister\Service\AccessPolicy;
+use OCA\TimeSister\Service\EntryService;
 use OCA\TimeSister\Service\MemberService;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
@@ -24,6 +25,7 @@ final class TeamController extends BaseController {
 		IL10N $l,
 		private AccessPolicy $policy,
 		private MemberService $memberService,
+		private EntryService $entries,
 	) {
 		parent::__construct($request, $tenants, $l);
 	}
@@ -41,7 +43,16 @@ final class TeamController extends BaseController {
 		});
 	}
 
-	/** PUT /team/members/{uid} – role, leaving date and “allow overriding”; Team Admins. */
+	/** PUT /team/settings – Team Admins; only `entries_since` for now (0.17.0). */
+	#[ApiRoute(verb: 'PUT', url: '/api/v1/team/settings')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function updateSettings(): DataResponse {
+		return $this->run(fn () => $this->entries->setSince($this->tenants->current(), $this->body(self::MAX_RECORD_BODY)));
+	}
+
+	/** PUT /team/members/{uid} – role and leaving date; Team Admins. */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/team/members/{uid}')]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
@@ -49,7 +60,7 @@ final class TeamController extends BaseController {
 	public function updateMember(string $uid): DataResponse {
 		return $this->run(function () use ($uid) {
 			$m = $this->tenants->current();
-			$in = array_intersect_key($this->request->getParams(), array_flip(['role', 'left', 'may_override']));
+			$in = array_intersect_key($this->request->getParams(), array_flip(['role', 'left']));
 			return $this->memberService->update($m->tenantId, $m->uid, $m->role, $uid, $in);
 		});
 	}

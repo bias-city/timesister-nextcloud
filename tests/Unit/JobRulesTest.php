@@ -189,6 +189,11 @@ class JobRulesTest extends TestCase {
 		$this->assertStringNotContainsString('later', (string)json_encode($t));
 		$this->assertStringNotContainsString('pbuser2', (string)json_encode($t->counters));
 		$this->assertSame('{}', json_encode($t->names), 'objects stay objects');
+		// Members see only themselves: no other recipients, not who declined, offer only to them.
+		$this->assertSame(['pbuser1'], $t->recipients);
+		$this->assertTrue($t->market, 'only that it is a market offer');
+		$this->assertFalse(isset($job->market));
+		$this->assertSame(['pbuser1'], $t->log[0]->to);
 		$this->assertCount(3, $job->counters, 'the original is untouched');
 		$t3 = JobRules::trimView($job, 'pbuser3');
 		$this->assertSame(['offer', 'counter', 'reject_counter', 'accept'], array_map(static fn ($e) => $e->action, $t3->log));

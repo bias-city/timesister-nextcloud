@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Service;
 
 use OCA\TimeSister\Db\MemberMapper;
+use OCA\TimeSister\Db\RecordMapper;
 use OCA\TimeSister\Db\RoleGroupMapper;
 use OCA\TimeSister\Db\Tenant;
 use OCA\TimeSister\Db\TenantMapper;
@@ -24,8 +25,10 @@ use OCP\IUserSession;
 final class TenantService {
 	/** @var list<array{tenant_id:int,role:string,gid:string}>|null */
 	private ?array $roleRows = null;
-	/** @var array<int,array<string,array{role:string,left_at:?int,may_override:bool}>> team → uid → entry */
+	/** @var array<int,array<string,array{role:string,left_at:?int}>> team → uid → entry */
 	private array $members = [];
+	/** @var array<int,array<string,list<array{kind:string,key:string,code:?string,name:string}>>> team → uid → active projects led (per request) */
+	private array $leads = [];
 
 	public function __construct(
 		private IUserSession $userSession,
@@ -35,6 +38,7 @@ final class TenantService {
 		private TenantMapper $tenants,
 		private RoleGroupMapper $roleGroups,
 		private MemberMapper $memberMapper,
+		private RecordMapper $records,
 	) {
 	}
 
@@ -58,7 +62,26 @@ final class TenantService {
 		if ($this->tenants->find($r['tenant_id']) === null) {
 			throw ApiException::noTeam();
 		}
-		return new Membership($user->getUID(), $r['tenant_id'], $r['role']);
+		$uid = $user->getUID();
+		return new Membership($uid, $r['tenant_id'], MembershipResolver::roleOf($r['admin'], $this->leadOf($r['tenant_id'], $uid) !== []));
+	}
+
+	/**
+	 * The active projects an account leads (0.11.0) – the source of the
+	 * role Lead. Read once per request and team.
+	 *
+	 * @return list<array{kind:string,key:string,code:?string,name:string}>
+	 */
+	public function leadOf(int $tenantId, string $uid): array {
+		return $this->leadsOf($tenantId)[$uid] ?? [];
+	}
+
+	/** @return array<string,list<array{kind:string,key:string,code:?string,name:string}>> uid → active projects led */
+	public function leadsOf(int $tenantId): array {
+		return $this->leads[$tenantId] ??= LeadResolver::leadsByUid(
+			$this->records->findLiveByKind($tenantId, 'person'),
+			$this->records->findLiveByKind($tenantId, 'project'),
+		);
 	}
 
 	/** @return list<array{tenant_id:int,role:string,gid:string}> */
@@ -70,6 +93,7 @@ final class TenantService {
 	public function reset(): void {
 		$this->roleRows = null;
 		$this->members = [];
+		$this->leads = [];
 	}
 
 	public function tenant(int $id): Tenant {
@@ -94,13 +118,13 @@ final class TenantService {
 	 * All members, including those who left: accounts of the team group
 	 * and its group admins, with role and `left_at`.
 	 *
-	 * @return array<string,array{role:string,left_at:?int,may_override:bool}>
+	 * @return array<string,array{role:string,left_at:?int}>
 	 */
 	public function members(int $tenantId): array {
 		return $this->members[$tenantId] ??= $this->loadMembers($tenantId);
 	}
 
-	/** @return array<string,array{role:string,left_at:?int,may_override:bool}> */
+	/** @return array<string,array{role:string,left_at:?int}> */
 	private function loadMembers(int $tenantId): array {
 		$gid = $this->teamGroupOf($tenantId);
 		$group = $gid === null ? null : $this->groupManager->get($gid);
@@ -112,6 +136,7 @@ final class TenantService {
 			$uids($group->getUsers()),
 			$uids($this->subAdmin->getGroupsSubAdmins($group)),
 			$this->memberMapper->entriesByTenant($tenantId),
+			array_map('strval', array_keys($this->leadsOf($tenantId))),
 		);
 	}
 
@@ -142,45 +167,36 @@ final class TenantService {
 	}
 
 	/**
-	 * A member as in GET /team.
+	 * A member as in GET /team; `lead_of` counts the active projects led,
+	 * `lead_projects` names them (0.11.0).
 	 *
-	 * @param array{role:string,left_at:?int,may_override:bool} $m
-	 * @return array{uid:string,display_name:string,role:string,left_at:?string,may_override:bool}
+	 * @param array{role:string,left_at:?int} $m
+	 * @return array{uid:string,display_name:string,role:string,left_at:?string,lead_of:int,lead_projects:list<string>}
 	 */
-	public function presentMember(string $uid, array $m): array {
+	public function presentMember(int $tenantId, string $uid, array $m): array {
+		$led = $this->leadOf($tenantId, $uid);
 		return [
 			'uid' => $uid,
 			'display_name' => $this->displayName($uid),
 			'role' => $m['role'],
 			'left_at' => Time::iso($m['left_at']),
-			'may_override' => $m['may_override'],
+			'lead_of' => count($led),
+			'lead_projects' => array_map(static fn (array $p): string => $p['name'], $led),
 		];
 	}
 
-	/** @return array<string,bool> uid → “allow overriding”, without those who left */
-	public function overrideFlags(int $tenantId): array {
-		$members = $this->members($tenantId);
-		$out = [];
-		foreach (array_map('strval', array_keys($members)) as $uid) {
-			if ($members[$uid]['left_at'] === null) {
-				$out[$uid] = $members[$uid]['may_override'];
-			}
-		}
-		return $out;
-	}
-
-	/** @return list<array{uid:string,display_name:string,role:string,left_at:?string,may_override:bool}> all members, including those who left */
+	/** @return list<array{uid:string,display_name:string,role:string,left_at:?string,lead_of:int,lead_projects:list<string>}> all members, including those who left */
 	public function presentMembers(int $tenantId): array {
 		$members = $this->members($tenantId);
 		$out = [];
 		// Purely numeric identifiers come as int keys.
 		foreach (array_map('strval', array_keys($members)) as $uid) {
-			$out[] = $this->presentMember($uid, $members[$uid]);
+			$out[] = $this->presentMember($tenantId, $uid, $members[$uid]);
 		}
 		return $out;
 	}
 
-	/** @return array{id:int,name:string,slug:string,groups:array{team:?string},backup_owner:?string,settings:array{leads_see_calendars:bool,backup_required:bool}} */
+	/** @return array{id:int,name:string,slug:string,groups:array{team:?string},backup_owner:?string,settings:array{backup_required:bool,entries_since:?string}} */
 	public function presentTeam(Tenant $t): array {
 		return [
 			'id' => $t->getId(),
@@ -192,11 +208,12 @@ final class TenantService {
 		];
 	}
 
-	/** @return array{leads_see_calendars:bool,backup_required:bool} */
+	/** @return array{backup_required:bool,entries_since:?string} */
 	public static function settingsOf(Tenant $t): array {
 		return [
-			'leads_see_calendars' => $t->getLeadsSeeCalendars() === 1,
 			'backup_required' => $t->getBackupRequired() === 1,
+			// The stored cutoff (0.17.0); the effective one is `entries_since` in /me.
+			'entries_since' => $t->getEntriesSince(),
 		];
 	}
 }

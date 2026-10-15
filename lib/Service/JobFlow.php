@@ -327,19 +327,49 @@ final class JobFlow {
 	}
 
 	/**
-	 * Declare Done: at any time, also with hours left.
+	 * Declare Done: at any time, also with hours left – by the assignee or
+	 * whoever manages the Job (0.15.0; rights are the service's business).
+	 * Already Done: as it is.
 	 *
 	 * @param array<string,mixed> $job
 	 * @return array<string,mixed>
 	 */
 	public static function done(array $job, string $uid, string $now): array {
-		if ($job['state'] === JobRules::DONE && $job['assignee'] === $uid) {
+		if ($job['state'] === JobRules::DONE) {
 			return $job;
 		}
-		self::requireAssignee($job, $uid);
+		if ($job['state'] !== JobRules::IN_PROGRESS) {
+			throw ApiException::conflict(Message::of('This {job} is not {in_progress}.', ['job' => JobWord::JOB, 'in_progress' => JobWord::IN_PROGRESS]));
+		}
 		$job['state'] = JobRules::DONE;
 		$job['done'] = ['by' => $uid, 'at' => $now, 'reason' => 'declared'];
 		return self::log($job, $now, $uid, 'done');
+	}
+
+	/**
+	 * Back from Done to In Progress (0.15.0) – not once paid, and not when
+	 * the hours are booked in full: the next report would finish it again.
+	 * Rights are the service's business (assignee or whoever manages).
+	 *
+	 * @param array<string,mixed> $job
+	 * @return array<string,mixed>
+	 */
+	public static function reopen(array $job, string $uid, string $now): array {
+		if ($job['state'] === JobRules::IN_PROGRESS) {
+			return $job;
+		}
+		if ($job['state'] !== JobRules::DONE) {
+			throw ApiException::conflict(Message::of('This {job} is not {done}.', ['job' => JobWord::JOB, 'done' => JobWord::DONE]));
+		}
+		if (($job['paid'] ?? null) !== null) {
+			throw ApiException::conflict(Message::of('A paid {job} stays {done}.', ['job' => JobWord::JOB, 'done' => JobWord::DONE]));
+		}
+		if ((float)(((array)($job['progress'] ?? []))['hours'] ?? 0) >= (float)$job['hours'] - JobRules::EPS) {
+			throw ApiException::conflict(Message::of('The hours are booked in full – the {job} stays {done}.', ['job' => JobWord::JOB, 'done' => JobWord::DONE]));
+		}
+		$job['state'] = JobRules::IN_PROGRESS;
+		$job['done'] = null;
+		return self::log($job, $now, $uid, 'reopen');
 	}
 
 	/**

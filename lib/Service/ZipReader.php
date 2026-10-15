@@ -12,7 +12,7 @@ namespace OCA\TimeSister\Service;
  */
 final class ZipReader {
 	/**
-	 * @return array{manifest:array<string,mixed>,team:array<string,mixed>,records:list<array<string,mixed>>,status:array<string,array<string,mixed>>,absences:array<string,list<array{source_uid:string,kind:string,start:string,end:string}>>,calendars:list<array{uid:string,path:string,size:int,missing:bool}>}
+	 * @return array{manifest:array<string,mixed>,team:array<string,mixed>,records:list<array<string,mixed>>,status:array<string,array<string,mixed>>,absences:array<string,list<array{source_uid:string,kind:string,start:string,end:string}>>,calendars:list<array{uid:string,path:string,size:int,missing:bool}>,template:?array{meta:array{name:string,size:int,sha256:string,modified_at:string,modified_by:string},path:string}}
 	 */
 	public static function read(ZipFile $zip): array {
 		$present = $zip->entries();
@@ -49,7 +49,30 @@ final class ZipReader {
 			'status' => isset($present[ZipRules::STATUS]) ? self::status($zip->readJson(ZipRules::STATUS)) : [],
 			'absences' => isset($present[ZipRules::ABSENCES]) ? self::absences($zip->readJson(ZipRules::ABSENCES)) : [],
 			'calendars' => $calendars,
+			'template' => self::template($zip, $present),
 		];
+	}
+
+	/**
+	 * The invoice template (0.16.0): file and meta together, the meta
+	 * matching the file; null when the backup has none (older ones).
+	 *
+	 * @param array<string,int> $present
+	 * @return ?array{meta:array{name:string,size:int,sha256:string,modified_at:string,modified_by:string},path:string}
+	 */
+	private static function template(ZipFile $zip, array $present): ?array {
+		$file = isset($present[ZipRules::TEMPLATE]);
+		if (!$file && !isset($present[ZipRules::TEMPLATE_META])) {
+			return null;
+		}
+		$meta = $file && isset($present[ZipRules::TEMPLATE_META])
+			? InvoiceTemplateRules::readMeta($zip->readJson(ZipRules::TEMPLATE_META))
+			: null;
+		if ($meta === null || $meta['size'] !== $present[ZipRules::TEMPLATE]
+			|| hash('sha256', $zip->read(ZipRules::TEMPLATE)) !== $meta['sha256']) {
+			throw self::bad(ZipRules::TEMPLATE_META);
+		}
+		return ['meta' => $meta, 'path' => ZipRules::TEMPLATE];
 	}
 
 	/**
@@ -73,6 +96,9 @@ final class ZipReader {
 			$out[$uid] = true;
 		}
 		foreach ($b['calendars'] as $c) {
+			$out[$c['uid']] = true;
+		}
+		foreach ($b['team']['time_calendars'] as $c) {
 			$out[$c['uid']] = true;
 		}
 		return array_map('strval', array_keys($out));
@@ -146,22 +172,9 @@ final class ZipReader {
 				'display_name' => self::str($m->display_name ?? null) ?? $uid,
 				'role' => $role,
 				'left_at' => self::at($m->left_at ?? null),
-				'may_override' => ($m->may_override ?? false) === true,
 			];
 		}
-		$access = [];
-		foreach (self::rows($t->access ?? null, ZipRules::TEAM) as $f) {
-			$viewer = self::str($f->viewer ?? null);
-			$owner = self::str($f->owner ?? null);
-			$source = self::str($f->source ?? null);
-			$level = self::str($f->level ?? null);
-			if ($viewer === null || $owner === null || !in_array($source, [AccessRules::SOURCE_ADMIN, AccessRules::SOURCE_SELF], true)
-				|| !in_array($level, AccessRules::LEVELS, true)) {
-				throw self::bad(ZipRules::TEAM);
-			}
-			$access[] = ['viewer' => $viewer, 'owner' => $owner, 'source' => $source, 'level' => $level,
-				'updated_by' => self::str($f->updated_by ?? null) ?? '', 'updated_at' => self::at($f->updated_at ?? null)];
-		}
+		// `access` (the shares matrix, until 0.16.x) is ignored since 0.17.0.
 		$consents = [];
 		foreach (self::rows($t->consents ?? null, ZipRules::TEAM) as $c) {
 			$uid = self::str($c->uid ?? null);
@@ -173,13 +186,29 @@ final class ZipReader {
 				'revoked_at' => self::at($c->revoked_at ?? null), 'notice' => $notice === null ? null : mb_substr($notice, 0, 32),
 				'notice_at' => self::at($c->notice_at ?? null)];
 		}
+		// 0.17.0: the cutoff and the named time calendars; older ZIPs have neither.
+		$settings = $t->settings ?? null;
+		$since = $settings instanceof \stdClass ? ($settings->entries_since ?? null) : null;
+		if ($since !== null && (!is_string($since) || !Time::isDay($since))) {
+			throw self::bad(ZipRules::TEAM);
+		}
+		$timeCalendars = [];
+		foreach (self::rows($t->time_calendars ?? null, ZipRules::TEAM) as $c) {
+			$uid = self::str($c->uid ?? null);
+			$uri = self::str($c->calendar_uri ?? null);
+			if ($uid === null || $uid === '' || $uri === null || EntryRules::calendarUri($uri) !== $uri) {
+				throw self::bad(ZipRules::TEAM);
+			}
+			$timeCalendars[] = ['uid' => $uid, 'calendar_uri' => $uri];
+		}
 		return [
 			'name' => $t->name,
 			'slug' => self::str($t->slug ?? null) ?? '',
 			'backup_owner' => self::str($t->backup_owner ?? null),
 			'members' => $members,
-			'access' => $access,
 			'consents' => $consents,
+			'settings' => ['entries_since' => $since],
+			'time_calendars' => $timeCalendars,
 		];
 	}
 
@@ -191,13 +220,11 @@ final class ZipReader {
 				throw self::bad(ZipRules::STATUS);
 			}
 			$weeks = $s->job_weeks ?? null;
-			$shared = $s->calendar_shared ?? null;
 			$out[$uid] = [
 				'seen_at' => self::at($s->seen_at ?? null),
 				'app_version' => self::str($s->app_version ?? null),
 				'last_sync' => self::at($s->last_sync ?? null),
 				'calendar_url' => self::str($s->calendar_url ?? null),
-				'calendar_shared' => is_int($shared) ? $shared : null,
 				'job_weeks' => $weeks === null ? null : json_encode($weeks, Json::FLAGS),
 				'job_weeks_at' => self::at($s->job_weeks_at ?? null),
 			];

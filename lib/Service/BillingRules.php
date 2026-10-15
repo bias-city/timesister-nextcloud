@@ -17,9 +17,10 @@ namespace OCA\TimeSister\Service;
  *   (of the billed state, the client's), and – for later hand-over to an
  *   accounting system, carried through only – `source`, `external_id`,
  *   `document`.
- * - Rights: Team Admins everything; a Lead whoever they may at least view
- *   in the shares matrix (members and externals); Users never. Reading:
- *   the same, plus the person themselves (their events are locked).
+ * - Rights: Team Admins only (since 0.14.0; before, also Leads who could
+ *   view the person). Reading: Team Admins and the person themselves
+ *   (their events are locked). A Lead marks billable, not billed
+ *   ({@see BookingRules}).
  */
 final class BillingRules {
 	public const KIND = 'billing';
@@ -80,22 +81,13 @@ final class BillingRules {
 		}
 	}
 
-	/**
-	 * May this role mark the person's events as billed? `$level` is the
-	 * caller's level on the person from the shares matrix (null: none).
-	 */
-	public static function canWrite(string $role, ?string $level): bool {
-		if (Role::manages($role)) {
-			return true;
-		}
-		if ($role !== Role::LEAD) {
-			return false;
-		}
-		return AccessRules::rank($level ?? AccessRules::NONE) >= AccessRules::rank(AccessRules::VIEW);
+	/** May this role mark events as billed? Team Admins only (0.14.0). */
+	public static function canWrite(string $role): bool {
+		return Role::manages($role);
 	}
 
 	/** Reading: whoever may write, and the person themselves. */
-	public static function canRead(string $role, ?string $level, bool $own): bool {
-		return $own || self::canWrite($role, $level);
+	public static function canRead(string $role, bool $own): bool {
+		return $own || self::canWrite($role);
 	}
 }
