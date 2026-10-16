@@ -32,7 +32,8 @@ final class InvoiceRules {
 	/** 0.18.0: the free texts of the document, the positions, the hours per booking. */
 	public const TEXT_MAX = 4000;
 	public const MAX_POSITIONS = 500;
-	public const POSITION_KINDS = ['hours', 'flat', 'discount', 'text'];
+	/** 0.21.0: expense positions (a percentage of the hours, a flat amount) and cost lines. */
+	public const POSITION_KINDS = ['hours', 'flat', 'discount', 'text', 'expense_percent', 'expense_flat', 'costs'];
 	public const POSITION_TEXT_MAX = 500;
 	public const CODE_MAX = 64;
 
@@ -118,8 +119,10 @@ final class InvoiceRules {
 
 	/**
 	 * The positions (0.18.0): at most 500 of `hours`, `flat`, `discount` or
-	 * `text`, each with a text and an amount (negative for a discount,
-	 * 0 for a text line); work package, person, hours and rate optional.
+	 * `text` (0.21.0 also `expense_percent`, `expense_flat`, `costs`), each
+	 * with a text and an amount (negative for a discount, 0 for a text
+	 * line); work package, person, hours and rate optional; since 0.21.0
+	 * `vat`, `vat_mode` and `cost`.
 	 */
 	public static function checkPositions(mixed $list): void {
 		if (!is_array($list) || !array_is_list($list) || count($list) > self::MAX_POSITIONS) {
@@ -152,9 +155,34 @@ final class InvoiceRules {
 				if (!(is_int($a) || (is_float($a) && is_finite($a)))) {
 					throw ApiException::invalid('“amount” must be a number.');
 				}
+				self::checkLineTax($p);
 			} catch (ApiException $e) {
 				throw ApiException::invalid(Message::of('Position {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]));
 			}
+		}
+	}
+
+	/**
+	 * VAT and mode of a line (0.21.0): `vat` null or 0–100, `vat_mode`
+	 * taxable or pass_through, `cost` null or the number of a cost
+	 * position; `rate` of an expense percentage is a percentage.
+	 */
+	private static function checkLineTax(\stdClass $p): void {
+		$vat = $p->vat ?? null;
+		if ($vat !== null && !(ProjectRules::isRate($vat) && $vat <= 100)) {
+			throw ApiException::invalid('“vat” must be null or a percentage from 0 to 100.');
+		}
+		$mode = $p->vat_mode ?? null;
+		if ($mode !== null && !in_array($mode, VatLines::MODES, true)) {
+			throw ApiException::invalid(Message::of('“{field}” must be one of {values}.', ['field' => 'vat_mode', 'values' => implode(', ', VatLines::MODES)]));
+		}
+		$cost = $p->cost ?? null;
+		if ($cost !== null && (!is_int($cost) || $cost < 1)) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or an integer ≥ 1.', ['field' => 'cost']));
+		}
+		$rate = $p->rate ?? null;
+		if (($p->kind ?? null) === 'expense_percent' && $rate !== null && !(ProjectRules::isRate($rate) && $rate <= 100)) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or a percentage from 0 to 100.', ['field' => 'rate']));
 		}
 	}
 

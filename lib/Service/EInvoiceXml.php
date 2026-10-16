@@ -104,14 +104,24 @@ final class EInvoiceXml {
 		if ($d->from !== '' && $d->to !== '') {
 			$b->setDocumentBillingPeriod(self::date($d->from), self::date($d->to), null);
 		}
-		$this->positions($b, $d);
-		$taxCase = $d->taxCase;
-		$rate = TaxRules::rate($taxCase, $d->vat);
-		$code = TaxRules::code($taxCase, $rate, self::str($d->customer['country'] ?? null));
-		$note = TaxRules::note($taxCase, DocumentRules::EN);
-		$b->addDocumentTax($code, 'VAT', $d->net, $d->vatAmount, $rate, $note, TaxRules::exemptionCode($code));
+		// 0.21.0: one tax group per rate and category, the pass-through items as E (TaxRules::breakdown).
+		$s = $d->sums;
+		[, $pass] = $d->splitPositions();
+		$withPass = $pass !== [] || $s->passThrough !== 0.0;
+		$groups = TaxRules::breakdown($s, $d->taxCase, self::str($d->customer['country'] ?? null), $withPass);
+		if ($groups === []) {
+			$rate = $d->vatRate();
+			$code = TaxRules::code($d->taxCase, $rate, self::str($d->customer['country'] ?? null));
+			$groups[] = ['code' => $code, 'rate' => $rate, 'basis' => 0.0, 'tax' => 0.0, 'reason' => TaxRules::note($d->taxCase, DocumentRules::EN), 'reason_code' => TaxRules::exemptionCode($code)];
+		}
+		$this->positions($b, $d, $groups);
+		foreach ($groups as $g) {
+			$b->addDocumentTax($g['code'], 'VAT', $g['basis'], $g['tax'], $g['rate'], $g['reason'], $g['reason_code']);
+		}
 		$this->payment($b, $d);
-		$b->setDocumentSummation($d->gross, $d->gross, $d->net, 0.0, 0.0, $d->net, $d->vatAmount, null, 0.0);
+		// The line total and the tax basis include the pass-through items (BR-CO-10, BR-CO-13); grand total and due = total.
+		$basis = round($s->net + $s->passThrough, 2);
+		$b->setDocumentSummation($s->total, $s->total, $basis, 0.0, 0.0, $basis, $s->vatAmount, null, 0.0);
 		return $b;
 	}
 
@@ -156,11 +166,15 @@ final class EInvoiceXml {
 	 * One line per position: hours as quantity (HUR) × rate, everything
 	 * else as one piece (C62) at the amount; a negative amount makes the
 	 * quantity negative (the price is never negative, BR-27); a text line
-	 * is a line at 0.
+	 * is a line at 0. Each line carries its own category and rate (0.21.0).
 	 */
-	private function positions(ZugferdDocumentBuilder $b, InvoiceDocument $d): void {
-		$rate = TaxRules::rate($d->taxCase, $d->vat);
-		$code = TaxRules::code($d->taxCase, $rate, self::str($d->customer['country'] ?? null));
+	/** @param non-empty-list<array{code:string,rate:float,basis:float,tax:float,reason:?string,reason_code:?string}> $groups */
+	private function positions(ZugferdDocumentBuilder $b, InvoiceDocument $d, array $groups): void {
+		$country = self::str($d->customer['country'] ?? null);
+		$known = [];
+		foreach ($groups as $g) {
+			$known[TaxRules::groupKey($g['code'], $g['rate'])] = true;
+		}
 		$n = 0;
 		foreach ($d->positions as $p) {
 			$n++;
@@ -180,6 +194,11 @@ final class EInvoiceXml {
 			$b->setDocumentPositionProductDetails(mb_substr(self::str($p['text'] ?? null) === '' ? '–' : self::str($p['text'] ?? null), 0, 500));
 			$b->setDocumentPositionNetPrice(abs($price));
 			$b->setDocumentPositionQuantity($quantity, $unit);
+			[$code, $rate] = TaxRules::lineCategory($p, $d->vat, $d->taxCase, $country);
+			// A line of amount 0 (a text) at a rate no other line has: the first group's, so every line has its group.
+			if (!isset($known[TaxRules::groupKey($code, $rate)])) {
+				[$code, $rate] = [$groups[0]['code'], $groups[0]['rate']];
+			}
 			$b->addDocumentPositionTax($code, 'VAT', $rate);
 			$b->setDocumentPositionLineSummation($amount);
 		}

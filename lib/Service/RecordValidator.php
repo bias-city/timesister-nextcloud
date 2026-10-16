@@ -77,6 +77,10 @@ final class RecordValidator {
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, IssuerRules::FIELD)) {
 			IssuerRules::validate($data->{IssuerRules::FIELD});
 		}
+		// 0.21.0: the module switches (costs among them) are booleans.
+		if ($kind === 'setting' && $key === 'settings' && property_exists($data, ModuleRules::FIELD)) {
+			ModuleRules::validate($data->{ModuleRules::FIELD});
+		}
 		if ($kind === 'person') {
 			if (!isset($data->login) || !is_string($data->login) || $data->login !== $key) {
 				throw ApiException::invalid('For a person, “login” must equal the key.');

@@ -102,6 +102,12 @@ use OCP\DB\Types;
  * @method void setXmlSha256(?string $xmlSha256)
  * @method string|null getExternalJson()
  * @method void setExternalJson(?string $externalJson)
+ * @method string|null getVatLinesJson()
+ * @method void setVatLinesJson(?string $vatLinesJson)
+ * @method string|null getPassThrough()
+ * @method void setPassThrough(?string $passThrough)
+ * @method string|null getTotal()
+ * @method void setTotal(?string $total)
  * @method int getCreatedAt()
  * @method void setCreatedAt(int $createdAt)
  * @method int getModifiedAt()
@@ -162,6 +168,10 @@ final class InvInvoice extends Entity {
 	protected ?string $xmlPath = null;
 	protected ?string $xmlSha256 = null;
 	protected ?string $externalJson = null;
+	// 0.21.0: net and VAT per rate (JSON), the pass-through items, the amount to pay; null before 0.21.0.
+	protected ?string $vatLinesJson = null;
+	protected ?string $passThrough = null;
+	protected ?string $total = null;
 	protected int $createdAt = 0;
 	protected int $modifiedAt = 0;
 
@@ -210,6 +220,9 @@ final class InvInvoice extends Entity {
 		$this->addType('xmlPath', Types::STRING);
 		$this->addType('xmlSha256', Types::STRING);
 		$this->addType('externalJson', Types::STRING);
+		$this->addType('vatLinesJson', Types::STRING);
+		$this->addType('passThrough', Types::DECIMAL);
+		$this->addType('total', Types::DECIMAL);
 		$this->addType('createdAt', Types::INTEGER);
 		$this->addType('modifiedAt', Types::INTEGER);
 	}

@@ -9,6 +9,7 @@ namespace OCA\TimeSister\Tests\Unit;
 use OCA\TimeSister\Service\DocumentRules;
 use OCA\TimeSister\Service\InvoiceDocument;
 use OCA\TimeSister\Service\InvoicePdf;
+use OCA\TimeSister\Service\VatLines;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -36,9 +37,7 @@ class InvoicePdfTest extends TestCase {
 		$d->positions = [['kind' => 'hours', 'text' => 'Planung', 'hours' => 12.5, 'rate' => 150, 'amount' => 1875], ['kind' => 'discount', 'text' => 'Rabatt', 'amount' => -50]];
 		$d->currency = 'CHF';
 		$d->vat = 8.1;
-		$d->net = 1825.0;
-		$d->vatAmount = 147.83;
-		$d->gross = 1972.83;
+		$d->sums = VatLines::of($d->positions, $d->vat, $d->taxCase);
 		$d->chainLine = DocumentRules::chainLine('RE-2026-0007', 3, '3f9c0123abcdef0123', 'a1b2c3d4e5f6a7b8c9');
 		return $d;
 	}
@@ -91,7 +90,7 @@ class InvoicePdfTest extends TestCase {
 		$this->assertSame(1, self::pages((new InvoicePdf())->render($d)));
 		$d = self::document();
 		$d->iban = 'CH9300762011623852957';
-		$d->gross = -10.0;
+		$d->sums = VatLines::of([['kind' => 'flat', 'text' => 'x', 'amount' => -10]], 0.0, 'domestic');
 		$this->assertFalse($d->wantsQrBill());
 		$this->assertSame(1, self::pages((new InvoicePdf())->render($d)));
 		$d = self::document();

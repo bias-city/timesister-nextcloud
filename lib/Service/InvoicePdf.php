@@ -17,7 +17,8 @@ use Sprain\SwissQrBill\QrBill;
 
 /**
  * The PDF of an invoice (0.19.0), A4 portrait: issuer and customer
- * blocks, title, the facts, greeting, the positions, the sums, the body
+ * blocks, title, the facts, greeting, the positions, the sums (per rate,
+ * pass-through items and total since 0.21.0), the body
  * text, the hours appendix (date, person, code, title, hours – no notes),
  * the footer with the chain line on every page, a watermark on a preview
  * and the Swiss QR bill as the last page when the issuer has an IBAN in
@@ -170,9 +171,15 @@ final class InvoicePdf {
 			$pdf->SetFont(InvoicePage::FONT, '', 9);
 		};
 		$header();
-		foreach ($d->positions as $p) {
+		// 0.21.0: the pass-through items stand in their own block under the sums; with several rates each line names its rate.
+		[$taxable] = $d->splitPositions();
+		$several = count($d->sums->lines) > 1;
+		foreach ($taxable as $p) {
 			$kind = self::str($p['kind'] ?? '');
 			$text = self::str($p['text'] ?? '');
+			if ($several && $kind !== 'text') {
+				$text .= ' (' . $t['vat'] . ' ' . DocumentRules::percent(VatLines::rateOf((array)$p, $d->vat, $d->taxCase)) . ')';
+			}
 			$hours = $kind === 'hours' && is_numeric($p['hours'] ?? null) ? DocumentRules::hours((float)$p['hours']) : '';
 			$rate = $kind === 'hours' && is_numeric($p['rate'] ?? null) ? DocumentRules::money((float)$p['rate'], $d->lang) : '';
 			$amount = $kind === 'text' ? '' : DocumentRules::money(is_numeric($p['amount'] ?? null) ? (float)$p['amount'] : 0.0, $d->lang);
@@ -207,22 +214,54 @@ final class InvoicePdf {
 		$pdf->SetXY(InvoicePage::MARGIN, $y + $h);
 	}
 
-	/** Net, VAT and gross, right-aligned under the table. @param array<string,string> $t */
+	/**
+	 * Net, VAT per rate and gross, right-aligned under the table; then the
+	 * pass-through items (no VAT) with their sum and the total to pay.
+	 *
+	 * @param array<string,string> $t
+	 */
 	private function sums(InvoicePage $pdf, InvoiceDocument $d, array $t): void {
 		$label = self::COLS[0] + self::COLS[1] + self::COLS[2];
-		$pdf->SetFont(InvoicePage::FONT, '', 9);
-		$pdf->Cell($label, self::LINE, $t['net'], 'T', 0, 'R');
-		$pdf->Cell(self::COLS[3], self::LINE, DocumentRules::money($d->net, $d->lang), 'T', 1, 'R');
-		$pdf->Cell($label, self::LINE, $t['vat'] . ' ' . rtrim(rtrim(number_format($d->vatRate(), 2, '.', ''), '0'), '.') . ' %', 0, 0, 'R');
-		$pdf->Cell(self::COLS[3], self::LINE, DocumentRules::money($d->vatAmount, $d->lang), 0, 1, 'R');
-		$pdf->SetFont(InvoicePage::FONT, 'B', 10);
-		$pdf->Cell($label, 6, $t['gross'] . ' ' . $d->currency, 'T', 0, 'R');
-		$pdf->Cell(self::COLS[3], 6, DocumentRules::money($d->gross, $d->lang), 'T', 1, 'R');
+		$s = $d->sums;
+		[, $pass] = $d->splitPositions();
+		$withPass = $pass !== [] || $s->passThrough !== 0.0;
+		if ($s->lines !== [] || !$withPass) {
+			$pdf->SetFont(InvoicePage::FONT, '', 9);
+			$pdf->Cell($label, self::LINE, $t['net'], 'T', 0, 'R');
+			$pdf->Cell(self::COLS[3], self::LINE, DocumentRules::money($s->net, $d->lang), 'T', 1, 'R');
+			$lines = $s->lines !== [] ? $s->lines : [['rate' => $d->vatRate(), 'net' => $s->net, 'vat' => $s->vatAmount]];
+			foreach ($lines as $l) {
+				$text = $t['vat'] . ' ' . DocumentRules::percent($l['rate']);
+				if (count($lines) > 1) {
+					$text .= ' ' . $t['on'] . ' ' . DocumentRules::money($l['net'], $d->lang);
+				}
+				$pdf->Cell($label, self::LINE, $text, 0, 0, 'R');
+				$pdf->Cell(self::COLS[3], self::LINE, DocumentRules::money($l['vat'], $d->lang), 0, 1, 'R');
+			}
+			$pdf->SetFont(InvoicePage::FONT, 'B', 10);
+			$pdf->Cell($label, 6, ($withPass ? $t['gross_vat'] : $t['gross']) . ' ' . $d->currency, 'T', 0, 'R');
+			$pdf->Cell(self::COLS[3], 6, DocumentRules::money($s->gross, $d->lang), 'T', 1, 'R');
+		}
 		// Reverse charge and export (0.20.0): the note under the sums.
 		$note = $d->taxNote();
 		if ($note !== null) {
 			$pdf->SetFont(InvoicePage::FONT, '', 8);
 			$pdf->Cell(0, self::SMALL, $note, 0, 1, 'R');
+		}
+		if ($withPass) {
+			$pdf->Ln(4);
+			$pdf->SetFont(InvoicePage::FONT, 'B', 9);
+			$pdf->Cell(0, self::LINE, $t['pass_through'], 'B', 1, 'L');
+			$pdf->SetFont(InvoicePage::FONT, '', 9);
+			foreach ($pass as $p) {
+				$amount = DocumentRules::money(is_numeric($p['amount'] ?? null) ? (float)$p['amount'] : 0.0, $d->lang);
+				$this->row($pdf, [$label, self::COLS[3]], [self::str($p['text'] ?? ''), $amount], ['L', 'R'], null);
+			}
+			$pdf->Cell($label, self::LINE, $t['pass_through_sum'], 'T', 0, 'R');
+			$pdf->Cell(self::COLS[3], self::LINE, DocumentRules::money($s->passThrough, $d->lang), 'T', 1, 'R');
+			$pdf->SetFont(InvoicePage::FONT, 'B', 10);
+			$pdf->Cell($label, 6, $t['total'] . ' ' . $d->currency, 'T', 0, 'R');
+			$pdf->Cell(self::COLS[3], 6, DocumentRules::money($s->total, $d->lang), 'T', 1, 'R');
 		}
 		$pdf->SetFont(InvoicePage::FONT, '', 10);
 	}
@@ -267,7 +306,7 @@ final class InvoicePdf {
 	/**
 	 * The Swiss QR bill on the last page (Swiss Payment Standards):
 	 * creditor = issuer, debtor = customer when the address is complete,
-	 * amount = gross, the QR reference with a QR-IBAN. When the data fails the standard's
+	 * amount = the total (0.21.0: gross plus pass-through items), the QR reference with a QR-IBAN. When the data fails the standard's
 	 * checks (e.g. a QR-IBAN without reference), the page is left out.
 	 *
 	 * @param array<string,string> $t
@@ -301,7 +340,7 @@ final class InvoicePdf {
 			if ($debtor !== null) {
 				$bill->setUltimateDebtor($debtor);
 			}
-			$bill->setPaymentAmountInformation(PaymentAmountInformation::create($d->currency, round($d->gross, 2)));
+			$bill->setPaymentAmountInformation(PaymentAmountInformation::create($d->currency, round($d->sums->total, 2)));
 			// A QR-IBAN carries the QR reference (0.20.0); a plain IBAN none.
 			$bill->setPaymentReference($d->qrReference !== null && QrReferenceRules::isQrIban($d->iban)
 				? PaymentReference::create(PaymentReference::TYPE_QR, $d->qrReference)

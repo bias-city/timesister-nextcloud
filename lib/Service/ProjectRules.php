@@ -156,7 +156,7 @@ final class ProjectRules {
 		}
 	}
 
-	/** One budget: currency (upper case), `rates` refused, `cap` and work package `rate` ≥ 0, `invoice_dates` days. Also a quote's budget. */
+	/** One budget: currency (upper case), `rates` refused, `cap` and work package `rate` ≥ 0, `invoice_dates` days, `costs` ({@see CostRules}). Also a quote's budget. */
 	public static function checkBudget(\stdClass $b): void {
 		$c = $b->currency ?? null;
 		if ($c !== null) {
@@ -189,6 +189,8 @@ final class ProjectRules {
 				throw ApiException::invalid('“invoice_dates” must be a list of at most 200 days (YYYY-MM-DD), each once.');
 			}
 		}
+		// 0.21.0: the cost positions beside the work packages (module «costs»).
+		CostRules::check($b->{CostRules::FIELD} ?? null);
 		$wps = $b->work_packages ?? null;
 		if (!is_array($wps)) {
 			return;

@@ -47,7 +47,7 @@ final class DraftResolver {
 	/**
 	 * The draft with everything resolved; throws what issuing would throw.
 	 *
-	 * @return array{record:Record,d:\stdClass,project:\stdClass,projectKey:string,budget:\stdClass,currency:string,customerKey:string,customer:\stdClass,customerBlock:\stdClass,settings:?\stdClass,issuer:\stdClass,vat:float,bookings:list<\stdClass>,positions:list<\stdClass>,sums:array{net:float,vat_amount:float,gross:float},hours:list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string}>}
+	 * @return array{record:Record,d:\stdClass,project:\stdClass,projectKey:string,budget:\stdClass,currency:string,customerKey:string,customer:\stdClass,customerBlock:\stdClass,settings:?\stdClass,issuer:\stdClass,vat:float,bookings:list<\stdClass>,positions:list<\stdClass>,sums:VatLines,hours:list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string}>}
 	 */
 	public function resolve(int $tenantId, string $key): array {
 		[$cur, $d] = $this->invoiceRecord($tenantId, $key);
@@ -70,7 +70,11 @@ final class DraftResolver {
 		// 0.20.0: the tax case is frozen with the customer; abroad the document carries no VAT.
 		$issuerCountry = $issuer->country ?? null;
 		$customerBlock = IssueRules::customerBlock($customer, $d, is_string($issuerCountry) ? $issuerCountry : null);
-		$vat = TaxRules::rate((string)$customerBlock->{TaxRules::FIELD}, IssueRules::vatOf($d, $settings));
+		$taxCase = (string)$customerBlock->{TaxRules::FIELD};
+		$vat = TaxRules::rate($taxCase, IssueRules::vatOf($d, $settings));
+		// 0.21.0: every line carries its rate and mode; the sums per rate come from VatLines.
+		$positions = VatLines::freeze($positions, $vat, $taxCase);
+		$sums = VatLines::of($positions, $vat, $taxCase);
 		return [
 			'record' => $cur,
 			'd' => $d,
@@ -83,10 +87,10 @@ final class DraftResolver {
 			'customerBlock' => $customerBlock,
 			'settings' => $settings,
 			'issuer' => $issuer,
-			'vat' => $vat,
+			'vat' => $sums->rate,
 			'bookings' => $bookings,
 			'positions' => $positions,
-			'sums' => IssueRules::sums($positions, $vat),
+			'sums' => $sums,
 			'hours' => IssueRules::hoursOf($bookings),
 		];
 	}

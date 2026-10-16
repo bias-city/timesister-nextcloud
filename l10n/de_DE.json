@@ -577,7 +577,17 @@
 		"The folder will be created: “{path}”.": "Der Ordner wird angelegt: „{path}“.",
 		"The folders could not be checked: {message}": "Die Ordner konnten nicht geprüft werden: {message}",
 		"The team has no backup owner; documents need one.": "Das Team hat keinen Sicherungs-Eigner; Dokumente brauchen einen.",
-		"Where the server stores the PDFs of issued invoices and where the Mac app stores quote PDFs: folders in the files of the backup owner, e.g. a group folder like “Accounting/Invoices”. Type the path as it appears in that account’s Files. Empty: “TimeSister Invoices/<team>” and “TimeSister Quotes/<team>”.": "Wo der Server die PDFs gestellter Rechnungen ablegt und wo die Mac-App die Offerten-PDFs ablegt: Ordner in den Dateien des Sicherungs-Eigners, z. B. ein Gruppenordner wie „Buchhaltung/Rechnungen“. Geben Sie den Pfad so ein, wie er in den Dateien dieses Kontos erscheint. Leer: „TimeSister Invoices/<Team>“ und „TimeSister Quotes/<Team>“."
+		"Where the server stores the PDFs of issued invoices and where the Mac app stores quote PDFs: folders in the files of the backup owner, e.g. a group folder like “Accounting/Invoices”. Type the path as it appears in that account’s Files. Empty: “TimeSister Invoices/<team>” and “TimeSister Quotes/<team>”.": "Wo der Server die PDFs gestellter Rechnungen ablegt und wo die Mac-App die Offerten-PDFs ablegt: Ordner in den Dateien des Sicherungs-Eigners, z. B. ein Gruppenordner wie „Buchhaltung/Rechnungen“. Geben Sie den Pfad so ein, wie er in den Dateien dieses Kontos erscheint. Leer: „TimeSister Invoices/<Team>“ und „TimeSister Quotes/<Team>“.",
+		"Each cost position must be a JSON object.": "Jede Kostenposition muss ein JSON-Objekt sein.",
+		"“{field}” must be unique within the budget.": "„{field}“ muss im Budget eindeutig sein.",
+		"Cost position {n}: {message}": "Kostenposition {n}: {message}",
+		"The field “{field}” must be an integer ≥ 1.": "Das Feld „{field}“ muss eine ganze Zahl ≥ 1 sein.",
+		"“{field}” must be a number ≥ 0.": "„{field}“ muss eine Zahl ≥ 0 sein.",
+		"“{field}” applies only when “{other}” is “{value}”.": "„{field}“ gilt nur, wenn „{other}“ „{value}“ ist.",
+		"“{field}” must be a percentage from 0 to 100.": "„{field}“ muss ein Prozentsatz von 0 bis 100 sein.",
+		"“{field}” must be one of {values}.": "„{field}“ muss eines von {values} sein.",
+		"“{field}” must be null or an integer ≥ 1.": "„{field}“ muss null oder eine ganze Zahl ≥ 1 sein.",
+		"“{field}” must be null or a percentage from 0 to 100.": "„{field}“ muss null oder ein Prozentsatz von 0 bis 100 sein."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

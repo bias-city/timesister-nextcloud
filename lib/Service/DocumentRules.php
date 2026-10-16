@@ -227,6 +227,8 @@ final class DocumentRules {
 				'position' => 'Position', 'hours' => 'Stunden', 'rate' => 'Ansatz', 'amount' => 'Betrag',
 				'net' => 'Netto', 'vat' => 'MWST', 'gross' => 'Total', 'appendix' => 'Stundenliste', 'person' => 'Person',
 				'code' => 'Code', 'title' => 'Titel', 'total' => 'Total', 'page' => 'Seite {n} von {total}', 'payment_part' => 'Zahlteil',
+				'on' => 'auf', 'gross_vat' => 'Total inkl. MWST', 'pass_through' => 'Durchlaufende Posten (ohne MWST)',
+				'pass_through_sum' => 'Summe durchlaufende Posten',
 			];
 		}
 		return [
@@ -236,6 +238,8 @@ final class DocumentRules {
 			'position' => 'Position', 'hours' => 'Hours', 'rate' => 'Rate', 'amount' => 'Amount',
 			'net' => 'Net', 'vat' => 'VAT', 'gross' => 'Total', 'appendix' => 'Hours', 'person' => 'Person',
 			'code' => 'Code', 'title' => 'Title', 'total' => 'Total', 'page' => 'Page {n} of {total}', 'payment_part' => 'Payment part',
+			'on' => 'on', 'gross_vat' => 'Total incl. VAT', 'pass_through' => 'Pass-through items (no VAT)',
+			'pass_through_sum' => 'Pass-through items',
 		];
 	}
 
@@ -253,6 +257,11 @@ final class DocumentRules {
 	/** An amount: `1’234.50` in German (Swiss style), `1,234.50` in English. */
 	public static function money(float $v, string $lang): string {
 		return number_format($v, 2, '.', $lang === self::DE ? '’' : ',');
+	}
+
+	/** A rate: `8.1 %`, `19 %`. */
+	public static function percent(float $v): string {
+		return rtrim(rtrim(number_format($v, 2, '.', ''), '0'), '.') . ' %';
 	}
 
 	/** Hours: `12.5` → `12.50`. */

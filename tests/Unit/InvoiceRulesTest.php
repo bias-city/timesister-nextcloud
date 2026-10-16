@@ -170,7 +170,7 @@ class InvoiceRulesTest extends TestCase {
 		$this->assertSame('422 “positions” must be a list of at most 500 positions.', self::check(['positions' => array_fill(0, 501, $pos())]));
 		$this->assertSame('ok', self::check(['positions' => array_fill(0, 500, $pos())]));
 		$this->assertSame('422 Position 1: Each position must be a JSON object.', self::check(['positions' => ['x']]));
-		$this->assertSame('422 Position 2: “kind” of a position is one of hours, flat, discount, text.', self::check(['positions' => [$pos(), $pos(['kind' => 'rebate'])]]));
+		$this->assertSame('422 Position 2: “kind” of a position is one of hours, flat, discount, text, expense_percent, expense_flat, costs.', self::check(['positions' => [$pos(), $pos(['kind' => 'rebate'])]]));
 		$this->assertSame('422 Position 1: “text” must be text of 1 to 500 characters.', self::check(['positions' => [$pos(['text' => ''])]]));
 		$this->assertSame('422 Position 1: “text” must be text of 1 to 500 characters.', self::check(['positions' => [$pos(['text' => str_repeat('t', 501)])]]));
 		$this->assertSame('422 Position 1: “work_package” must be null or an integer ≥ 0.', self::check(['positions' => [$pos(['work_package' => '2'])]]));
@@ -180,6 +180,14 @@ class InvoiceRulesTest extends TestCase {
 		$this->assertSame('422 Position 1: “rate” must be null or a number ≥ 0.', self::check(['positions' => [$pos(['rate' => '150'])]]));
 		$this->assertSame('422 Position 1: “amount” must be a number.', self::check(['positions' => [$pos(['amount' => null])]]));
 		$this->assertSame('422 Position 1: “amount” must be a number.', self::check(['positions' => [$pos(['amount' => '1875'])]]));
+		// 0.21.0: rate and mode per line, cost positions, expense lines.
+		$this->assertSame('ok', self::check(['positions' => [$pos(['vat' => 8.1]), $pos(['kind' => 'expense_percent', 'rate' => 3, 'hours' => null, 'amount' => 56.25, 'cost' => 1, 'vat' => 2.6]),
+			$pos(['kind' => 'expense_flat', 'amount' => 250, 'cost' => 2, 'vat' => null, 'vat_mode' => 'taxable']), $pos(['kind' => 'costs', 'amount' => 1200, 'cost' => 3, 'vat_mode' => 'pass_through'])]]));
+		$this->assertSame('422 Position 1: “vat” must be null or a percentage from 0 to 100.', self::check(['positions' => [$pos(['vat' => 101])]]));
+		$this->assertSame('422 Position 1: “vat” must be null or a percentage from 0 to 100.', self::check(['positions' => [$pos(['vat' => '8.1'])]]));
+		$this->assertSame('422 Position 1: “vat_mode” must be one of taxable, pass_through.', self::check(['positions' => [$pos(['vat_mode' => 'exempt'])]]));
+		$this->assertSame('422 Position 1: “cost” must be null or an integer ≥ 1.', self::check(['positions' => [$pos(['cost' => 0])]]));
+		$this->assertSame('422 Position 1: “rate” must be null or a percentage from 0 to 100.', self::check(['positions' => [$pos(['kind' => 'expense_percent', 'rate' => 150])]]));
 		$b = static fn (array $over = []): array => ['bookings' => [array_merge(['person' => 'alice', 'uid' => 'u1', 'start' => '2026-09-02'], $over)]];
 		$this->assertSame('ok', self::check($b(['hours' => 2.5, 'rate' => 150, 'code' => 'D196.4'])));
 		$this->assertSame('ok', self::check($b(['hours' => 0, 'rate' => null, 'code' => null])));

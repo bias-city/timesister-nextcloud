@@ -51,7 +51,11 @@ use OCP\Capabilities\ICapability;
  * XRechnung file for customers who ask for it, the tax case, the QR
  * reference with a QR-IBAN. `invoice_export: 1` since 0.20.0: CSV, DATEV
  * Buchungsstapel and ledger exports, the hand-over to an accounting
- * system and webhooks.
+ * system and webhooks. `vat_lines: 1` since 0.21.0: VAT rate and mode
+ * (taxable or pass-through) per invoice line, sums per rate, pass-through
+ * items and the total frozen and in every document and export.
+ * `costs: 1` since 0.21.0: cost positions `costs[]` in a budget (module
+ * «costs», `settings.modules.costs`), checked and stored.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -59,7 +63,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int}} */
+	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int, vat_lines: int, costs: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -83,6 +87,8 @@ final class Capabilities implements ICapability {
 				'invoice_documents' => 1,
 				'e_invoice' => 1,
 				'invoice_export' => 1,
+				'vat_lines' => 1,
+				'costs' => 1,
 			],
 		];
 	}

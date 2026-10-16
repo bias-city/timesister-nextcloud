@@ -155,14 +155,15 @@ final class WebhookRules {
 	}
 
 	/**
-	 * The body of a delivery.
+	 * The body of a delivery; `total` (0.21.0) is what the customer pays,
+	 * gross when not given.
 	 *
-	 * @param array{key:string,number:string,status:string,gross:float,currency:string} $invoice
+	 * @param array{key:string,number:string,status:string,gross:float,currency:string,total?:float} $invoice
 	 */
 	public static function body(string $team, string $event, string $action, string $at, array $invoice, int $seq, string $hash): string {
 		return json_encode([
 			'team' => $team, 'event' => $event, 'at' => $at,
-			'invoice' => ['key' => $invoice['key'], 'number' => $invoice['number'], 'status' => $invoice['status'], 'gross' => $invoice['gross'], 'currency' => $invoice['currency']],
+			'invoice' => ['key' => $invoice['key'], 'number' => $invoice['number'], 'status' => $invoice['status'], 'gross' => $invoice['gross'], 'total' => $invoice['total'] ?? $invoice['gross'], 'currency' => $invoice['currency']],
 			'ledger' => ['seq' => $seq, 'hash' => $hash, 'action' => $action],
 		], Json::FLAGS);
 	}

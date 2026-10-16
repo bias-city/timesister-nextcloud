@@ -25,6 +25,13 @@ final class TaxRules {
 	public const CODE_REVERSE = 'AE';
 	public const CODE_EXPORT = 'G';
 	public const CODE_EXEMPT = 'E';
+	/**
+	 * Pass-through items (0.21.0) in the e-invoice: category E with the
+	 * exemption of Art. 79(c) VAT directive – `O` (not subject) would forbid
+	 * every other category on the invoice (BR-O-11).
+	 */
+	public const PASS_THROUGH_CODE = 'VATEX-EU-79-C';
+	public const PASS_THROUGH_REASON = 'Durchlaufender Posten / disbursement';
 	/** The 27 member states (ISO 3166-1 alpha-2), 2026. */
 	public const EU = ['AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE'];
 
@@ -103,5 +110,55 @@ final class TaxRules {
 	public static function ofBlock(array $customer): string {
 		$v = $customer[self::FIELD] ?? null;
 		return is_string($v) && in_array($v, self::CASES, true) ? $v : self::DOMESTIC;
+	}
+
+	/**
+	 * The category and rate of one line in the e-invoice (0.21.0): a
+	 * pass-through item is E at 0, a taxable line the case's code at its
+	 * effective rate.
+	 *
+	 * @param \stdClass|array<string,mixed> $p
+	 * @return array{0:string,1:float}
+	 */
+	public static function lineCategory(\stdClass|array $p, float $default, string $taxCase, ?string $customerCountry): array {
+		if (VatLines::isPassThrough($p)) {
+			return [self::CODE_EXEMPT, 0.0];
+		}
+		$rate = VatLines::rateOf($p, $default, $taxCase);
+		return [self::code($taxCase, $rate, $customerCountry), $rate];
+	}
+
+	/**
+	 * The VAT breakdown of the e-invoice (0.21.0): one group per rate of
+	 * the taxable lines with the case's code and note, and the pass-through
+	 * items as one group E. EN 16931 allows one group per category and
+	 * rate (BR-E-01: exactly one E): an export to an EU customer (E) and
+	 * pass-through items share it, with both reasons and no reason code.
+	 *
+	 * @return list<array{code:string,rate:float,basis:float,tax:float,reason:?string,reason_code:?string}>
+	 */
+	public static function breakdown(VatLines $sums, string $taxCase, ?string $customerCountry, bool $withPassThrough): array {
+		$groups = [];
+		$note = self::note($taxCase, DocumentRules::EN);
+		foreach ($sums->lines as $l) {
+			$code = self::code($taxCase, $l['rate'], $customerCountry);
+			$groups[self::groupKey($code, $l['rate'])] = ['code' => $code, 'rate' => $l['rate'], 'basis' => $l['net'], 'tax' => $l['vat'], 'reason' => $note, 'reason_code' => self::exemptionCode($code)];
+		}
+		if ($withPassThrough) {
+			$k = self::groupKey(self::CODE_EXEMPT, 0.0);
+			if (isset($groups[$k])) {
+				$g = $groups[$k];
+				$groups[$k] = ['code' => self::CODE_EXEMPT, 'rate' => 0.0, 'basis' => round($g['basis'] + $sums->passThrough, 2), 'tax' => $g['tax'],
+					'reason' => trim(($g['reason'] ?? '') . ' ' . self::PASS_THROUGH_REASON), 'reason_code' => null];
+			} else {
+				$groups[$k] = ['code' => self::CODE_EXEMPT, 'rate' => 0.0, 'basis' => $sums->passThrough, 'tax' => 0.0, 'reason' => self::PASS_THROUGH_REASON, 'reason_code' => self::PASS_THROUGH_CODE];
+			}
+		}
+		return array_values($groups);
+	}
+
+	/** The key of a tax group: category and rate. */
+	public static function groupKey(string $code, float $rate): string {
+		return $code . '|' . number_format($rate, 2, '.', '');
 	}
 }
