@@ -8,16 +8,14 @@ namespace OCA\TimeSister\Service;
 
 /**
  * Invoice documents (0.19.0), the pure part: the team setting `documents`
- * (folders in the backup owner's files, per year, chain mail), the
- * default folders, file names, the year subfolder, the chain line on
- * every page, the watermark and the labels of the document in German and
- * English. The services (DocumentService, DocumentFolder, InvoicePdf) do
- * the reading, the files and the PDF.
+ * (since 0.22.0 the root of the document tree and the chain mail; the
+ * paths below it come from DocumentTree), the chain line on every page,
+ * the watermark and the labels of the document in German and English.
+ * The services (DocumentService, DocumentFolder, InvoicePdf) do the
+ * reading, the files and the PDF.
  */
 final class DocumentRules {
 	public const FIELD = 'documents';
-	public const DEFAULT_INVOICES = 'TimeSister Invoices';
-	public const DEFAULT_QUOTES = 'TimeSister Quotes';
 	public const PATH_MAX = 255;
 	public const MAIL_MAX = 254;
 	public const MAX_TRIES = 10;
@@ -30,8 +28,10 @@ final class DocumentRules {
 	public const KIND_XRECHNUNG = 'xrechnung';
 	public const DE = 'de';
 	public const EN = 'en';
-	/** The settings with their defaults. */
-	public const DEFAULTS = ['invoices' => null, 'quotes' => null, 'per_year' => true, 'chain_mail' => null];
+	/** The settings with their defaults (0.22.0: the tree's root; null = `TimeSister/<team>`). */
+	public const DEFAULTS = ['root' => null, 'chain_mail' => null];
+	/** The folders of 0.19.0: ignored on write, never returned (0.22.0, no transition). */
+	public const GONE = ['invoices', 'quotes', 'per_year'];
 	private const CONTROL = '/[\x00-\x1F\x7F]/';
 
 	// ----------------------------------------------------------- settings
@@ -39,29 +39,26 @@ final class DocumentRules {
 	/**
 	 * The stored setting (JSON, null = defaults) as the API hands it out.
 	 *
-	 * @return array{invoices:?string,quotes:?string,per_year:bool,chain_mail:?string}
+	 * @return array{root:?string,chain_mail:?string}
 	 */
 	public static function settings(?string $json): array {
 		$out = self::DEFAULTS;
 		$v = $json === null || $json === '' ? null : json_decode($json, true);
 		if (is_array($v)) {
-			foreach (['invoices', 'quotes', 'chain_mail'] as $k) {
+			foreach (['root', 'chain_mail'] as $k) {
 				$out[$k] = isset($v[$k]) && is_string($v[$k]) && $v[$k] !== '' ? $v[$k] : null;
-			}
-			if (array_key_exists('per_year', $v)) {
-				$out['per_year'] = $v['per_year'] === true;
 			}
 		}
 		return $out;
 	}
 
 	/**
-	 * `documents` from a body: an object with `invoices`, `quotes`,
-	 * `per_year` and `chain_mail`; a missing key keeps the stored value,
-	 * unknown keys, a malformed path or address: 422.
+	 * `documents` from a body: an object with `root` and `chain_mail`; a
+	 * missing key keeps the stored value, the folders of 0.19.0 are
+	 * ignored, other keys, a malformed path or address: 422.
 	 *
-	 * @param array{invoices:?string,quotes:?string,per_year:bool,chain_mail:?string} $current
-	 * @return array{invoices:?string,quotes:?string,per_year:bool,chain_mail:?string}
+	 * @param array{root:?string,chain_mail:?string} $current
+	 * @return array{root:?string,chain_mail:?string}
 	 */
 	public static function validate(mixed $v, array $current): array {
 		if ($v instanceof \stdClass) {
@@ -72,16 +69,12 @@ final class DocumentRules {
 		}
 		$out = $current;
 		foreach ($v as $key => $value) {
+			if (in_array($key, self::GONE, true)) {
+				continue;
+			}
 			switch ($key) {
-				case 'invoices':
-				case 'quotes':
-					$out[$key] = self::path($value, self::FIELD . '.' . $key);
-					break;
-				case 'per_year':
-					if (!is_bool($value)) {
-						throw ApiException::notBool(self::FIELD . '.per_year');
-					}
-					$out['per_year'] = $value;
+				case 'root':
+					$out['root'] = self::path($value, self::FIELD . '.root');
 					break;
 				case 'chain_mail':
 					$out['chain_mail'] = self::mail($value);
@@ -94,7 +87,7 @@ final class DocumentRules {
 	}
 
 	/** A folder path: 1–255 characters, no `..`, no leading `/`, no control characters; null or empty: the default. */
-	private static function path(mixed $v, string $field): ?string {
+	public static function path(mixed $v, string $field): ?string {
 		if ($v === null || $v === '') {
 			return null;
 		}
@@ -136,6 +129,11 @@ final class DocumentRules {
 		return $s === self::DEFAULTS ? null : json_encode($s, Json::FLAGS);
 	}
 
+	/** The team's root folder: the setting or `TimeSister/<team>`. @param array{root:?string,...} $s */
+	public static function rootOf(array $s, string $teamName): string {
+		return DocumentTree::root($s['root'], $teamName);
+	}
+
 	// ------------------------------------------------------------- folders
 
 	/** A team name as a folder name: no slashes, no control characters. */
@@ -144,36 +142,10 @@ final class DocumentRules {
 		return $n === '' || $n === '.' || $n === '..' ? 'Team' : $n;
 	}
 
-	/** The invoices folder of a team: the setting or `TimeSister Invoices/<team>`. @param array{invoices:?string,...} $s */
-	public static function invoicesFolder(array $s, string $teamName): string {
-		return $s['invoices'] ?? self::DEFAULT_INVOICES . '/' . self::folderName($teamName);
-	}
-
-	/** The quotes folder of a team: the setting or `TimeSister Quotes/<team>`. @param array{quotes:?string,...} $s */
-	public static function quotesFolder(array $s, string $teamName): string {
-		return $s['quotes'] ?? self::DEFAULT_QUOTES . '/' . self::folderName($teamName);
-	}
-
-	/** The year of a day (`YYYY-MM-DD`). */
-	public static function year(string $day): string {
-		return substr($day, 0, 4);
-	}
-
-	/** Where an invoice's documents go: the invoices folder, plus the year of the issue date when `per_year`. @param array{invoices:?string,per_year:bool,...} $s */
-	public static function invoiceFolder(array $s, string $teamName, string $issuedOn): string {
-		$folder = self::invoicesFolder($s, $teamName);
-		return $s['per_year'] ? $folder . '/' . self::year($issuedOn) : $folder;
-	}
-
 	/** `<number>.pdf` – the number without slashes and control characters. */
 	public static function fileName(string $number, string $kind = self::KIND_PDF): string {
 		$n = trim((string)preg_replace(self::CONTROL, '', str_replace(['/', '\\'], '-', $number)));
 		return ($n === '' ? 'invoice' : $n) . '.' . $kind;
-	}
-
-	/** `chain-<YYYY-MM-DD>.txt` – the daily chain head file. */
-	public static function chainFileName(string $day): string {
-		return 'chain-' . $day . '.txt';
 	}
 
 	/** The text of the chain head file and mail. */
@@ -229,6 +201,10 @@ final class DocumentRules {
 				'code' => 'Code', 'title' => 'Titel', 'total' => 'Total', 'page' => 'Seite {n} von {total}', 'payment_part' => 'Zahlteil',
 				'on' => 'auf', 'gross_vat' => 'Total inkl. MWST', 'pass_through' => 'Durchlaufende Posten (ohne MWST)',
 				'pass_through_sum' => 'Summe durchlaufende Posten',
+				'receipt' => 'Beleg', 'copy_missing' => 'Die Kopie dieses Belegs liess sich nicht einbinden. Die Datei liegt hier:',
+				'copy_more' => '… und {n} weitere Seiten in der Datei des Belegs.', 'copy_unreadable' => 'Die Datei fehlt.',
+				'report' => 'Spesenblatt', 'supplier' => 'Lieferant', 'text' => 'Text', 'gross_col' => 'Brutto', 'without_receipt' => 'ohne Beleg',
+				'sign_person' => 'Unterschrift Person', 'sign_approval' => 'Freigabe', 'team' => 'Team', 'status' => 'Stand',
 			];
 		}
 		return [
@@ -240,6 +216,10 @@ final class DocumentRules {
 			'code' => 'Code', 'title' => 'Title', 'total' => 'Total', 'page' => 'Page {n} of {total}', 'payment_part' => 'Payment part',
 			'on' => 'on', 'gross_vat' => 'Total incl. VAT', 'pass_through' => 'Pass-through items (no VAT)',
 			'pass_through_sum' => 'Pass-through items',
+			'receipt' => 'Receipt', 'copy_missing' => 'The copy of this receipt could not be embedded. The file is here:',
+			'copy_more' => '… and {n} more pages in the receipt’s file.', 'copy_unreadable' => 'The file is missing.',
+			'report' => 'Expense report', 'supplier' => 'Supplier', 'text' => 'Text', 'gross_col' => 'Gross', 'without_receipt' => 'without receipt',
+			'sign_person' => 'Signature person', 'sign_approval' => 'Approval', 'team' => 'Team', 'status' => 'Status',
 		];
 	}
 

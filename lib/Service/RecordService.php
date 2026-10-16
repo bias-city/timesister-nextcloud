@@ -38,6 +38,7 @@ final class RecordService {
 		private RecordRights $rights,
 		private TenantService $team,
 		private InvInvoiceMapper $invoices,
+		private CostWrites $costs,
 	) {
 	}
 
@@ -339,6 +340,29 @@ final class RecordService {
 		]], false)['records'][0];
 	}
 
+	/**
+	 * The server's own write of one record (0.22.0: approving, filing a
+	 * receipt, a quote's document): its fields as given, on the version
+	 * read before – a write in between is a conflict.
+	 *
+	 * @return array<string,mixed> the new record
+	 */
+	public function writeAsServer(Membership $m, string $kind, string $key, int $version, \stdClass $data): array {
+		$v = RecordValidator::validate($kind, $key, $data);
+		$ops = [['kind' => $kind, 'key' => $key, 'version' => $version, 'json' => $v['json'], 'accounts' => $v['accounts']]];
+		$this->db->beginTransaction();
+		try {
+			$out = $this->applyWithin($m, $ops, false, null, true);
+			$this->db->commit();
+			return $out['records'][0];
+		} catch (\Throwable $e) {
+			if ($this->db->inTransaction()) {
+				$this->db->rollBack();
+			}
+			throw $e;
+		}
+	}
+
 	/** "Account deleted" note on an account's persons, across all teams. */
 	public function markAccountDeleted(string $uid): int {
 		$now = $this->time->getTime();
@@ -387,11 +411,13 @@ final class RecordService {
 		try {
 			$out = $this->applyWithin($m, $ops, $batch);
 			$this->db->commit();
+			$this->costs->afterCommit();
 			return $out;
 		} catch (\Throwable $e) {
 			if ($this->db->inTransaction()) {
 				$this->db->rollBack();
 			}
+			$this->costs->discard();
 			throw $e;
 		}
 	}
@@ -414,6 +440,7 @@ final class RecordService {
 		$plans = [];
 		$problems = [];
 		$own = null;
+		$costs = new CostBatch();
 		foreach ($ops as $op) {
 			$cur = $this->records->findOne($m->tenantId, $op['kind'], $op['key']);
 			[$outcome, $newVersion] = VersionCheck::decide(
@@ -425,7 +452,7 @@ final class RecordService {
 				$problems[] = ['op' => $op, 'outcome' => $outcome, 'current' => $cur === null ? null : $this->present($cur)];
 				continue;
 			}
-			if (in_array($op['kind'], RecordRights::AGAINST_STORED, true)) {
+			if ($op['kind'] === QuoteRules::KIND || $op['kind'] === InvoiceRules::KIND) {
 				// A Lead's invoice or quote against the stored state, under the team lock.
 				try {
 					if ($op['kind'] === QuoteRules::KIND) {
@@ -433,6 +460,14 @@ final class RecordService {
 					} else {
 						$this->rights->requireInvoiceWrite($m, $cur, $op['json']);
 					}
+				} catch (ApiException $e) {
+					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+				}
+			}
+			if (!$system && CostWrites::handles($op['kind'])) {
+				// 0.22.0: receipts, expense rules and reports against the stored record; the server's fields kept.
+				try {
+					$op['json'] = $this->costs->prepare($m, $op, $cur, $costs);
 				} catch (ApiException $e) {
 					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
 				}
@@ -465,41 +500,80 @@ final class RecordService {
 				}
 			}
 			$rev++;
-			$isDelete = $op['json'] === null;
-			$r = $cur ?? new Record();
-			if ($cur === null) {
-				$r->setTenantId($m->tenantId);
-				$r->setKind($op['kind']);
-				$r->setRkey($op['key']);
-			}
-			// An invoice's or quote's tombstone keeps its last data (never handed out): who may read it.
-			$r->setData($isDelete && in_array($op['kind'], RecordRights::AGAINST_STORED, true) ? $cur?->getData() : $op['json']);
-			if (!$isDelete) {
-				// A tombstone keeps the accounts: this is how the person learns their record is gone.
-				$r->setAccounts($op['accounts'] === [] ? null : Json::encode($op['accounts']));
-			}
-			$r->setVersion($newVersion);
-			$r->setRevision($rev);
-			$r->setDeleted($isDelete ? 1 : 0);
-			$r->setModifiedBy($m->uid);
-			$r->setModifiedAt($now);
-			$r = $cur === null ? $this->records->insert($r) : $this->records->update($r);
-
-			$h = new History();
-			$h->setTenantId($m->tenantId);
-			$h->setKind($op['kind']);
-			$h->setRkey($op['key']);
-			$h->setVersion($newVersion);
-			$h->setDeleted($isDelete ? 1 : 0);
-			$h->setData($op['json']);
-			$h->setModifiedBy($m->uid);
-			$h->setModifiedAt($now);
-			$this->history->insert($h);
-
-			$out[] = $this->present($r);
+			$out[] = $this->present($this->store($m, $op, $cur, $newVersion, $rev, $now));
 		}
+		$top = $this->applyMarks($m, $costs, $top, $now);
 		$top = $this->deliverAgain($m->tenantId, $top, $scope);
 		return ['revision' => $top, 'records' => $out];
+	}
+
+	/**
+	 * One record and its history row.
+	 *
+	 * @param array{kind:string,key:string,json:?string,accounts:?list<string>,...} $op
+	 */
+	private function store(Membership $m, array $op, ?Record $cur, int $newVersion, int $rev, int $now): Record {
+		$isDelete = $op['json'] === null;
+		$r = $cur ?? new Record();
+		if ($cur === null) {
+			$r->setTenantId($m->tenantId);
+			$r->setKind($op['kind']);
+			$r->setRkey($op['key']);
+		}
+		// An invoice's, quote's or receipt's tombstone keeps its last data (never handed out): who may read it.
+		$r->setData($isDelete && in_array($op['kind'], RecordRights::AGAINST_STORED, true) ? $cur?->getData() : $op['json']);
+		if (!$isDelete && $op['accounts'] !== null) {
+			// A tombstone keeps the accounts: this is how the person learns their record is gone.
+			$r->setAccounts($op['accounts'] === [] ? null : Json::encode($op['accounts']));
+		}
+		$r->setVersion($newVersion);
+		$r->setRevision($rev);
+		$r->setDeleted($isDelete ? 1 : 0);
+		$r->setModifiedBy($m->uid);
+		$r->setModifiedAt($now);
+		$r = $cur === null ? $this->records->insert($r) : $this->records->update($r);
+
+		$h = new History();
+		$h->setTenantId($m->tenantId);
+		$h->setKind($op['kind']);
+		$h->setRkey($op['key']);
+		$h->setVersion($newVersion);
+		$h->setDeleted($isDelete ? 1 : 0);
+		$h->setData($op['json']);
+		$h->setModifiedBy($m->uid);
+		$h->setModifiedAt($now);
+		$this->history->insert($h);
+		return $r;
+	}
+
+	/**
+	 * After an expense report's write (0.22.0): its receipts note it in
+	 * `report`, the ones it no longer holds lose it – the server's own
+	 * writes, each with a new version and revision.
+	 *
+	 * @return int the team's revision afterwards
+	 */
+	private function applyMarks(Membership $m, CostBatch $costs, int $top, int $now): int {
+		$writes = [];
+		foreach ($costs->marks as $key => $report) {
+			$r = $this->records->findOne($m->tenantId, ReceiptRules::KIND, $key);
+			$d = $r === null || $r->isTombstone() ? null : InvoiceRules::decode($r->getData());
+			if ($r === null || $d === null || ($d->report ?? null) === $report) {
+				continue;
+			}
+			$d->report = $report;
+			$writes[] = [$r, Json::encode($d)];
+		}
+		if ($writes === []) {
+			return $top;
+		}
+		$top = $this->tenants->bumpRevision($m->tenantId, count($writes));
+		$rev = $top - count($writes);
+		foreach ($writes as [$r, $json]) {
+			$rev++;
+			$this->store($m, ['kind' => ReceiptRules::KIND, 'key' => $r->getRkey(), 'json' => $json, 'accounts' => null], $r, $r->getVersion() + 1, $rev, $now);
+		}
+		return $top;
 	}
 
 	/**

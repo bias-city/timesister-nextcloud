@@ -159,6 +159,18 @@ class PrivacyNoticeTest extends TestCase {
 		$this->assertStringContainsString('no shared vacation calendar is set up', $none);
 	}
 
+	/** 0.22.0: with the module costs the notice names receipts, expense rules and reports. */
+	public function testCostsModuleIsNamed(): void {
+		$off = PrivacyFormat::markdown(self::doc());
+		$this->assertStringNotContainsString('Costs and expenses', $off);
+		$this->assertStringContainsString('Not recorded: hourly rates, salaries, expenses,', $off);
+		$on = PrivacyFormat::markdown(self::doc(['modules' => ['jobs' => true, 'budgets' => true, 'customers' => true, 'costs' => true]]));
+		$this->assertStringContainsString('- Costs: cost positions of budgets, receipts with their files', $on);
+		$this->assertStringContainsString('Costs and expenses', $on);
+		$this->assertStringContainsString('Receipts and expenses: each person their own', $on);
+		$this->assertStringContainsString('Not recorded: hourly rates, salaries, location data', $on);
+	}
+
 	public function testProjectsLedByFollowsPersonKeysAndAccounts(): void {
 		$person = static function (string $key, array $accounts): Record {
 			$r = new Record();

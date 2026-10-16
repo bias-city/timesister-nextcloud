@@ -12,11 +12,11 @@ use OCP\Files\IRootFolder;
 use OCP\Files\NotFoundException;
 
 /**
- * The document folders in the backup owner's files (0.19.0): resolving a
- * path segment by segment (a group folder lies at the root there),
- * creating what is missing, checking that a chosen folder exists or can
- * be created and is writable, writing and reading a file. Nothing is ever
- * deleted here.
+ * The document tree in the backup owner's files (0.19.0, tree since
+ * 0.22.0): resolving a path segment by segment (a group folder lies at the
+ * root there), creating what is missing, checking that the root exists or
+ * can be created and is writable, writing, reading, renaming a file once
+ * and moving a replaced one to the owner's trash.
  */
 final class DocumentFolder {
 	public function __construct(
@@ -128,6 +128,54 @@ final class DocumentFolder {
 			return null;
 		}
 		return $node instanceof File ? $node : null;
+	}
+
+	/** A name in the folder not taken yet ({@see DocumentTree::unique()}); the folder need not exist. */
+	public function freeName(string $owner, string $folder, string $name): string {
+		try {
+			$dir = $this->resolve($owner, $folder, false);
+		} catch (NotFoundException) {
+			return $name;
+		}
+		return DocumentTree::unique($name, static fn (string $n): bool => $dir->nodeExists($n));
+	}
+
+	/**
+	 * Writes a new file under a free name in the folder (`_2` …), unless
+	 * `$replace` names the file this one replaces: then that path is
+	 * overwritten when the name is the same, else it goes to the trash.
+	 *
+	 * @return array{path:string,file_id:int,size:int}
+	 */
+	public function store(string $owner, string $folder, string $name, string $content, ?string $replace): array {
+		if ($replace !== null && $replace === $folder . '/' . $name && $this->read($owner, $replace) !== null) {
+			return $this->write($owner, $folder, $name, $content);
+		}
+		$written = $this->write($owner, $folder, $this->freeName($owner, $folder, $name), $content);
+		if ($replace !== null && $replace !== $written['path']) {
+			$this->trash($owner, $replace);
+		}
+		return $written;
+	}
+
+	/** Moves a file to `<folder>/<name>` (a free name), creating the folders. @return string the new path */
+	public function move(string $owner, string $path, string $folder, string $name): string {
+		if ($path === $folder . '/' . $name) {
+			return $path;
+		}
+		$file = $this->read($owner, $path) ?? throw new NotFoundException($path);
+		$dir = $this->resolve($owner, $folder, true);
+		$free = DocumentTree::unique($name, static fn (string $n): bool => $dir->nodeExists($n));
+		$file->move($dir->getPath() . '/' . $free);
+		return $folder . '/' . $free;
+	}
+
+	/** The file goes to the owner's trash (files_trashbin); a missing file is fine. */
+	public function trash(string $owner, string $path): void {
+		$file = $this->read($owner, $path);
+		if ($file !== null) {
+			$file->delete();
+		}
 	}
 
 	/** The folder at a path, created when `$create`; NotFoundException otherwise. */

@@ -160,7 +160,8 @@ final class IssueService {
 		$dueOn = IssueRules::dueOn($issuedOn, $dueDays);
 
 		// The team lock first: one issue at a time, the revision for the marks and the record.
-		$top = $this->tenants->bumpRevision($tid, 1 + count($bookings));
+		$receipts = $r['receipts'];
+		$top = $this->tenants->bumpRevision($tid, 1 + count($bookings) + count($receipts));
 		[$number, $counterNo] = $this->takeNumber($tid, $settings, $issuedOn, $projectKey, $customerKey, $now);
 		// 0.20.0: a QR-IBAN in the currency gets the QR reference from the BESR id, the counter and the year.
 		$account = IssueRules::accountOf($issuer, $currency);
@@ -206,6 +207,10 @@ final class IssueService {
 		$ops = [];
 		foreach ($bookings as $b) {
 			$ops[] = $this->markOp($tid, (string)$b->person, (string)$b->uid, $issuedOn, $m->uid, $number);
+		}
+		// 0.22.0: the receipts on the invoice are billed by it, in the same transaction.
+		foreach (array_keys($receipts) as $rk) {
+			$ops[] = $this->receiptOp($tid, $rk, ReceiptRules::BILLED, $key);
 		}
 		$d->status = InvInvoice::ISSUED;
 		$d->number = $number;
@@ -278,6 +283,20 @@ final class IssueService {
 		$v = RecordValidator::validate(BillingRules::KIND, $key, $data);
 		$cur = $this->records->findOne($tenantId, BillingRules::KIND, $key);
 		return ['kind' => BillingRules::KIND, 'key' => $key, 'version' => $cur?->getVersion() ?? 0, 'json' => $v['json'], 'accounts' => $v['accounts']];
+	}
+
+	/**
+	 * A receipt billed by an invoice, or released again (approved, no invoice).
+	 *
+	 * @return array{kind:string,key:string,version:int,json:?string,accounts:?list<string>}
+	 */
+	private function receiptOp(int $tenantId, string $key, string $status, ?string $invoice): array {
+		$cur = $this->records->findOne($tenantId, ReceiptRules::KIND, $key);
+		$d = InvoiceRules::decode($cur?->getData()) ?? throw ApiException::invalid(Message::of('The receipt {key} does not exist.', ['key' => $key]));
+		$d->status = $status;
+		$d->invoice = $invoice;
+		$v = RecordValidator::validate(ReceiptRules::KIND, $key, $d);
+		return ['kind' => ReceiptRules::KIND, 'key' => $key, 'version' => $cur?->getVersion() ?? 0, 'json' => $v['json'], 'accounts' => $v['accounts']];
 	}
 
 	/** @return array{kind:string,key:string,version:int,json:?string,accounts:?list<string>} */
@@ -385,7 +404,17 @@ final class IssueService {
 				}
 			}
 		}
-		$top = $this->tenants->bumpRevision($tid, 1 + ($kind === IssueRules::REVERSAL ? 1 + count($release) : 0));
+		// 0.22.0: a reversal releases the receipts the original billed.
+		$receipts = [];
+		if ($kind === IssueRules::REVERSAL) {
+			foreach (ReceiptFiles::keysOf($origPositions) as $rk) {
+				$rd = $this->live($tid, ReceiptRules::KIND, $rk);
+				if (($rd?->status ?? null) === ReceiptRules::BILLED && ($rd?->invoice ?? null) === $key) {
+					$receipts[] = $rk;
+				}
+			}
+		}
+		$top = $this->tenants->bumpRevision($tid, 1 + ($kind === IssueRules::REVERSAL ? 1 + count($release) + count($receipts) : 0));
 		[$number, $counterNo] = $this->takeNumber($tid, $settings, $issuedOn, $orig->getProject(), $orig->getCustomer(), $now);
 
 		$row = new InvInvoice();
@@ -461,6 +490,9 @@ final class IssueService {
 			$ops[] = $this->invoiceOp($key, $cur, $d);
 			foreach ($release as $mark) {
 				$ops[] = $this->deleteOp(BillingRules::KIND, $mark);
+			}
+			foreach ($receipts as $rk) {
+				$ops[] = $this->receiptOp($tid, $rk, ReceiptRules::APPROVED, null);
 			}
 		}
 		$written = $this->recordService->applyWithin($m, $ops, false, $top, true);

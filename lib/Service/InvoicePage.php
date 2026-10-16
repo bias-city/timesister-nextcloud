@@ -11,9 +11,10 @@ namespace OCA\TimeSister\Service;
  * preview drawn first on every page (so it lies under the content) and the
  * footer – the team's footer text, the chain line and the page number –
  * drawn on every page. On the page with the QR bill the footer sits above
- * the payment part.
+ * the payment part. Since 0.22.0 FPDI underneath: receipt copies import
+ * PDF pages, and a page may carry a small head of its own.
  */
-final class InvoicePage extends \TCPDF {
+final class InvoicePage extends \setasign\Fpdi\Tcpdf\Fpdi {
 	public const FONT = 'dejavusans';
 	public const MARGIN = 20.0;
 	/** Room for the footer text (up to three lines), the chain line and the page number. */
@@ -26,6 +27,7 @@ final class InvoicePage extends \TCPDF {
 	private string $chainLine = '';
 	private string $pageLabel = 'Page {n} of {total}';
 	private int $qrPage = 0;
+	private ?string $pageHead = null;
 
 	public function __construct() {
 		parent::__construct('P', 'mm', 'A4', true, 'UTF-8', false);
@@ -49,6 +51,11 @@ final class InvoicePage extends \TCPDF {
 		$this->pageLabel = $pageLabel;
 	}
 
+	/** A small head on the pages added from now on (a receipt copy); null: none. */
+	public function setPageHead(?string $text): void {
+		$this->pageHead = $text;
+	}
+
 	/** The current page carries the QR bill at its bottom. */
 	public function markQrPage(): void {
 		$this->qrPage = $this->getPage();
@@ -56,6 +63,15 @@ final class InvoicePage extends \TCPDF {
 
 	/** The watermark, diagonally across the page, light grey, under the content. */
 	public function Header(): void {
+		if ($this->pageHead !== null) {
+			$this->SetAutoPageBreak(false, 0);
+			$this->SetTextColor(60, 60, 60);
+			$this->SetFont(self::FONT, 'B', 8);
+			$this->SetXY(self::MARGIN, 10);
+			$this->Cell(170, 4, $this->pageHead, 0, 0, 'L');
+			$this->SetTextColor(0, 0, 0);
+			$this->SetAutoPageBreak(true, self::BOTTOM);
+		}
 		if ($this->watermark === null) {
 			return;
 		}

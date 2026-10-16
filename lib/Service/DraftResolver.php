@@ -9,6 +9,7 @@ namespace OCA\TimeSister\Service;
 use OCA\TimeSister\Db\EntryMapper;
 use OCA\TimeSister\Db\InvHourMapper;
 use OCA\TimeSister\Db\InvInvoice;
+use OCA\TimeSister\Db\InvInvoiceMapper;
 use OCA\TimeSister\Db\Record;
 use OCA\TimeSister\Db\RecordMapper;
 
@@ -25,6 +26,7 @@ final class DraftResolver {
 		private RecordMapper $records,
 		private EntryMapper $entries,
 		private InvHourMapper $hours,
+		private InvInvoiceMapper $invoices,
 	) {
 	}
 
@@ -47,7 +49,7 @@ final class DraftResolver {
 	/**
 	 * The draft with everything resolved; throws what issuing would throw.
 	 *
-	 * @return array{record:Record,d:\stdClass,project:\stdClass,projectKey:string,budget:\stdClass,currency:string,customerKey:string,customer:\stdClass,customerBlock:\stdClass,settings:?\stdClass,issuer:\stdClass,vat:float,bookings:list<\stdClass>,positions:list<\stdClass>,sums:VatLines,hours:list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string}>}
+	 * @return array{record:Record,d:\stdClass,project:\stdClass,projectKey:string,budget:\stdClass,currency:string,customerKey:string,customer:\stdClass,customerBlock:\stdClass,settings:?\stdClass,issuer:\stdClass,vat:float,bookings:list<\stdClass>,positions:list<\stdClass>,sums:VatLines,hours:list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string}>,receipts:array<string,\stdClass>}
 	 */
 	public function resolve(int $tenantId, string $key): array {
 		[$cur, $d] = $this->invoiceRecord($tenantId, $key);
@@ -67,6 +69,17 @@ final class DraftResolver {
 		$bookings = IssueRules::bookingsOf($d);
 		$this->requireBillable($tenantId, $bookings);
 		$positions = IssueRules::positionsOf($d);
+		// 0.22.0: the receipts of the costs lines, the markup and the expense percentage.
+		$receipts = [];
+		foreach (ReceiptFiles::keysOf($positions) as $k) {
+			$rd = $this->live($tenantId, ReceiptRules::KIND, $k);
+			if ($rd !== null) {
+				$receipts[$k] = $rd;
+			}
+		}
+		ReceiptLineRules::check($positions, $receipts, $projectKey, (string)$d->budget, $key,
+			fn (string $k): string => $this->invoices->findByKey($tenantId, $k)?->getNumber() ?? $k);
+		$positions = ReceiptLineRules::prepare($positions, $receipts);
 		// 0.20.0: the tax case is frozen with the customer; abroad the document carries no VAT.
 		$issuerCountry = $issuer->country ?? null;
 		$customerBlock = IssueRules::customerBlock($customer, $d, is_string($issuerCountry) ? $issuerCountry : null);
@@ -92,6 +105,7 @@ final class DraftResolver {
 			'positions' => $positions,
 			'sums' => $sums,
 			'hours' => IssueRules::hoursOf($bookings),
+			'receipts' => $receipts,
 		];
 	}
 

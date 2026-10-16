@@ -3172,7 +3172,7 @@ rely on it:
 
 Steps B1 and B2 of `PLAN-BELEGE.md`. Capabilities `vat_lines: 1` and
 `costs: 1`. Receipts (B3), invoicing from receipts (B4) and expense
-reports (B4a) follow in 0.22.0.
+reports (B4a) follow in 0.22.0 (section below).
 
 ### B1 – VAT and mode per invoice line
 
@@ -3348,3 +3348,418 @@ rely on it:
 - **Stored** (`Version1016Date20261016120000`, additive):
   `ts_inv_invoices` + `vat_lines_json` TEXT, `pass_through`
   DECIMAL(14,2), `total` DECIMAL(14,2), null for invoices issued before.
+
+## Receipts, expense reports and the document tree, 0.22.0 (2026-10-16) – wave 2 of PLAN-BELEGE
+
+Steps B3, B4 and B4a of `PLAN-BELEGE.md` and its section «Ablage in
+Nextcloud». Capabilities `receipts: 1`, `expense_reports: 1`,
+`document_tree: 1`. Everything below is shown by clients only with
+`modules.costs`; the server stores and checks regardless. Recognition
+(B5) stays on the Mac.
+
+### The document tree (replaces the folders of 0.19.0)
+
+Team setting `documents` becomes:
+
+```json
+"documents": { "root": "TimeSister Example Team", "chain_mail": null }
+```
+
+- `root`: a folder path in the files of the team's **backup owner** (a
+  group folder lies at the root there). `null` = `TimeSister/<team name>`.
+  1–255 characters, no `..`, no leading `/`; written and checked as in
+  0.19.0 (Nextcloud admin page and `PUT /team/settings`). `invoices`,
+  `quotes` and `per_year` are gone (development, no transition): the
+  server ignores them on write and never returns them. Documents already
+  stored keep their path in their record.
+- The server alone writes into the tree, always as the backup owner,
+  through the normal file functions (`IRootFolder`, no Team folders API).
+  Fixed scheme:
+
+```
+<root>/
+  Buchhaltung/<YYYY>/Offerten/    <date>_<number>_<customer>.pdf
+  Buchhaltung/<YYYY>/Rechnungen/  <date>_<number>_<customer>.pdf | .xml
+  Buchhaltung/<YYYY>/Belege/      <date>_<supplier>_<gross>-<CUR>[_<project code>-K<cost>].<ext>
+  Buchhaltung/<YYYY>/Spesen/<person>/  <YYYY-MM>_Spesenblatt.pdf and the person's reimbursed receipts (same name as above)
+  Buchhaltung/<YYYY>/Kette/       chain-<YYYY-MM-DD>.txt
+  Projekte/<project code> <project name>/  Projektakte-<YYYY-MM-DD>.zip
+```
+
+- `<YYYY>`: year of the document date (issue date, quote date, receipt
+  date, end of the report period, chain date). Name parts: umlauts
+  transliterated (ä→ae, ß→ss …), everything but `A–Z a–z 0–9 . -` becomes
+  `-`, runs collapsed, each part at most 40 characters; amounts with two
+  decimals and a dot. A name taken in the folder gets `_2`, `_3` …
+  `<person>` is the display name made safe the same way.
+- One class decides every path and name (`DocumentTree`, pure, unit
+  tested); `DocumentFolder` writes.
+
+### Quote documents
+
+| Method | Path | Who | |
+|---|---|---|---|
+| PUT | `/quotes/{key}/document` | Team Admins, the quote's Lead | body: the PDF (`application/pdf`, ≤ 20 MB). The server stores it under `Offerten/`, replaces an earlier file of this quote, and sets `document: { path, sha256, size }` in the record. Answer: that object. |
+| GET | `/quotes/{key}/document` | who reads the quote | the file; `404` without one |
+
+The Mac app no longer writes quote PDFs over WebDAV.
+
+### Receipts (record `receipt`, B3)
+
+Key from the client (`rc-…`). Data:
+
+| Field | Rule |
+|---|---|
+| `schema` | 1 |
+| `kind` | `"receipt"` (with a file), `"trust"` (no file, approved one by one), `"recurring"` (from an `expense_rule`) |
+| `date` | `YYYY-MM-DD` |
+| `supplier`, `text` | 0–120 / 0–300 characters |
+| `net`, `vat_rate`, `vat`, `gross` | numbers; `vat_rate` `null` or 0–100; must hold `net + vat = gross` within 0.01, `vat = round(net × vat_rate / 100, 2)` within 0.01 when `vat_rate` is set |
+| `currency` | ISO code, default the team's |
+| `project`, `budget`, `cost` | all `null` (general cost) or project key + budget id + cost position no of that budget (must exist) |
+| `paid_by` | `"person"`, `"company"` or `"customer"` |
+| `person` | uid, required with `paid_by: person`, else `null` |
+| `reimburse` | bool; only `true` with `paid_by: person` |
+| `invoice_effect` | `"charge"`, `"show_only"` or `"none"`; without project always `none`. Defaults when missing: `customer` → `show_only`, else `charge` |
+| `note` | 0–300 characters (shown on the invoice line for `show_only`) |
+| `rule`, `period` | `recurring` only: the rule key and `YYYY-MM` / `YYYY-Qn` / `YYYY` |
+
+**Owned by the server** (ignored on write, the stored value is kept and
+returned): `status`, `file`, `invoice`, `report`, `created_by`,
+`created_on`, `approved_by`, `approved_on`, `reject_reason`.
+
+- `status`: `open` → `approved` | `rejected` | `internal`; `approved` →
+  `billed` (the server, at issue; back to `approved` on reversal).
+  General receipts (no project) are approved to `internal`. A `recurring`
+  receipt of an approved rule is `approved` at once.
+- **Rights:** Team Admins everything. A Lead reads and approves the
+  receipts of the projects they lead and their own. A member reads and
+  writes only receipts they created or where `person` is them. Writes
+  after `approved` only by Lead/Team Admin and only to `project`,
+  `budget`, `cost`, `invoice_effect`, `note`; after `billed` only `note`.
+  Deleting only while `open` or `rejected` (and the file goes to the
+  backup owner's trash).
+- Unique: one live `recurring` receipt per (`rule`, `period`) → `409
+  duplicate`; the period must lie within the rule's `from`–`to`.
+
+| Method | Path | Who | |
+|---|---|---|---|
+| PUT | `/receipts/{key}/file` | who may write the receipt, while `open` | body: PDF, JPEG or PNG, ≤ 20 MB. Stored under `Belege/` – or `Spesen/<person>/` when `reimburse` – named from the record; replaces an earlier file. Sets `file: { path, sha256, size, mime }`. |
+| GET | `/receipts/{key}/file` | who reads the receipt | the file |
+| POST | `/receipts/{key}/approve` | Lead of the project, Team Admins (general and trust: Team Admins) | renames the file once to the current name (project and cost in it), then never moves it again; status `approved` / `internal` |
+| POST | `/receipts/{key}/reject` | same | body `{ reason }` (1–300 characters); status `rejected` |
+
+### Expense rules (record `expense_rule`, B4a)
+
+`{ schema: 1, person, text, amount, vat_rate|null, period: "monthly"|"quarterly"|"yearly", from: "YYYY-MM-DD", to: null|"YYYY-MM-DD", project|null, budget|null, cost|null }`;
+server-owned `approved_by`, `approved_on`. Written by the person
+(member: only for themselves) and Team Admins; `POST
+/expense-rules/{key}/approve` by Team Admins (with project: also its
+Lead). Changing `amount`, `vat_rate` or `period` after approval clears
+the approval. Ending = setting `to`. The **client** creates the
+`recurring` receipt of each period that has begun (locally as in a team);
+the server only checks.
+
+### Expense reports (record `expense_report`, B4a)
+
+`{ schema: 1, person, from, to, receipts: [keys] }`; server-owned
+`status` (`submitted` → `approved` → `paid`), `sums: { net, vat_lines,
+gross }` (computed with `VatLines` from the receipts, `vat_rate null`
+counts as rate 0), `submitted_on`, `approved_by`, `approved_on`,
+`paid_on`, `document`.
+
+- Written by the person (or a Team Admin for them) = **submit**: every
+  receipt must be the person's, `reimburse: true`, `approved` or `billed`,
+  dated within `from`–`to`, and in no other live report (`409`). The
+  server sets `report` on each receipt; deleting the report (only while
+  `submitted`) clears it.
+- `POST /expense-reports/{key}/approve` (Team Admins; a Lead when every
+  receipt belongs to a project they lead): renders the PDF and stores it
+  in `Spesen/<person>/`. `POST /expense-reports/{key}/paid` `{ date }`
+  (Team Admins). `GET /expense-reports/{key}/document` (who reads it).
+- PDF (A4 portrait, like the invoice): head with team, person, period;
+  table date, supplier, text, project, net, VAT, gross, with «without
+  receipt» for `trust` and `recurring`; sums per rate; signature lines
+  person and approval (name and date of `approved_by`); then the receipt
+  copies. No ledger entry.
+- Rights: the person reads their own; Team Admins all; a Lead those they
+  may approve.
+
+### Invoicing from receipts (B4)
+
+Positions of an invoice draft may carry `receipts: [keys]` on kind
+`costs`, and two more kinds:
+
+| Kind | Rule |
+|---|---|
+| `costs` with `receipts[]` | one line per receipt or per cost position; `cost` required; the receipts must be `approved`, of this invoice's project and budget, of that `cost`, `invoice_effect` ≠ `none`, and in no other live invoice (`409`). `show_only` receipts are lines with `amount: 0`, `vat: 0` and their `note` |
+| `markup` | `cost` and `rate` (percent); `amount` = round(Σ amounts of this invoice's `charge` receipt lines of that `cost` × rate / 100, 2), checked within 0.01 |
+| `expense_percent` (0.21.0) | now checked: `amount` = round(Σ `hours` amounts × rate / 100, 2) within 0.01 |
+
+On issue the server sets `status: billed` and `invoice: <key>` on every
+receipt named, in the same transaction; reversal sets them back. The PDF
+(and the PDF/A of ZUGFeRD) gets the **receipt copies** after the hours
+appendix: PDF pages imported (FPDI), images fitted to A4, a small head
+«Receipt <date> <supplier>» and the chain line on every page. The preview
+shows them too. `fixed` positions keep `receipts[]`.
+
+### Project dossier
+
+`POST /projects/{key}/dossier` (Team Admins, the project's Lead): the
+server writes `Projekte/<code> <name>/Projektakte-<date>.zip` with the
+project's quote and invoice documents, the receipt files, `hours.csv`
+(the project's entries from the book) and `ledger.txt` (its ledger
+lines), and answers `{ path, size, sha256 }`. A second call the same day
+replaces the file.
+
+### Exports
+
+`GET /exports/expenses?from&to&format=csv|datev` (Team Admins): one row
+per receipt in approved or paid reports (person, report, date, supplier,
+text, project, net, VAT rate, VAT, gross, without receipt). DATEV: credit
+account = the person's `creditor_account` (new optional field of the
+person record, 1–9 digits), debit account = `datev.expense_account`
+(new setting); `422` when missing.
+
+### Privacy
+
+The privacy notice names the module costs (cost positions, receipts with
+files, expense reports and rules, who sees them) when `modules.costs` is
+on.
+
+### Mac app, locally (no Nextcloud)
+
+Same records in the local store (tables `beleg`, `spesenregel`,
+`spesenblatt`), files in the app's own folder, same rules and sums
+(`Summen`), invoice and expense report as Word; no tree, no dossier.
+
+### As built, 0.22.0 (2026-10-16)
+
+What the server does beyond or beside the lines above, so the Mac app can
+rely on it. No schema change: receipts, rules and reports are records,
+their files lie in the tree; `occ upgrade` runs no migration.
+
+**Records.** The kinds `receipt`, `expense_rule`, `expense_report` go
+through `/records` like the others (single, batch – a member's batch may
+hold them –, list, delta, history, restore). A tombstone keeps its last
+data, so who may read it still sees the deletion. Keys: a receipt
+`rc-` plus 1–125 of `A–Z a–z 0–9 . _ + @ -` (“The key of a receipt is
+“rc-” and up to 125 characters.”); rules and reports any record key.
+The server's fields are overwritten from the stored record on every
+client write (also on restore) and set on a new one; the answer of the
+write shows them.
+
+**Receipt – content and defaults** (422 `invalid`):
+- `schema` null or 1–1000; `kind` one of the three; `date` a day;
+  `supplier` ≤ 120, `text` ≤ 300, `note` ≤ 300 (null allowed).
+- `net`, `vat`, `gross` numbers (“net” must be a number.); `net + vat =
+  gross` and, with `vat_rate`, `vat = round(net × rate / 100, 2)`, each
+  within 0.01.
+- `currency` three letters (upper-cased); missing: the budget's currency,
+  else `settings.currency`, else `CHF` – stored in the record.
+- `project`, `budget`, `cost` all null or all set; the project must exist
+  and its budget carry that cost position (checked on every write that
+  sends them: “The budget of the project has no such cost position.”).
+- `person` required with `paid_by: person` and an account of the team
+  (also one who left): ““atuser1” is not an account of the team.”;
+  otherwise it must be null and is stored as null.
+- `reimburse` missing = `false`; `true` only with `paid_by: person`.
+- `invoice_effect` missing: no project → `none`, `customer` → `show_only`,
+  else `charge`; without a project anything but `none` is 422.
+- `rule`/`period` only on `recurring`, there both (period `YYYY-MM`,
+  `YYYY-Qn` or `YYYY`).
+
+**Receipt – status and writes.**
+- New: `status: open`, `created_by` = caller, `created_on` = today (UTC),
+  `file`, `invoice`, `report`, `approved_*`, `reject_reason` null.
+- A client write to a **rejected** receipt opens it again (`status: open`,
+  `reject_reason: null`) – addition to the contract, so a member can fix
+  and resubmit.
+- After approval (`approved`, `internal`, `billed`): only Team Admins and a
+  Lead of the project before **and** after the write (a general receipt:
+  only Team Admins), else 403 “After approval only Team Admins and the
+  project’s Leads change a receipt.”; other fields than `project`,
+  `budget`, `cost`, `invoice_effect`, `note` (billed: only `note`) → 409
+  `conflict` naming the field (“An approved receipt changes only in
+  project, budget, cost, invoice effect and note; “net” stays.” / “A billed
+  receipt changes only in “note”; “cost” stays.”). Moving an approved
+  receipt to no project makes it `internal`, back to a project `approved`.
+- Before approval a member writes what they created or paid (also
+  `person` set to someone else of the team); a Lead also the receipts of
+  the projects they lead, before and after.
+- Delete: 409 “An approved receipt is not deleted.” or “A receipt is
+  deleted only while open or rejected.”; the file goes to the backup
+  owner's trash after the commit.
+- **Recurring:** on create (or a new `rule`/`period`) the rule must exist
+  (422), be approved (422 “The expense rule is not approved yet.”), have
+  the receipt's `person` with `paid_by: person`; the period must have the
+  rule's form (monthly `YYYY-MM`, quarterly `YYYY-Qn`, yearly `YYYY`) and
+  **overlap** `from`–`to` (the month a rule starts in counts). One live
+  receipt per rule and period, also within one batch: 409 `duplicate`
+  “The receipt rc-… is already the one of this rule for 2026-02.” Status
+  `approved` (with project) or `internal` (general) at once, `approved_by`
+  = the writer, `approved_on` = today. The amount is not compared with
+  the rule's.
+
+**Receipt file** `PUT /receipts/{key}/file`: the type is taken from the
+content (`%PDF-`, JPEG, PNG; the Content-Type header is ignored), else 422
+“The file must be a PDF, JPEG or PNG.”; > 20 MB 413 “A file may be at
+most 20 MB.”; only kind `receipt` (422); only while `open` (409; a member
+after approval gets 403 first). Answer `{ path, sha256, size, mime,
+version }` – `version` is the record's new version. Folder `Belege/` of
+the receipt date's year, or `Spesen/<person display name, made safe>/`
+when `reimburse`; extension `pdf`/`jpg`/`png`. A file of the same name is
+overwritten; a different name (e.g. after a change of supplier) is written
+anew and the old file goes to the trash; a name taken by another receipt
+gets `_2`. `GET` answers the file with its `mime`; 404 “This receipt has
+no file.”
+
+**Approve / reject.** Only from `open` (409 “Only an open receipt is
+approved or rejected.”). Lead of the project or Team Admins; `trust` and
+general receipts Team Admins only (403). Kind `receipt` without file:
+422 “The receipt has no file yet.” Approving moves the file once to its
+current name and folder (project code = the project's first code, else
+its key: `…_D196-K2.pdf`); if the record write then fails, the file
+moves back. Sets `approved_by`, `approved_on`, `reject_reason: null`,
+`status` `approved`/`internal`. Reject body `{ reason }` 1–300 characters
+(422), sets `status: rejected`, `reject_reason`. Both answer the record.
+
+**Expense rules.** Content: `person` (required), `text` 1–300, `amount` ≥ 0,
+`vat_rate` null/0–100, `period`, `from`, `to` null or ≥ `from`, `project`/
+`budget`/`cost` as on a receipt (checked to exist). The person writes
+their own, Team Admins any (403 otherwise). A change of `amount`,
+`vat_rate` or `period` clears `approved_by`/`approved_on`; a client
+cannot set them. Delete only while not approved (409 “An approved
+expense rule is not deleted; end it by setting “to”.”). `POST
+/expense-rules/{key}/approve` (Team Admins; with a project its Leads)
+answers the record; read: the person, Team Admins, the project's Leads.
+
+**Expense reports.**
+- `receipts` 1–500 distinct receipt keys. Eligible: the report's
+  person, `reimburse: true`, status `approved`, **`internal`** or `billed`,
+  dated within `from`–`to`. `internal` is an addition: general reimbursed
+  receipts (phone, home office) are approved to `internal` and would
+  otherwise never reach a report.
+- In another live report (or another report of the same batch): 409
+  “The receipt rc-… is in the expense report sb-….”
+- `sums: { currency, net, vat_lines, gross }` – `currency` added; all
+  receipts in one currency, else 422.
+- Submitting, changing (while `submitted`) and deleting (while
+  `submitted`) set or clear `report` on the receipts as the server's own
+  writes in the same transaction (new version and revision of each
+  receipt; they are not in the write's answer, they come with the next
+  delta). After approval: 409 “An approved expense report does not
+  change.”
+- Approve: Team Admins, or a Lead when every receipt has a project they
+  lead (403). The PDF goes to `Spesen/<person>/<YYYY-MM of to>_Spesenblatt.pdf`
+  in the year of `to` (a taken name: `_2`); `document: { path, sha256,
+  size }`. Paid: Team Admins, body `{ date }` optional (default today),
+  only from `approved` (409). Document: 404 “This expense report has no
+  document yet; it is written on approval.”
+- PDF: A4 portrait, team, person, period; rows date, supplier, text
+  (+ «ohne Beleg»/«without receipt» for trust and recurring), project code,
+  net, VAT (with rate), gross; Netto, one line per rate, Total; signature
+  lines “Unterschrift Person: <name>” and “Freigabe: <name>, <date>”; then
+  the copies. Language as the invoice (team setting, else server).
+
+**Invoicing from receipts.**
+- Draft write: `receipts` only on kind `costs` (422 “Position n: Only a
+  “costs” line names receipts.”), a list of 1–500 receipt keys; new kind
+  `markup` (`rate` null or 0–100 on the draft).
+- Preview and issue check (422 unless said): a line with receipts needs
+  `cost`; each receipt exists, is `approved`, of the invoice's project,
+  budget and that `cost`, `invoice_effect` ≠ `none`, once per invoice;
+  `billed` by another invoice → 409 “Position n: The receipt rc-… is
+  billed by invoice RE-….”. Lines of `show_only` receipts hold only such
+  receipts and amount 0 (422 otherwise). `markup` needs `cost` and `rate`;
+  its base is Σ `amount` of this invoice's lines with `charge` receipts of
+  that `cost` (as sent). `expense_percent` now needs `rate` (422
+  “Position n: “rate” must be a percentage from 0 to 100.”). Both:
+  `amount` = round(base × rate / 100, 2) within 0.01, else “Position n:
+  The amount must be 10.00.”
+- Frozen: a `show_only` line gets `amount: 0`, `vat: 0` (pass-through:
+  `vat: null` as every pass-through line) and the receipt's `note`
+  appended to its text (“Druck – paid by the customer”) unless already in
+  it. `receipts[]` stays on the frozen positions.
+- Issue sets `status: billed`, `invoice: <key>` on every receipt named
+  (also `show_only`), reversal sets those billed by the original back to
+  `approved`, `invoice: null`; a credit note changes none. Server writes in
+  the issue transaction (new versions).
+- Copies after the hours appendix and before the QR bill, in the stored
+  PDF/A-3 (ZUGFeRD) and the preview: head «Beleg <date> <supplier>»
+  («Receipt …» in English), `(1/2)` per page of a multi-page PDF, at most
+  20 pages per receipt, the chain line in the footer. Receipts without a
+  file (trust, recurring) have none. **Limit:** the free FPDI parser
+  cannot read PDFs with a compressed cross-reference (object streams,
+  common in PDF 1.5+ from scanners and Preview); such a receipt gets a
+  page naming its path and SHA-256 instead. The PDF/A conformance of
+  imported pages is not checked.
+
+**Document tree.**
+- `documents` = `{ root, chain_mail }` in `/me`, `/team`,
+  `/admin/teams`; `invoices`, `quotes`, `per_year` are dropped silently on
+  write (other unknown keys stay 422). Stored paths of earlier documents
+  are kept in their rows and records.
+- `POST /admin/teams/{id}/documents/check` takes `{ root }` and answers
+  `{ root: { ok, message, path } }` (`path` = the resolved root,
+  `TimeSister/<team>` without one). The admin page has one field «Root
+  folder» with the check button.
+- Names: parts transliterated, `[^A-Za-z0-9.-]` → `-`, runs collapsed, no
+  `-` at the ends, ≤ 40 characters; **empty parts are left out**
+  (`2026-10-16_RE-1.pdf` without customer). Invoices
+  `<issued_on>_<number>_<customer name>.pdf|.xml` (the XRechnung file
+  beside it), the chain head `Buchhaltung/<year of the day>/Kette/chain-<day>.txt`,
+  projects `Projekte/<first code> <name>/` (each part made safe, joined by
+  a space). An invoice's document keeps its name when rendered again.
+
+**Quote documents.** `PUT`/`GET /quotes/{key}/document`: Team Admins and
+the Leads who read the quote (403 “Only Team Admins and the quote’s Leads
+read and write its document.”); PDF only (422 “The document must be a
+PDF.”), ≤ 20 MB (413). Name `<date>_<number>_<customer name>.pdf` with
+`date` = the quote's `date`, else `created_on`, else today; `number`,
+else the key; the customer's name, else its key. Answer `{ path, sha256,
+size, version }`. `document` is the server's: a client write keeps the
+stored value (sent or not) and cannot set one.
+
+**Project dossier.** `POST /projects/{key}/dossier`: Team Admins and the
+project's Leads (403), 404 without the project. ZIP entries:
+`Offerten/<file>` (live quotes of the project with a document),
+`Rechnungen/<file>` (PDF and XML of every rendered invoice of the
+project, reversals and credit notes included), `Belege/<file>` (live
+receipts of the project with a file; a repeated name gets `_2`),
+`hours.csv` (BOM, `;`: `person;event_uid;start;end;hours;series;codes;title`
+– one row per live event of the book whose codes name the project or a
+work package below it; a series is **not expanded**: `series` 1 and the
+hours of one occurrence; all-day events without hours) and `ledger.txt`
+(one line per ledger entry of the project's invoices: `seq at actor
+action number payload <hash> prev <hash> hash <hash>`). Answer `{ path,
+size, sha256 }`.
+
+**Export of expenses.** `GET /exports/expenses?from&to&format`: Team
+Admins (403 “Only Team Admins export expenses.”), independent of
+`invoicing`; `from`/`to` optional, filter on the **receipt's date**;
+`format` `csv` (default) or `datev` (422 otherwise). CSV head
+`person;person_name;report;report_status;date;supplier;text;project;currency;net;vat_rate;vat;gross;without_receipt`
+(`without_receipt` 1/0). DATEV: EXTF head as for invoices with the label
+«TimeSister Spesen»; per receipt Umsatz = |gross| (S, H when negative),
+Konto = `datev.expense_account`, Gegenkonto = the person's
+`creditor_account`, no BU key (input VAT is not split), Belegdatum DDMM,
+Belegfeld 1 = the report's key, text = supplier and text (60). 422 when
+`expense_account` is missing (“… “expense_account” is missing.”) or a
+person has none (“The DATEV export needs the creditor account of <name>
+(“creditor_account” in the person record).”). `datev.expense_account`
+(≤ 9 digits) is part of the `datev` setting; the person record's
+`creditor_account` is null or a string of 1–9 digits (422 otherwise),
+found under the person key = account, else the person naming the account.
+
+**Privacy.** The notice names the module costs (purpose, a category row,
+who sees receipts and reports, «not recorded» without «expenses») when
+`settings.modules.costs` is true – or, not set, when receipts, rules or
+reports exist.
+
+**Errors.** New code `duplicate` (409). Classes: `DocumentTree`,
+`ReceiptRules`, `ExpenseRuleRules`, `ExpenseReportRules`,
+`ReceiptLineRules`, `DossierRules`, `ExpenseExportRules` (pure);
+`CostWrites` (the record writes), `ReceiptService`, `ExpenseService`,
+`QuoteDocumentService`, `DossierService`, `ExpenseExportService`,
+`ReceiptFiles`, `ReceiptCopyPages`, `ExpenseReportPdf`, `TeamTree`.

@@ -18,14 +18,19 @@ use OCA\TimeSister\Db\RecordMapper;
  */
 final class RecordRights {
 	/** Kinds with rights per record: a non-admin batch may hold only these. */
-	public const PER_RECORD = [RecordValidator::BILLING, BookingRules::REPORT, BookingRules::MARK, InvoiceRules::KIND, QuoteRules::KIND];
+	public const PER_RECORD = [RecordValidator::BILLING, BookingRules::REPORT, BookingRules::MARK, InvoiceRules::KIND, QuoteRules::KIND,
+		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND];
 	/** Kinds whose Lead write is checked against the stored record, and whose tombstone keeps its last data for that. */
-	public const AGAINST_STORED = [InvoiceRules::KIND, QuoteRules::KIND];
+	public const AGAINST_STORED = [InvoiceRules::KIND, QuoteRules::KIND, ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND];
+	/** 0.22.0: every member writes these; CostWrites checks each write against the stored record. */
+	public const COST_KINDS = [ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND];
 
 	/** @var array<string,array<string,true>> "tenant:uid" → customer keys */
 	private array $customers = [];
 	/** @var array<string,array<string,true>> "tenant:uid" → active projects led */
 	private array $led = [];
+	/** @var array<int,array<string,\stdClass>> tenant → live receipts by key, read once per request */
+	private array $receipts = [];
 
 	public function __construct(
 		private AccessPolicy $policy,
@@ -78,6 +83,9 @@ final class RecordRights {
 			return $m->manages() || ($this->ledProjects($m) !== []
 				&& QuoteRules::leadReads(InvoiceRules::decode($record?->getData()), $ownKeys, $this->ledProjects($m)));
 		}
+		if (in_array($kind, self::COST_KINDS, true)) {
+			return $this->canReadCost($m, $kind, InvoiceRules::decode($record?->getData()));
+		}
 		if ($kind === InvoiceRules::KIND) {
 			// Team Admins; Leads those of the active projects they lead, also as a tombstone.
 			$project = InvoiceRules::projectOf($record?->getData());
@@ -100,6 +108,35 @@ final class RecordRights {
 		return true;
 	}
 
+	/** Receipts, expense rules and reports (0.22.0): the person, the project's Leads, Team Admins. */
+	public function canReadCost(Membership $m, string $kind, ?\stdClass $d): bool {
+		$led = $m->manages() ? [] : $this->ledProjects($m);
+		return match ($kind) {
+			ReceiptRules::KIND => ReceiptRules::canRead($m->manages(), $m->uid, $led, $d),
+			ExpenseRuleRules::KIND => ExpenseRuleRules::canRead($m->manages(), $m->uid, $led, $d),
+			default => ExpenseReportRules::canRead($m->manages(), $m->uid, $led, $d, $this->receiptsOf($m->tenantId, ExpenseReportRules::receiptsOf($d))),
+		};
+	}
+
+	/**
+	 * The live receipts named, read once per request.
+	 *
+	 * @param list<string> $keys
+	 * @return list<?\stdClass>
+	 */
+	public function receiptsOf(int $tenantId, array $keys): array {
+		if (!isset($this->receipts[$tenantId])) {
+			$this->receipts[$tenantId] = [];
+			foreach ($this->records->findLiveByKind($tenantId, ReceiptRules::KIND) as $r) {
+				$d = InvoiceRules::decode($r->getData());
+				if ($d !== null) {
+					$this->receipts[$tenantId][$r->getRkey()] = $d;
+				}
+			}
+		}
+		return array_map(fn (string $k): ?\stdClass => $this->receipts[$tenantId][$k] ?? null, $keys);
+	}
+
 	/** The rights of a write: per record for billing and bookings, everything else Team Admins. */
 	public function requireWrite(Membership $m, string $kind, string $key): void {
 		if ($kind === RecordValidator::BILLING) {
@@ -118,6 +155,10 @@ final class RecordRights {
 			if (!$m->manages() && $this->ledProjects($m) === []) {
 				throw ApiException::forbidden('Only Team Admins and the project’s Leads write invoices.');
 			}
+			return;
+		}
+		if (in_array($kind, self::COST_KINDS, true)) {
+			// Every member: CostWrites checks the write against the stored record.
 			return;
 		}
 		if ($kind === QuoteRules::KIND) {

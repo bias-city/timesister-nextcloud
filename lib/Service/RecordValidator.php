@@ -14,7 +14,8 @@ namespace OCA\TimeSister\Service;
  * of identifiers, size.
  */
 final class RecordValidator {
-	public const KINDS = ['person', 'region', 'project', 'customer', 'setting', 'job', 'billing', BookingRules::REPORT, BookingRules::MARK, InvoiceRules::KIND, QuoteRules::KIND];
+	public const KINDS = ['person', 'region', 'project', 'customer', 'setting', 'job', 'billing', BookingRules::REPORT, BookingRules::MARK, InvoiceRules::KIND, QuoteRules::KIND,
+		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND];
 	/** Jobs (0.6.0): readable as records, written only through /jobs. */
 	public const JOB = 'job';
 	/** Billing marks (0.7.6): rights per person, see {@see BillingRules}. */
@@ -106,6 +107,13 @@ final class RecordValidator {
 			InvoiceRules::validate($data);
 		} elseif ($kind === QuoteRules::KIND) {
 			QuoteRules::validate($key, $data);
+		} elseif ($kind === ReceiptRules::KIND) {
+			// 0.22.0: receipts, expense rules and reports (the server's own fields are merged by CostWrites).
+			ReceiptRules::validate($key, $data);
+		} elseif ($kind === ExpenseRuleRules::KIND) {
+			ExpenseRuleRules::validate($data);
+		} elseif ($kind === ExpenseReportRules::KIND) {
+			ExpenseReportRules::validate($data);
 		}
 		$accounts = [];
 		if ($kind === 'person' && property_exists($data, 'accounts') && $data->accounts !== null) {

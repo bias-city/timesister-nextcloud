@@ -14,6 +14,7 @@ namespace OCA\TimeSister\Service;
  */
 final class PersonRules {
 	public const COST_RATES = 'cost_rates';
+	public const CREDITOR = 'creditor_account';
 	/** What only Team Admins read, even on the own person. */
 	public const ADMIN_ONLY = [self::COST_RATES];
 
@@ -24,6 +25,11 @@ final class PersonRules {
 	 * @throws ApiException 422
 	 */
 	public static function validate(\stdClass $data): void {
+		// 0.22.0: the person's creditor account for the DATEV export of expenses.
+		$creditor = $data->{self::CREDITOR} ?? null;
+		if ($creditor !== null && (!is_string($creditor) || preg_match('/^\d{1,9}$/', $creditor) !== 1)) {
+			throw ApiException::invalid('“creditor_account” must be null or 1 to 9 digits.');
+		}
 		$rates = $data->{self::COST_RATES} ?? null;
 		if ($rates === null) {
 			return;

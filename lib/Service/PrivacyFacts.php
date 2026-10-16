@@ -116,11 +116,11 @@ final class PrivacyFacts {
 
 	/**
 	 * `settings.modules` as the Mac app keeps it ({jobs, budgets,
-	 * customers}); a switch that is not set counts as on when records of
-	 * that module exist.
+	 * customers, costs}); a switch that is not set counts as on when records of
+	 * that module exist (costs: receipts, expense rules or reports, 0.22.0).
 	 *
 	 * @param list<Record> $projects
-	 * @return array{jobs:bool,budgets:bool,customers:bool}
+	 * @return array{jobs:bool,budgets:bool,customers:bool,costs:bool}
 	 */
 	private function modules(int $tid, ?\stdClass $settings, array $projects): array {
 		$m = $settings?->modules ?? null;
@@ -146,6 +146,9 @@ final class PrivacyFacts {
 			'jobs' => $flag('jobs') ?? $this->records->findLiveByKind($tid, RecordValidator::JOB) !== [],
 			'budgets' => $flag('budgets') ?? $withBudgets(),
 			'customers' => $flag('customers', 'kunden') ?? $this->records->findLiveByKind($tid, 'customer') !== [],
+			'costs' => $flag(ModuleRules::COSTS) ?? ($this->records->findLiveByKind($tid, ReceiptRules::KIND) !== []
+				|| $this->records->findLiveByKind($tid, ExpenseReportRules::KIND) !== []
+				|| $this->records->findLiveByKind($tid, ExpenseRuleRules::KIND) !== []),
 		];
 	}
 

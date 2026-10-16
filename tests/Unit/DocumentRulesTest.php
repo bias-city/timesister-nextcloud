@@ -29,49 +29,44 @@ class DocumentRulesTest extends TestCase {
 	}
 
 	public function testSettingsDefaultsAndStored(): void {
-		$this->assertSame(['invoices' => null, 'quotes' => null, 'per_year' => true, 'chain_mail' => null], DocumentRules::settings(null));
-		$this->assertSame(['invoices' => null, 'quotes' => null, 'per_year' => true, 'chain_mail' => null], DocumentRules::settings('garbage'));
-		$s = DocumentRules::settings('{"invoices":"Buchhaltung/Rechnungen","per_year":false,"chain_mail":"treuhand@example.test"}');
-		$this->assertSame(['invoices' => 'Buchhaltung/Rechnungen', 'quotes' => null, 'per_year' => false, 'chain_mail' => 'treuhand@example.test'], $s);
-		// Encoding: null when everything is default, else only the four keys.
+		$this->assertSame(['root' => null, 'chain_mail' => null], DocumentRules::settings(null));
+		$this->assertSame(['root' => null, 'chain_mail' => null], DocumentRules::settings('garbage'));
+		// 0.22.0: the folders of 0.19.0 are ignored, never returned.
+		$s = DocumentRules::settings('{"invoices":"Buchhaltung/Rechnungen","per_year":false,"root":"TimeSister Example","chain_mail":"treuhand@example.test"}');
+		$this->assertSame(['root' => 'TimeSister Example', 'chain_mail' => 'treuhand@example.test'], $s);
+		// Encoding: null when everything is default, else only the two keys.
 		$this->assertNull(DocumentRules::encode(DocumentRules::DEFAULTS));
-		$this->assertSame('{"invoices":"A","quotes":null,"per_year":true,"chain_mail":null}', DocumentRules::encode(['invoices' => 'A', 'extra' => 1] + DocumentRules::DEFAULTS));
+		$this->assertSame('{"root":"A","chain_mail":null}', DocumentRules::encode(['root' => 'A', 'extra' => 1] + DocumentRules::DEFAULTS));
 	}
 
 	public function testValidate(): void {
 		$cur = DocumentRules::DEFAULTS;
-		$v = DocumentRules::validate((object)['invoices' => 'Buchhaltung/Rechnungen/', 'per_year' => false], $cur);
-		$this->assertSame(['invoices' => 'Buchhaltung/Rechnungen', 'quotes' => null, 'per_year' => false, 'chain_mail' => null], $v);
+		$v = DocumentRules::validate((object)['root' => 'Gruppe/TimeSister/', 'invoices' => 'X', 'quotes' => 'Y', 'per_year' => 'whatever'], $cur);
+		$this->assertSame(['root' => 'Gruppe/TimeSister', 'chain_mail' => null], $v, 'old folder keys ignored');
 		// A missing key keeps the stored value; empty means default again.
-		$this->assertSame('Buchhaltung/Rechnungen', DocumentRules::validate(['chain_mail' => 'a@example.org'], $v)['invoices']);
-		$this->assertNull(DocumentRules::validate(['invoices' => ''], $v)['invoices']);
-		$this->assertSame('422 “documents.invoices” must be a folder path of at most 255 characters, without “..” and without a leading slash.', self::outcome(fn () => DocumentRules::validate(['invoices' => '/abs'], $cur)));
-		$this->assertStringStartsWith('422', self::outcome(fn () => DocumentRules::validate(['quotes' => 'a/../b'], $cur)));
-		$this->assertStringStartsWith('422', self::outcome(fn () => DocumentRules::validate(['quotes' => str_repeat('x', 256)], $cur)));
-		$this->assertStringStartsWith('422', self::outcome(fn () => DocumentRules::validate(['quotes' => "a\nb"], $cur)));
-		$this->assertStringStartsWith('422', self::outcome(fn () => DocumentRules::validate(['per_year' => 'yes'], $cur)));
+		$this->assertSame('Gruppe/TimeSister', DocumentRules::validate(['chain_mail' => 'a@example.org'], $v)['root']);
+		$this->assertNull(DocumentRules::validate(['root' => ''], $v)['root']);
+		$this->assertSame('422 “documents.root” must be a folder path of at most 255 characters, without “..” and without a leading slash.', self::outcome(fn () => DocumentRules::validate(['root' => '/abs'], $cur)));
+		$this->assertStringStartsWith('422', self::outcome(fn () => DocumentRules::validate(['root' => 'a/../b'], $cur)));
+		$this->assertStringStartsWith('422', self::outcome(fn () => DocumentRules::validate(['root' => str_repeat('x', 256)], $cur)));
+		$this->assertStringStartsWith('422', self::outcome(fn () => DocumentRules::validate(['root' => "a\nb"], $cur)));
 		$this->assertSame('422 “documents.chain_mail” must be an e-mail address.', self::outcome(fn () => DocumentRules::validate(['chain_mail' => 'nope'], $cur)));
 		$this->assertSame('422 Unknown team setting “documents.other”.', self::outcome(fn () => DocumentRules::validate(['other' => 1], $cur)));
 		$this->assertSame('422 “documents” must be an object.', self::outcome(fn () => DocumentRules::validate('x', $cur)));
 		// Through TeamRules::settings, merged over the stored JSON.
-		$s = TeamRules::settings(['settings' => ['documents' => ['quotes' => 'Offerten'], 'invoicing' => true]], '{"invoices":"R"}');
-		$this->assertSame(['invoices' => 'R', 'quotes' => 'Offerten', 'per_year' => true, 'chain_mail' => null], $s['documents']);
+		$s = TeamRules::settings(['settings' => ['documents' => ['chain_mail' => 'a@example.org'], 'invoicing' => true]], '{"root":"R"}');
+		$this->assertSame(['root' => 'R', 'chain_mail' => 'a@example.org'], $s['documents']);
 		$this->assertTrue($s['invoicing']);
 	}
 
 	public function testFoldersAndNames(): void {
 		$d = DocumentRules::DEFAULTS;
-		$this->assertSame('TimeSister Invoices/Planungsbüro', DocumentRules::invoicesFolder($d, 'Planungsbüro'));
-		$this->assertSame('TimeSister Quotes/Planungsbüro', DocumentRules::quotesFolder($d, 'Planungsbüro'));
-		$this->assertSame('TimeSister Invoices/A-B', DocumentRules::invoicesFolder($d, 'A/B'));
-		$this->assertSame('Buchhaltung/Rechnungen', DocumentRules::invoicesFolder(['invoices' => 'Buchhaltung/Rechnungen'] + $d, 'X'));
-		$this->assertSame('2026', DocumentRules::year('2026-10-15'));
-		$this->assertSame('TimeSister Invoices/Planungsbüro/2026', DocumentRules::invoiceFolder($d, 'Planungsbüro', '2026-10-15'));
-		$this->assertSame('Buchhaltung/Rechnungen', DocumentRules::invoiceFolder(['invoices' => 'Buchhaltung/Rechnungen', 'per_year' => false] + $d, 'X', '2026-10-15'));
+		$this->assertSame('TimeSister/Example Team', DocumentRules::rootOf($d, 'Example Team'));
+		$this->assertSame('TimeSister/A-B', DocumentRules::rootOf($d, 'A/B'));
+		$this->assertSame('Gruppe', DocumentRules::rootOf(['root' => 'Gruppe'] + $d, 'X'));
 		$this->assertSame('RE-2026-0007.pdf', DocumentRules::fileName('RE-2026-0007'));
 		$this->assertSame('2026-7.pdf', DocumentRules::fileName('2026/7'));
-		$this->assertSame('chain-2026-10-15.txt', DocumentRules::chainFileName('2026-10-15'));
-		$this->assertSame("team: Planungsbüro\ndate: 2026-10-15\nentries: 12\nhead seq: 12\nhead hash: abc\n", DocumentRules::chainHeadText('Planungsbüro', '2026-10-15', 12, 12, 'abc'));
+		$this->assertSame("team: Example\ndate: 2026-10-15\nentries: 12\nhead seq: 12\nhead hash: abc\n", DocumentRules::chainHeadText('Example', '2026-10-15', 12, 12, 'abc'));
 		$this->assertTrue(DocumentRules::isPath('a/b c/d'));
 		$this->assertFalse(DocumentRules::isPath('a//b'));
 		$this->assertFalse(DocumentRules::isPath('a\\b'));
@@ -102,6 +97,8 @@ class DocumentRulesTest extends TestCase {
 	public function testCapability(): void {
 		$apps = $this->createMock(IAppManager::class);
 		$apps->method('getAppVersion')->willReturn('0.19.0');
-		$this->assertSame(1, (new Capabilities($apps))->getCapabilities()['timesister']['invoice_documents']);
+		$caps = (new Capabilities($apps))->getCapabilities()['timesister'];
+		$this->assertSame(1, $caps['invoice_documents']);
+		$this->assertSame([1, 1, 1], [$caps['receipts'], $caps['expense_reports'], $caps['document_tree']], '0.22.0');
 	}
 }

@@ -100,14 +100,14 @@ final class AdminTeamController extends BaseController {
 		});
 	}
 
-	/** POST /admin/teams/{id}/documents/check `{ invoices?, quotes? }` – are the document folders there and writable for the backup owner (0.19.0)? */
+	/** POST /admin/teams/{id}/documents/check `{ root? }` – is the document tree's root there (or creatable) and writable for the backup owner (0.22.0)? */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/admin/teams/{id}/documents/check', requirements: ['id' => '\d+'])]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function checkDocuments(int $id): DataResponse {
 		return $this->run(function () use ($id) {
 			$this->requireAdmin();
-			return $this->admin->checkDocumentFolders($id, $this->request->getParam('invoices'), $this->request->getParam('quotes'));
+			return $this->admin->checkDocumentFolders($id, $this->request->getParam('root'));
 		});
 	}
 
