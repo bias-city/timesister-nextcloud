@@ -186,7 +186,7 @@ export async function erechnung() {
 			expect('draft CH→DE public', await ocs(A, 'PUT', path(keys.pub), { version: 0, data: draft(customers.pub, 'EUR') }), 200)
 			const r = await issueAndFix(keys.pub, ISSUED_ON)
 			expect('issue for the public customer', r.issue, 200)
-			check('fixed: xml_path <folder>/<year>/<number>.xml and xml_sha256', typeof r.fixed?.xml_path === 'string' && r.fixed.xml_path.endsWith(`/${Y}/${r.fixed.number}.xml`) && /^[0-9a-f]{64}$/.test(r.fixed?.xml_sha256 || ''), r.fixed)
+			check('fixed: xml_path <root>/Buchhaltung/<year>/Rechnungen/<date>_<number>_<customer>.xml (0.22.0) and xml_sha256', typeof r.fixed?.xml_path === 'string' && r.fixed.xml_path.includes(`/Buchhaltung/${Y}/Rechnungen/${r.fixed.issued_on}_${r.fixed.number}_`) && r.fixed.xml_path.endsWith('.xml') && /^[0-9a-f]{64}$/.test(r.fixed?.xml_sha256 || ''), r.fixed)
 			const xml = await fetchRaw(A, `${ipath(keys.pub)}/document?kind=xml`)
 			check('document?kind=xml: application/xml, <number>.xml', xml.status === 200 && xml.type.startsWith('application/xml') && xml.disposition.includes(`${r.fixed?.number}.xml`), [xml.status, xml.type, xml.disposition])
 			check('… CII, profile XRechnung 3.0, the Leitweg-ID as BuyerReference, the number, the totals', xml.text.includes('<rsm:CrossIndustryInvoice') && xml.text.includes('urn:xeinkauf.de:kosit:xrechnung_3.0') && xml.text.includes('<ram:BuyerReference>04011000-1234512345-06</ram:BuyerReference>') && xml.text.includes(`<ram:ID>${r.fixed?.number}</ram:ID>`) && xml.text.includes('<ram:GrandTotalAmount>1500.00</ram:GrandTotalAmount>'), xml.text.slice(0, 300))

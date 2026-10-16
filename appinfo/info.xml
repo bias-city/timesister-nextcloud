@@ -18,7 +18,7 @@ It requires the TimeSister Mac app, where master data, roles and backups are man
 Jedes Team baut auf einer bestehenden Nextcloud-Gruppe auf, der Teamgruppe. Es gibt drei Rollen, in jeder Sprache Team Admin, Lead und User: Team Admins sind die Gruppenadmins der Teamgruppe, Lead und den Austritt führt die App. Jede Person benennt einmal ihren Zeitkalender; der Server liest ihn und gibt die Zeiteinträge des Teams nach Rolle heraus, niemand teilt einen Kalender. Leads und Team Admins bieten Personen des Teams Jobs an – Anteile an einem Projekt oder Arbeitspaket; der Server prüft Volumen und Überschneidungen, und Benachrichtigungen sagen, wer antworten muss. Die App legt keine eigenen Konten und keine eigenen Kalender an; die Buchungen bleiben in den CalDAV-Kalendern der Konten.
 
 Sie setzt die Mac-App TimeSister voraus, in der Stammdaten, Rollen und Sicherungen gepflegt werden. Für sich allein bringt die App nur einen Admin-Abschnitt für Teams und Zustand mit.]]></description>
-	<version>0.21.0</version>
+	<version>0.22.0</version>
 	<licence>AGPL-3.0-or-later</licence>
 	<author homepage="https://bias.city">B/IAS – Basel Institut für angewandte Stadtforschung</author>
 	<namespace>TimeSister</namespace>

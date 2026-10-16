@@ -47,19 +47,15 @@
 		<div id="ts-members"></div>
 		<div id="ts-documents" hidden>
 			<h4><?php p($l->t('Documents')); ?></h4>
-			<p class="ts-hint ts-muted"><?php p($l->t('Where the server stores the PDFs of issued invoices and where the Mac app stores quote PDFs: folders in the files of the backup owner, e.g. a group folder like “Accounting/Invoices”. Type the path as it appears in that account’s Files. Empty: “TimeSister Invoices/<team>” and “TimeSister Quotes/<team>”.')); ?></p>
+			<p class="ts-hint ts-muted"><?php p($l->t('The root of the team’s documents: a folder in the files of the backup owner, e.g. a group folder like “TimeSister Example Team”. Type the path as it appears in that account’s Files. Below it the server keeps a fixed scheme: Buchhaltung/<year>/ with Offerten, Rechnungen, Belege, Spesen and Kette, and Projekte/ with the project dossiers. Empty: “TimeSister/<team>”.')); ?></p>
 			<div class="ts-grid">
 				<span class="ts-label"><?php p($l->t('Backup owner')); ?></span>
 				<span id="ts-doc-owner"></span>
-				<label for="ts-doc-invoices"><?php p($l->t('Invoices folder')); ?></label>
-				<input id="ts-doc-invoices" type="text" maxlength="255" autocomplete="off" spellcheck="false">
-				<label for="ts-doc-quotes"><?php p($l->t('Quotes folder')); ?></label>
-				<input id="ts-doc-quotes" type="text" maxlength="255" autocomplete="off" spellcheck="false">
-				<label for="ts-doc-per-year"><?php p($l->t('Subfolder per year')); ?></label>
-				<input id="ts-doc-per-year" type="checkbox">
+				<label for="ts-doc-root"><?php p($l->t('Root folder')); ?></label>
+				<input id="ts-doc-root" type="text" maxlength="255" autocomplete="off" spellcheck="false">
 				<label for="ts-doc-mail"><?php p($l->t('Chain head by e-mail to')); ?></label>
 				<input id="ts-doc-mail" type="email" maxlength="254" autocomplete="off" aria-describedby="ts-doc-mail-hint">
-				<p id="ts-doc-mail-hint" class="ts-hint ts-muted"><?php p($l->t('Optional. Every day the app writes the ledger’s chain head (last entry and hash) as chain-<date>.txt into the invoices folder and sends the same text to this address, e.g. the accountant.')); ?></p>
+				<p id="ts-doc-mail-hint" class="ts-hint ts-muted"><?php p($l->t('Optional. Every day the app writes the ledger’s chain head (last entry and hash) as chain-<date>.txt into Buchhaltung/<year>/Kette and sends the same text to this address, e.g. the accountant.')); ?></p>
 			</div>
 			<div class="ts-buttons">
 				<button type="button" id="ts-doc-check" class="button"><?php p($l->t('Check')); ?></button>

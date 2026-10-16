@@ -30,7 +30,7 @@ final class ExportRules {
 	/** The DATEV setting with its defaults (null: not set). */
 	public const DATEV_DEFAULTS = ['consultant' => null, 'client' => null, 'fiscal_year_start' => null, 'account_length' => null,
 		'debtor_account' => null, 'revenue_domestic' => null, 'revenue_eu' => null, 'revenue_export' => null,
-		'bu_domestic' => null, 'bu_eu' => null, 'bu_export' => null, 'revenue_pass_through' => null];
+		'bu_domestic' => null, 'bu_eu' => null, 'bu_export' => null, 'revenue_pass_through' => null, 'expense_account' => null];
 	/** Belegfeld 1 takes 36 characters of these. */
 	private const BELEG_PATTERN = '/[^A-Za-z0-9$&%*+\-\/]/';
 
@@ -97,6 +97,7 @@ final class ExportRules {
 				case 'revenue_eu':
 				case 'revenue_export':
 				case 'revenue_pass_through':
+				case 'expense_account':
 					$out[$key] = self::digits($value, $field, 9);
 					break;
 				case 'bu_domestic':

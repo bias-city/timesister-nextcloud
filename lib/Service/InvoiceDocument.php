@@ -45,6 +45,8 @@ final class InvoiceDocument {
 	/** @var list<array{date:string,person:string,code:string,title:string,hours:float}> */
 	public array $appendix = [];
 	public float $hoursTotal = 0.0;
+	/** @var list<array{head:string,content:?string,mime:string,path:string,sha256:string}> 0.22.0: the receipt copies after the appendix */
+	public array $copies = [];
 	public string $chainLine = '';
 	/** The issuer's IBAN in the invoice's currency when a QR bill is wanted; null: no payment part. */
 	public ?string $iban = null;

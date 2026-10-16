@@ -26,6 +26,8 @@ final class ApiException extends \RuntimeException {
 	public const CONFIRM = 'confirm';
 	/** 409: the invoice is issued on the server and does not change (0.18.0). */
 	public const ISSUED = 'issued';
+	/** 409: a recurring receipt of this rule and period exists already (0.22.0). */
+	public const DUPLICATE = 'duplicate';
 
 	private Message $text;
 
@@ -76,6 +78,11 @@ final class ApiException extends \RuntimeException {
 	/** An issued invoice refuses every record write (0.18.0). */
 	public static function issued(): self {
 		return new self(409, self::ISSUED, Message::of('An issued invoice does not change; reverse it.'));
+	}
+
+	/** 409 `duplicate`. */
+	public static function duplicate(Message|string $message): self {
+		return new self(409, self::DUPLICATE, $message);
 	}
 
 	public static function badRequest(Message|string $message): self {

@@ -312,14 +312,12 @@
 		sel.disabled = !st
 	}
 
-	/** The document folders (0.19.0): only when editing; the owner is shown, not chosen here. */
+	/** The document tree's root (0.22.0): only when editing; the owner is shown, not chosen here. */
 	function fillDocuments(team) {
 		$('ts-documents').hidden = !team
 		$('ts-doc-result').textContent = ''
 		const d = (team && team.settings && team.settings.documents) || {}
-		$('ts-doc-invoices').value = d.invoices || ''
-		$('ts-doc-quotes').value = d.quotes || ''
-		$('ts-doc-per-year').checked = d.per_year !== false
+		$('ts-doc-root').value = d.root || ''
 		$('ts-doc-mail').value = d.chain_mail || ''
 		const owner = $('ts-doc-owner')
 		owner.textContent = ''
@@ -327,17 +325,15 @@
 		owner.textContent = team && team.backup_owner ? adminLabel(stateOf(team.id), team.backup_owner) : tr('owner_none')
 	}
 
-	/** The `documents` setting as typed; empty paths mean the default. */
+	/** The `documents` setting as typed; an empty root means the default. */
 	function documentsData() {
 		return {
-			invoices: $('ts-doc-invoices').value.trim() || null,
-			quotes: $('ts-doc-quotes').value.trim() || null,
-			per_year: $('ts-doc-per-year').checked,
+			root: $('ts-doc-root').value.trim() || null,
 			chain_mail: $('ts-doc-mail').value.trim() || null,
 		}
 	}
 
-	/** Asks the server whether both folders are there (or can be created) and writable. */
+	/** Asks the server whether the root is there (or can be created) and writable. */
 	async function checkDocuments() {
 		if (editing === null) {
 			return
@@ -347,11 +343,9 @@
 		$('ts-doc-check').disabled = true
 		try {
 			const d = documentsData()
-			const r = await api('POST', '/admin/teams/' + editing + '/documents/check', { invoices: d.invoices, quotes: d.quotes })
-			for (const key of ['invoices', 'quotes']) {
-				const x = r[key] || {}
-				box.append(h('div', { class: x.ok ? 'ts-ok' : 'ts-bad', text: tr(key === 'invoices' ? 'invoices_folder' : 'quotes_folder') + ': ' + (x.message || '') }))
-			}
+			const r = await api('POST', '/admin/teams/' + editing + '/documents/check', { root: d.root })
+			const x = r.root || {}
+			box.append(h('div', { class: x.ok ? 'ts-ok' : 'ts-bad', text: tr('root_folder') + ' “' + (x.path || '') + '”: ' + (x.message || '') }))
 		} catch (e) {
 			box.append(h('div', { class: 'ts-bad', text: tr('check_failed', { message: e.message }) }))
 		} finally {

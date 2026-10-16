@@ -55,7 +55,11 @@ use OCP\Capabilities\ICapability;
  * (taxable or pass-through) per invoice line, sums per rate, pass-through
  * items and the total frozen and in every document and export.
  * `costs: 1` since 0.21.0: cost positions `costs[]` in a budget (module
- * «costs», `settings.modules.costs`), checked and stored.
+ * «costs», `settings.modules.costs`), checked and stored. `receipts: 1`
+ * since 0.22.0: receipts with files, approval, invoicing from receipts;
+ * `expense_reports: 1`: expense rules and reports with PDF and export;
+ * `document_tree: 1`: one root per team (`documents.root`) with a fixed
+ * scheme, quote PDFs through the server, the project dossier.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -63,7 +67,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int, vat_lines: int, costs: int}} */
+	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, expense_reports: int, document_tree: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -89,6 +93,9 @@ final class Capabilities implements ICapability {
 				'invoice_export' => 1,
 				'vat_lines' => 1,
 				'costs' => 1,
+				'receipts' => 1,
+				'expense_reports' => 1,
+				'document_tree' => 1,
 			],
 		];
 	}

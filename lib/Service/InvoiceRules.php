@@ -33,7 +33,7 @@ final class InvoiceRules {
 	public const TEXT_MAX = 4000;
 	public const MAX_POSITIONS = 500;
 	/** 0.21.0: expense positions (a percentage of the hours, a flat amount) and cost lines. */
-	public const POSITION_KINDS = ['hours', 'flat', 'discount', 'text', 'expense_percent', 'expense_flat', 'costs'];
+	public const POSITION_KINDS = ['hours', 'flat', 'discount', 'text', 'expense_percent', 'expense_flat', 'costs', ReceiptLineRules::MARKUP];
 	public const POSITION_TEXT_MAX = 500;
 	public const CODE_MAX = 64;
 
@@ -181,9 +181,11 @@ final class InvoiceRules {
 			throw ApiException::invalid(Message::of('“{field}” must be null or an integer ≥ 1.', ['field' => 'cost']));
 		}
 		$rate = $p->rate ?? null;
-		if (($p->kind ?? null) === 'expense_percent' && $rate !== null && !(ProjectRules::isRate($rate) && $rate <= 100)) {
+		if (in_array($p->kind ?? null, ['expense_percent', ReceiptLineRules::MARKUP], true) && $rate !== null && !(ProjectRules::isRate($rate) && $rate <= 100)) {
 			throw ApiException::invalid(Message::of('“{field}” must be null or a percentage from 0 to 100.', ['field' => 'rate']));
 		}
+		// 0.22.0: a costs line may name its receipts.
+		ReceiptLineRules::checkList($p);
 	}
 
 	private static function bookings(mixed $list): void {

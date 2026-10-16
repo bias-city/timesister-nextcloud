@@ -65,7 +65,10 @@ Likewise, `OCP\Files\IRootFolder` inherits the not-included
 
 The app only deletes files in people's home storage when they are listed in
 `ts_backup_files` and the file ID still points to the same path. Invoice
-documents and chain head files (0.19.0) are written, never deleted.
+documents and chain head files (0.19.0) are written, never deleted. In the
+document tree (0.22.0) a receipt's or quote's file that is replaced under
+another name, and the file of a deleted open receipt, go to the backup
+owner's trash (`files_trashbin`), never deleted outright.
 
 Runtime libraries (since 0.19.0, `composer.json` `require`):
 `tecnickcom/tcpdf` (LGPL-3.0-or-later, the PDF), `sprain/swiss-qr-bill`

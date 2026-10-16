@@ -301,8 +301,8 @@ async function testteam() {
 		check('backup_owner null: automatic again', auto.data?.backup_owner === first, auto.text)
 
 		// 0.19.0: `documents` with its defaults (null = the default folders). 0.20.0: `datev` (nothing set) and `webhooks` (none).
-		const documents = { invoices: null, quotes: null, per_year: true, chain_mail: null }
-		const datev = { consultant: null, client: null, fiscal_year_start: null, account_length: null, debtor_account: null, revenue_domestic: null, revenue_eu: null, revenue_export: null, bu_domestic: null, bu_eu: null, bu_export: null, revenue_pass_through: null }
+		const documents = { root: null, chain_mail: null }
+		const datev = { consultant: null, client: null, fiscal_year_start: null, account_length: null, debtor_account: null, revenue_domestic: null, revenue_eu: null, revenue_export: null, bu_domestic: null, bu_eu: null, bu_export: null, revenue_pass_through: null, expense_account: null }
 		const webhooks = []
 		const defaults = { backup_required: false, entries_since: null, invoicing: true, documents, datev, webhooks }
 		check('settings: default values on creation', JSON.stringify(made.data?.settings) === JSON.stringify(defaults), made.data?.settings)

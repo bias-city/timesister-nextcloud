@@ -1,5 +1,42 @@
 # Changes
 
+## 0.22.0 – 2026-10-16 (beta)
+
+API unchanged in form (`api: 2`); new capabilities `receipts: 1`,
+`expense_reports: 1` and `document_tree: 1`. Plan: `PLAN-BELEGE.md` (B3,
+B4, B4a, «Ablage in Nextcloud»), contract: `API.md` «Receipts, expense
+reports and the document tree, 0.22.0» with «As built». No schema change.
+
+- **Document tree:** the team setting `documents` is `{ root, chain_mail }`
+  (default `TimeSister/<team>` in the backup owner's files); `invoices`,
+  `quotes` and `per_year` are gone and ignored. One fixed scheme
+  (`DocumentTree`): `Buchhaltung/<year>/{Offerten,Rechnungen,Belege,Spesen/<person>,Kette}`
+  and `Projekte/<code> <name>`, names with date, number, counterpart,
+  amount and project. Invoices, XRechnung files and the chain head go
+  there; the admin page has one root field with a check.
+- **Receipts** (record `receipt`): who paid, reimbursement and where it is
+  booked with their defaults; the server owns status, file, invoice,
+  report, approval; rights for members, Leads and Team Admins; the file
+  (PDF, JPEG, PNG ≤ 20 MB) through `PUT/GET /receipts/{key}/file`;
+  `approve` (the file is renamed once) and `reject`; trust receipts and
+  recurring ones from an approved `expense_rule`, one per period (409
+  `duplicate`).
+- **Expense rules and reports:** `expense_rule` with approval
+  (`/expense-rules/{key}/approve`); `expense_report` submitted by the
+  person, sums per VAT rate, approved with a PDF in `Spesen/<person>/`,
+  marked paid, `GET …/document`.
+- **Invoicing from receipts:** `costs` lines with `receipts[]`, `markup`,
+  and `expense_percent` now checked; receipts billed on issue and released
+  on reversal in the same transaction; receipt copies (FPDI) after the
+  hours appendix in the PDF, the ZUGFeRD PDF and the preview.
+- **Quote documents** through `PUT/GET /quotes/{key}/document`, the
+  **project dossier** `POST /projects/{key}/dossier` (ZIP with documents,
+  receipts, hours and ledger lines), **export of expenses**
+  `GET /exports/expenses` as CSV or DATEV (`datev.expense_account`, the
+  person's `creditor_account`).
+- The privacy notice names the module costs.
+- `InvoicePage` now builds on FPDI (already a dependency since 0.20.0).
+
 ## 0.21.0 – 2026-10-16 (beta)
 
 API unchanged in form (`api: 2`); new capabilities `vat_lines: 1` and

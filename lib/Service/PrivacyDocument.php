@@ -96,9 +96,15 @@ final class PrivacyDocument {
 		]];
 	}
 
+	/** Is the module costs on (0.22.0)? @param array<string,mixed> $f */
+	private static function costsOn(array $f): bool {
+		$m = $f['modules'] ?? null;
+		return is_array($m) && ($m['costs'] ?? false) === true;
+	}
+
 	/** @param array<string,mixed> $f */
 	private function purpose(array $f): array {
-		/** @var array{jobs:bool,budgets:bool,customers:bool} $m */
+		/** @var array{jobs:bool,budgets:bool,customers:bool,costs?:bool} $m */
 		$m = $f['modules'];
 		$items = [
 			$this->l->t('Recording working time and assigning it to projects'),
@@ -114,6 +120,9 @@ final class PrivacyDocument {
 		}
 		if ($m['customers']) {
 			$items[] = $this->l->t('Customers: the customer book with contact persons (module switched on)');
+		}
+		if (self::costsOn($f)) {
+			$items[] = $this->l->t('Costs: cost positions of budgets, receipts with their files, recurring expenses and the expense reports of the people (module switched on)');
 		}
 		return ['title' => $this->l->t('Purpose'), 'blocks' => [
 			['type' => 'p', 'text' => $this->l->t('TimeSister processes personal data for these purposes only:')],
@@ -151,6 +160,10 @@ final class PrivacyDocument {
 				$this->fill($this->l->t('Operating data; customers may hold contact persons (name, e-mail, phone) – third parties. Currently {n} customer records.'), ['n' => (int)$f['customers']]),
 				$this->l->t('Team Admins and Leads'),
 				$this->l->t('App tables of the Nextcloud')],
+			...(self::costsOn($f) ? [[$this->l->t('Costs and expenses'),
+				$this->l->t('Cost positions of budgets; receipts (date, supplier, text, amounts and VAT, who paid, reimbursement, project, the file) with approval or rejection and its reason; rules of recurring expenses; expense reports per person with sums and the PDF'),
+				$this->l->t('The person who records a receipt; approval: Leads and Team Admins'),
+				$this->l->t('App tables of the Nextcloud (record with history); files in the team’s document folder in the backup owner’s files')]] : []),
 			[$this->l->t('External persons'),
 				$this->fill($this->l->t('Name, initials, private feed address (a secret); their events are read, never written. Currently {n}.'), ['n' => $externals]),
 				RoleName::TEAM_ADMIN,
@@ -162,7 +175,9 @@ final class PrivacyDocument {
 		];
 		return ['title' => $this->l->t('Which data, which categories'), 'blocks' => [
 			['type' => 'table', 'head' => [$this->l->t('Category'), $this->l->t('Examples'), $this->l->t('Source'), $this->l->t('Location')], 'rows' => $rows],
-			['type' => 'p', 'text' => $this->l->t('Not recorded: hourly rates, salaries, expenses, location data, health data – the absence “Sickness” is only a category without a reason.')],
+			['type' => 'p', 'text' => self::costsOn($f)
+				? $this->l->t('Not recorded: hourly rates, salaries, location data, health data – the absence “Sickness” is only a category without a reason.')
+				: $this->l->t('Not recorded: hourly rates, salaries, expenses, location data, health data – the absence “Sickness” is only a category without a reason.')],
 		]];
 	}
 
@@ -195,6 +210,7 @@ final class PrivacyDocument {
 				$this->l->t('Nextcloud admins: everything, including the accounts and this notice'),
 				$this->fill($this->l->t('Team Admins (group admins of the team group): all master data, all time entries, backups, export, deletion. Currently: {names}'), ['names' => $this->join($admins)]),
 				$this->fill($this->l->t('Leads: their projects, the bookings on these projects as the people report them (date, time, person, code, duration, title, notes, billable, billed), the customers of these projects, names and initials of the people; no time calendars, master data, balances or vacation of others. Currently: {names}'), ['names' => $this->join(array_map(static fn (array $ld) => $ld['name'], $leads))]),
+				...(self::costsOn($f) ? [$this->l->t('Receipts and expenses: each person their own; Leads those of the projects they lead and the expense reports they approve; Team Admins all')] : []),
 				$this->l->t('Users: only their own data'),
 				$this->l->t('External persons: nothing – their feed is only read'),
 			]],

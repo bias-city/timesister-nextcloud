@@ -170,7 +170,7 @@ class InvoiceRulesTest extends TestCase {
 		$this->assertSame('422 “positions” must be a list of at most 500 positions.', self::check(['positions' => array_fill(0, 501, $pos())]));
 		$this->assertSame('ok', self::check(['positions' => array_fill(0, 500, $pos())]));
 		$this->assertSame('422 Position 1: Each position must be a JSON object.', self::check(['positions' => ['x']]));
-		$this->assertSame('422 Position 2: “kind” of a position is one of hours, flat, discount, text, expense_percent, expense_flat, costs.', self::check(['positions' => [$pos(), $pos(['kind' => 'rebate'])]]));
+		$this->assertSame('422 Position 2: “kind” of a position is one of hours, flat, discount, text, expense_percent, expense_flat, costs, markup.', self::check(['positions' => [$pos(), $pos(['kind' => 'rebate'])]]));
 		$this->assertSame('422 Position 1: “text” must be text of 1 to 500 characters.', self::check(['positions' => [$pos(['text' => ''])]]));
 		$this->assertSame('422 Position 1: “text” must be text of 1 to 500 characters.', self::check(['positions' => [$pos(['text' => str_repeat('t', 501)])]]));
 		$this->assertSame('422 Position 1: “work_package” must be null or an integer ≥ 0.', self::check(['positions' => [$pos(['work_package' => '2'])]]));

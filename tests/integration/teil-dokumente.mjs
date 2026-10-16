@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Invoice documents (0.19.0): the team setting `documents` (folders in the
-// backup owner's files, checked on writing), the admin's check endpoint,
+// Invoice documents (0.19.0): the team setting `documents` (since 0.22.0
+// the root of the document tree in the backup owner's files, checked on
+// writing), the admin's check endpoint,
 // the watermarked preview of a draft, the stored PDF after issuing (file
 // in the folder, ledger entry `document` with the file's hash, chain still
 // valid), rendering again, the chain head and the daily chain head file.
@@ -60,7 +61,7 @@ export async function dokumente() {
 	const base = settings.status === 200 ? settings.data.data : {}
 	let settingsVersion = settings.status === 200 ? settings.data.version : 0
 	const teamBefore = (await ocs(A, 'GET', '/team')).data
-	const docsBefore = teamBefore?.settings?.documents || { invoices: null, quotes: null, per_year: true, chain_mail: null }
+	const docsBefore = teamBefore?.settings?.documents || { root: null, chain_mail: null }
 	let owner = teamBefore?.backup_owner || null
 	const draft = (more = {}) => ({
 		schema: 1, project: PF, budget: 'b1', from: '2026-10-01', to: '2026-10-31', status: 'draft', number: null,
@@ -74,7 +75,7 @@ export async function dokumente() {
 		{
 			const cap = await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')
 			check('capability invoice_documents: 1', cap.data?.capabilities?.timesister?.invoice_documents === 1, cap.data?.capabilities?.timesister)
-			check('/me.settings.documents has the four keys', JSON.stringify(Object.keys((await me(A)).settings?.documents || {}).sort()) === '["chain_mail","invoices","per_year","quotes"]', (await me(A)).settings)
+			check('/me.settings.documents has root and chain_mail (0.22.0)', JSON.stringify(Object.keys((await me(A)).settings?.documents || {}).sort()) === '["chain_mail","root"]', (await me(A)).settings)
 			if (!owner) {
 				// The backup owner is the first Team Admin by default; set pbadmin explicitly through the admin page's endpoint.
 				const teams = await ocs(ADMIN, 'GET', '/admin/teams')
@@ -105,33 +106,35 @@ export async function dokumente() {
 		head('Documents: the team setting')
 		{
 			expect('documents as text', await ocs(A, 'PUT', '/team/settings', { documents: 'x' }), 422, 'invalid')
-			expect('a leading slash', await ocs(A, 'PUT', '/team/settings', { documents: { invoices: '/abs' } }), 422, 'invalid')
-			expect('a “..”', await ocs(A, 'PUT', '/team/settings', { documents: { quotes: 'a/../b' } }), 422, 'invalid')
+			expect('a leading slash', await ocs(A, 'PUT', '/team/settings', { documents: { root: '/abs' } }), 422, 'invalid')
+			expect('a “..”', await ocs(A, 'PUT', '/team/settings', { documents: { root: 'a/../b' } }), 422, 'invalid')
 			expect('an unknown key', await ocs(A, 'PUT', '/team/settings', { documents: { other: 1 } }), 422, 'invalid')
 			expect('a bad address', await ocs(A, 'PUT', '/team/settings', { documents: { chain_mail: 'nope' } }), 422, 'invalid')
-			expect('Lead sets it', await ocs(L, 'PUT', '/team/settings', { documents: { per_year: false } }), 403, 'forbidden')
-			const set = await ocs(A, 'PUT', '/team/settings', { documents: { invoices: `${FOLDER}/Rechnungen/`, quotes: `${FOLDER}/Offerten`, per_year: true, chain_mail: 'treuhand@example.test' } })
-			expect('Team Admin sets the folders (a trailing slash is trimmed)', set, 200)
-			check('… answer carries documents', set.data?.documents?.invoices === `${FOLDER}/Rechnungen` && set.data?.documents?.quotes === `${FOLDER}/Offerten` && set.data?.documents?.per_year === true && set.data?.documents?.chain_mail === 'treuhand@example.test', set.data)
-			check('… /me and /team say so', (await me(A)).settings?.documents?.invoices === `${FOLDER}/Rechnungen` && (await ocs(A, 'GET', '/team')).data?.settings?.documents?.quotes === `${FOLDER}/Offerten`)
+			expect('Lead sets it', await ocs(L, 'PUT', '/team/settings', { documents: { root: 'x' } }), 403, 'forbidden')
+			const set = await ocs(A, 'PUT', '/team/settings', { documents: { root: `${FOLDER}/`, invoices: 'Gone', per_year: false, chain_mail: 'treuhand@example.test' } })
+			expect('Team Admin sets the root (a trailing slash is trimmed, the folders of 0.19.0 ignored)', set, 200)
+			check('… answer carries documents { root, chain_mail } only', JSON.stringify(set.data?.documents) === JSON.stringify({ root: FOLDER, chain_mail: 'treuhand@example.test' }), set.data)
+			check('… /me and /team say so', (await me(A)).settings?.documents?.root === FOLDER && (await ocs(A, 'GET', '/team')).data?.settings?.documents?.root === FOLDER)
 			const partial = await ocs(A, 'PUT', '/team/settings', { documents: { chain_mail: null } })
 			expect('a partial change keeps the rest', partial, 200)
-			check('… chain_mail null, folders kept', partial.data?.documents?.chain_mail === null && partial.data?.documents?.invoices === `${FOLDER}/Rechnungen`, partial.data)
+			check('… chain_mail null, root kept', partial.data?.documents?.chain_mail === null && partial.data?.documents?.root === FOLDER, partial.data)
 			// The admin side: the check endpoint and the setting through PUT /admin/teams.
 			const teams = await ocs(ADMIN, 'GET', '/admin/teams')
 			const pb = (teams.data || []).find((t) => t.slug === 'pb')
-			check('admin lists the setting', pb?.settings?.documents?.invoices === `${FOLDER}/Rechnungen`, pb?.settings)
+			check('admin lists the setting', pb?.settings?.documents?.root === FOLDER, pb?.settings)
 			if (pb) {
-				const chk = await ocs(ADMIN, 'POST', `/admin/teams/${pb.id}/documents/check`, { invoices: `${FOLDER}/Rechnungen`, quotes: null })
-				expect('admin checks the folders', chk, 200)
-				check('… both ok with a message (the invoices folder exists or will be created)', chk.data?.invoices?.ok === true && typeof chk.data?.invoices?.message === 'string' && chk.data?.quotes?.ok === true, chk.data)
-				const bad = await ocs(ADMIN, 'POST', `/admin/teams/${pb.id}/documents/check`, { invoices: '/abs' })
+				const chk = await ocs(ADMIN, 'POST', `/admin/teams/${pb.id}/documents/check`, { root: FOLDER })
+				expect('admin checks the root', chk, 200)
+				check('… ok with a message and the path', chk.data?.root?.ok === true && typeof chk.data?.root?.message === 'string' && chk.data?.root?.path === FOLDER, chk.data)
+				const dflt = await ocs(ADMIN, 'POST', `/admin/teams/${pb.id}/documents/check`, {})
+				check('… without a root: TimeSister/<team>', dflt.data?.root?.path === `TimeSister/${pb.name}`, dflt.data)
+				const bad = await ocs(ADMIN, 'POST', `/admin/teams/${pb.id}/documents/check`, { root: '/abs' })
 				expect('… a bad path', bad, 422, 'invalid')
 				expect('Team Admin calls the admin check', await ocs(A, 'POST', `/admin/teams/${pb.id}/documents/check`, {}), 403)
-				const put = await ocs(ADMIN, 'PUT', `/admin/teams/${pb.id}`, { name: pb.name, slug: pb.slug, groups: pb.groups, settings: { documents: { per_year: false } } })
-				expect('admin sets per_year through PUT /admin/teams', put, 200)
-				check('… merged over the stored setting', put.data?.settings?.documents?.per_year === false && put.data?.settings?.documents?.invoices === `${FOLDER}/Rechnungen`, put.data?.settings)
-				expect('… and back', await ocs(A, 'PUT', '/team/settings', { documents: { per_year: true } }), 200)
+				const put = await ocs(ADMIN, 'PUT', `/admin/teams/${pb.id}`, { name: pb.name, slug: pb.slug, groups: pb.groups, settings: { documents: { chain_mail: 'a@example.test' } } })
+				expect('admin sets chain_mail through PUT /admin/teams', put, 200)
+				check('… merged over the stored setting', put.data?.settings?.documents?.chain_mail === 'a@example.test' && put.data?.settings?.documents?.root === FOLDER, put.data?.settings)
+				expect('… and back', await ocs(A, 'PUT', '/team/settings', { documents: { chain_mail: null } }), 200)
 			}
 		}
 
@@ -179,7 +182,7 @@ export async function dokumente() {
 				f = await ocs(A, 'GET', `${ipath(K1)}/fixed`)
 			}
 			fixed = f.data
-			check('fixed: document_state done, no error, path <folder>/<year>/<number>.pdf, sha256', fixed?.document_state === 'done' && fixed?.document_error === null && fixed?.document_path === `${FOLDER}/Rechnungen/${Y}/${number}.pdf` && HEX64.test(fixed?.document_sha256 ?? ''), fixed)
+			check('fixed: document_state done, no error, path <root>/Buchhaltung/<year>/Rechnungen/<date>_<number>_<customer>.pdf, sha256', fixed?.document_state === 'done' && fixed?.document_error === null && fixed?.document_path === `${FOLDER}/Buchhaltung/${Y}/Rechnungen/${ISSUED_ON}_${number}_Kunde-${RUN}.pdf` && HEX64.test(fixed?.document_sha256 ?? ''), fixed)
 			const doc = await fetchRaw(A, `${ipath(K1)}/document?kind=pdf`)
 			check('document: application/pdf, attachment <number>.pdf', doc.status === 200 && doc.type.startsWith('application/pdf') && doc.disposition.includes(`${number}.pdf`), [doc.status, doc.type, doc.disposition])
 			const sha = sha256(doc.buf)
@@ -221,7 +224,7 @@ export async function dokumente() {
 					await ocs(A, 'POST', `${ipath(rev)}/render`, {})
 					f = await ocs(A, 'GET', `${ipath(rev)}/fixed`)
 				}
-				check('the reversal’s document is stored', f.data?.document_state === 'done' && f.data?.document_path === `${FOLDER}/Rechnungen/${Y}/${f.data?.number}.pdf`, f.data)
+				check('the reversal’s document is stored', f.data?.document_state === 'done' && f.data?.document_path === `${FOLDER}/Buchhaltung/${Y}/Rechnungen/${ISSUED_ON}_${f.data?.number}_Kunde-${RUN}.pdf`, f.data)
 				const doc = await fetchRaw(A, `${ipath(rev)}/document`)
 				check('… titled “Storno zu <original>”', doc.status === 200 && doc.buf.includes(`Storno zu ${number}`), doc.status)
 			}
@@ -232,16 +235,16 @@ export async function dokumente() {
 				check('the ChainHead job runs', ran)
 				const day = new Date().toISOString().slice(0, 10)
 				const ownerDav = { user: owner, pass: `Test-2026-${owner}!` }
-				const dv = await dav(ownerDav, 'GET', `files/${encodeURIComponent(owner)}/${`${FOLDER}/Rechnungen/chain-${day}.txt`.split('/').map(encodeURIComponent).join('/')}`)
+				const dv = await dav(ownerDav, 'GET', `files/${encodeURIComponent(owner)}/${`${FOLDER}/Buchhaltung/${day.slice(0, 4)}/Kette/chain-${day}.txt`.split('/').map(encodeURIComponent).join('/')}`)
 				const hd = (await ocs(A, 'GET', '/invoices/chain/head')).data
-				check('chain-<day>.txt lies in the invoices folder with the head', dv.status === 200 && dv.text.includes('team: Planungsbüro') && dv.text.includes(`head hash: ${hd?.hash}`) && dv.text.includes(`head seq: ${hd?.seq}`), [dv.status, dv.text.slice(0, 200)])
+				check('chain-<day>.txt lies in Buchhaltung/<year>/Kette with the head', dv.status === 200 && dv.text.includes('team: Planungsbüro') && dv.text.includes(`head hash: ${hd?.hash}`) && dv.text.includes(`head seq: ${hd?.seq}`), [dv.status, dv.text.slice(0, 200)])
 				const retry = runJob('DocumentRetry')
 				check('the DocumentRetry job runs', retry)
 			}
 		}
 	} finally {
 		head('Documents: cleaning up')
-		await ocs(A, 'PUT', '/team/settings', { documents: { invoices: docsBefore.invoices, quotes: docsBefore.quotes, per_year: docsBefore.per_year !== false, chain_mail: docsBefore.chain_mail } })
+		await ocs(A, 'PUT', '/team/settings', { documents: { root: docsBefore.root ?? null, chain_mail: docsBefore.chain_mail ?? null } })
 		if (tenant !== null) {
 			const keys = made.map((k) => `'${k}'`).join(', ')
 			sql(`DELETE FROM oc_ts_inv_hours WHERE tenant_id = ${tenant} AND invoice_id IN (SELECT id FROM oc_ts_inv_invoices WHERE tenant_id = ${tenant} AND rkey IN (${keys}))`)

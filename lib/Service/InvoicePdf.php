@@ -20,6 +20,7 @@ use Sprain\SwissQrBill\QrBill;
  * blocks, title, the facts, greeting, the positions, the sums (per rate,
  * pass-through items and total since 0.21.0), the body
  * text, the hours appendix (date, person, code, title, hours – no notes),
+ * the receipt copies (0.22.0),
  * the footer with the chain line on every page, a watermark on a preview
  * and the Swiss QR bill as the last page when the issuer has an IBAN in
  * the invoice's currency. TCPDF with DejaVu Sans; no files, no network.
@@ -62,6 +63,10 @@ final class InvoicePdf {
 		}
 		if ($d->appendix !== []) {
 			$this->appendix($pdf, $d, $t);
+		}
+		// 0.22.0: the copies of the receipts billed, before the payment part.
+		if ($d->copies !== []) {
+			ReceiptCopyPages::append($pdf, $d->copies, $t);
 		}
 		if ($d->wantsQrBill()) {
 			$this->qrBill($pdf, $d, $t);

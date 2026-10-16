@@ -22,8 +22,9 @@ use Psr\Log\LoggerInterface;
 /**
  * Invoice documents (0.19.0): renders the PDF of an issued invoice – since
  * 0.20.0 as PDF/A-3 with the EN 16931 XML inside (ZUGFeRD), plus an
- * XRechnung file when the customer wants one –, stores it in the team's
- * folder in the backup owner's files, appends the ledger action `document`
+ * XRechnung file when the customer wants one, since 0.22.0 with the
+ * receipt copies –, stores it under `Buchhaltung/<YYYY>/Rechnungen/` of the
+ * team's document tree in the backup owner's files, appends the ledger action `document`
  * with the file's hash and keeps `document_state`;
  * serves the watermarked preview of a draft (never stored) and the stored
  * document; renders again on request and through the retry job; writes
@@ -48,6 +49,7 @@ final class DocumentService {
 		private InvoicePdf $pdf,
 		private EInvoiceXml $einvoice,
 		private DocumentFolder $folders,
+		private ReceiptFiles $receiptFiles,
 		private IConfig $config,
 		private IMailer $mailer,
 		private IL10N $l,
@@ -103,12 +105,13 @@ final class DocumentService {
 			// 0.20.0: the PDF becomes PDF/A-3 with the EN 16931 XML inside (ZUGFeRD); an XRechnung file beside it when wanted.
 			$content = $this->einvoice->embed($doc, $this->pdf->render($doc));
 			$xml = $doc->wantsXRechnung() ? $this->einvoice->xrechnung($doc) : null;
-			$settings = DocumentRules::settings($t->getDocumentsJson());
-			$folder = DocumentRules::invoiceFolder($settings, $t->getName(), $row->getIssuedOn());
-			$name = DocumentRules::fileName($row->getNumber());
+			// 0.22.0: the tree, `Buchhaltung/<YYYY>/Rechnungen/<date>_<number>_<customer>.pdf`.
+			$folder = DocumentTree::invoiceFolder(TeamTree::rootOf($t), $row->getIssuedOn());
+			$customer = is_string($doc->customer['name'] ?? null) ? $doc->customer['name'] : '';
+			$name = DocumentTree::invoiceName($row->getIssuedOn(), $row->getNumber(), $customer);
 			$written = $this->folders->write($owner, $folder, $name, $content);
 			$sha = hash('sha256', $content);
-			$writtenXml = $xml === null ? null : $this->folders->write($owner, $folder, DocumentRules::fileName($row->getNumber(), DocumentRules::KIND_XML), $xml);
+			$writtenXml = $xml === null ? null : $this->folders->write($owner, $folder, DocumentTree::invoiceName($row->getIssuedOn(), $row->getNumber(), $customer, DocumentRules::KIND_XML), $xml);
 			$shaXml = $xml === null ? null : hash('sha256', $xml);
 			$this->db->beginTransaction();
 			try {
@@ -259,8 +262,8 @@ final class DocumentService {
 
 	/**
 	 * The daily job: for every team with a ledger, `chain-<day>.txt` in
-	 * the invoices folder of the backup owner's files, and the same text by
-	 * mail when `documents.chain_mail` is set.
+	 * `Buchhaltung/<YYYY>/Kette/` of the tree, and the same text by mail
+	 * when `documents.chain_mail` is set.
 	 *
 	 * @return array{written:int,mailed:int,failed:int}
 	 */
@@ -276,7 +279,7 @@ final class DocumentService {
 			$settings = DocumentRules::settings($t->getDocumentsJson());
 			try {
 				$owner = $this->team->backupOwner($t) ?? throw new \RuntimeException('no backup owner');
-				$this->folders->write($owner, DocumentRules::invoicesFolder($settings, $t->getName()), DocumentRules::chainFileName($day), $text);
+				$this->folders->write($owner, DocumentTree::chainFolder(TeamTree::rootOf($t), $day), DocumentTree::chainName($day), $text);
 				$n['written']++;
 			} catch (\Throwable $e) {
 				$n['failed']++;
@@ -304,26 +307,20 @@ final class DocumentService {
 	// ------------------------------------------------------------- folders
 
 	/**
-	 * `POST /admin/teams/{id}/documents/check`: the folders as typed (null:
-	 * the defaults) in the backup owner's files.
+	 * `POST /admin/teams/{id}/documents/check` `{ root }`: the root as typed
+	 * (null: `TimeSister/<team>`) in the backup owner's files.
 	 *
-	 * @return array{invoices:array{ok:bool,message:string},quotes:array{ok:bool,message:string}}
+	 * @return array{root:array{ok:bool,message:string,path:string}}
 	 */
-	public function checkFolders(Tenant $t, mixed $invoices, mixed $quotes): array {
-		$s = DocumentRules::validate(['invoices' => $invoices, 'quotes' => $quotes], DocumentRules::settings($t->getDocumentsJson()));
-		$owner = $this->team->backupOwner($t);
-		$out = [];
-		foreach (['invoices' => DocumentRules::invoicesFolder($s, $t->getName()), 'quotes' => DocumentRules::quotesFolder($s, $t->getName())] as $k => $path) {
-			$r = $this->folders->check($owner, $path);
-			$out[$k] = ['ok' => $r['ok'], 'message' => $this->folders->message($r)->text($this->l)];
-		}
-		return $out;
+	public function checkFolders(Tenant $t, mixed $root): array {
+		$path = DocumentTree::root(DocumentRules::path($root, DocumentRules::FIELD . '.root'), $t->getName());
+		$r = $this->folders->check($this->team->backupOwner($t), $path);
+		return ['root' => ['ok' => $r['ok'], 'message' => $this->folders->message($r)->text($this->l), 'path' => $path]];
 	}
 
-	/** Both folders of a setting must be there or creatable and writable: 422 otherwise. @param array{invoices:?string,quotes:?string,...} $s */
+	/** The root of a setting must be there or creatable and writable: 422 otherwise. @param array{root:?string,...} $s */
 	public function requireFolders(?string $owner, array $s, string $teamName): void {
-		$this->folders->require($owner, DocumentRules::invoicesFolder($s, $teamName));
-		$this->folders->require($owner, DocumentRules::quotesFolder($s, $teamName));
+		$this->folders->require($owner, DocumentRules::rootOf($s, $teamName));
 	}
 
 	// ------------------------------------------------------------ building
@@ -384,6 +381,8 @@ final class DocumentService {
 				'hours' => self::float($h['hours'] ?? 0),
 			];
 		}
+		// 0.22.0: the copies of the receipts the positions name.
+		$doc->copies = $this->receiptFiles->copies($tid, $this->receiptFiles->receipts($tid, ReceiptFiles::keysOf($doc->positions)), $doc->lang, $doc->texts());
 		$doc->iban = self::ibanFor($doc->issuer, $doc->currency);
 		// 0.20.0: the e-invoice's account, the tax case and the QR reference, the customer's key and Leitweg-ID.
 		$issuerObject = json_decode(json_encode($doc->issuer, Json::FLAGS), false);

@@ -258,9 +258,9 @@ final class TeamAdminService {
 		}
 	}
 
-	/** `POST /admin/teams/{id}/documents/check` – the folders as typed. @return array{invoices:array{ok:bool,message:string},quotes:array{ok:bool,message:string}} */
-	public function checkDocumentFolders(int $id, mixed $invoices, mixed $quotes): array {
-		return $this->documents->checkFolders($this->find($id), $invoices, $quotes);
+	/** `POST /admin/teams/{id}/documents/check` – the root as typed (0.22.0). @return array{root:array{ok:bool,message:string,path:string}} */
+	public function checkDocumentFolders(int $id, mixed $root): array {
+		return $this->documents->checkFolders($this->find($id), $root);
 	}
 
 	/** The backup owner must be an admin, i.e. a group admin of the team group (422). */
