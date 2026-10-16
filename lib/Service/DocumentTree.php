@@ -95,7 +95,8 @@ final class DocumentTree {
 
 	/** `<date>_<supplier>_<gross>-<CUR>[_<project code>-K<cost>].<ext>`. */
 	public static function receiptName(string $date, string $supplier, float $gross, string $currency, ?string $projectCode, ?int $cost, string $ext): string {
-		$parts = [$date, $supplier, self::amount($gross) . '-' . strtoupper($currency)];
+		// No amount yet (0.00): the part is left out.
+		$parts = [$date, $supplier, abs($gross) < 0.005 ? '' : self::amount($gross) . '-' . strtoupper($currency)];
 		if ($projectCode !== null && $projectCode !== '') {
 			$parts[] = $projectCode . ($cost === null ? '' : '-K' . $cost);
 		}
@@ -123,6 +124,21 @@ final class DocumentTree {
 	/** The extension of a type; `bin` for anything else. */
 	public static function extension(string $mime): string {
 		return self::EXTENSIONS[$mime] ?? 'bin';
+	}
+
+	/** Does the path already carry this name in this folder, also as `_2` … of {@see unique()}? */
+	public static function isPlaced(string $path, string $folder, string $name): bool {
+		if ($path === $folder . '/' . $name) {
+			return true;
+		}
+		if (!str_starts_with($path, $folder . '/')) {
+			return false;
+		}
+		$base = substr($path, strlen($folder) + 1);
+		$dot = strrpos($name, '.');
+		$stem = $dot === false ? $name : substr($name, 0, $dot);
+		$ext = $dot === false ? '' : substr($name, $dot);
+		return preg_match('/^' . preg_quote($stem, '/') . '_[0-9]{1,3}' . preg_quote($ext, '/') . '$/', $base) === 1;
 	}
 
 	/**

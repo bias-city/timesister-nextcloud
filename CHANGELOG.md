@@ -36,6 +36,16 @@ reports and the document tree, 0.22.0» with «As built». No schema change.
   person's `creditor_account`).
 - The privacy notice names the module costs.
 - `InvoicePage` now builds on FPDI (already a dependency since 0.20.0).
+- **Member triage** (`API.md` «Member triage, 0.22.0»): new receipt field
+  `cost_kind` (`expense`, `third_party`); a project receipt may lack
+  budget and cost position while open; a member's write keeps the stored
+  budget, cost position and invoice effect; Leads read and write the
+  receipts of their projects as soon as the project is set; approval needs
+  budget and cost position of the receipt's kind (422).
+- **File names while open:** the receipt's file follows every change of
+  its name until approval; no amount part while gross is 0.
+- **Export of expenses:** the parameter is `kind=csv|datev` (was
+  `format`, which OCS reserves).
 
 ## 0.21.0 – 2026-10-16 (beta)
 

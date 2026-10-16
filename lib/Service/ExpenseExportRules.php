@@ -18,12 +18,13 @@ final class ExpenseExportRules {
 	public const FORMATS = [self::CSV, self::DATEV];
 	public const CSV_HEAD = ['person', 'person_name', 'report', 'report_status', 'date', 'supplier', 'text', 'project', 'currency', 'net', 'vat_rate', 'vat', 'gross', 'without_receipt'];
 
-	public static function format(mixed $v): string {
+	/** The `kind` parameter (csv default, datev); not `format`, which OCS keeps for json/xml. */
+	public static function kind(mixed $v): string {
 		if ($v === null || $v === '') {
 			return self::CSV;
 		}
 		if (!in_array($v, self::FORMATS, true)) {
-			throw ReceiptRules::oneOf('format', self::FORMATS);
+			throw ReceiptRules::oneOf('kind', self::FORMATS);
 		}
 		return $v;
 	}

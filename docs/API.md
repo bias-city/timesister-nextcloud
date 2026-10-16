@@ -3514,7 +3514,7 @@ replaces the file.
 
 ### Exports
 
-`GET /exports/expenses?from&to&format=csv|datev` (Team Admins): one row
+`GET /exports/expenses?from&to&kind=csv|datev` (Team Admins; `kind` since «Member triage» below): one row
 per receipt in approved or paid reports (person, report, date, supplier,
 text, project, net, VAT rate, VAT, gross, without receipt). DATEV: credit
 account = the person's `creditor_account` (new optional field of the
@@ -3735,10 +3735,10 @@ hours of one occurrence; all-day events without hours) and `ledger.txt`
 action number payload <hash> prev <hash> hash <hash>`). Answer `{ path,
 size, sha256 }`.
 
-**Export of expenses.** `GET /exports/expenses?from&to&format`: Team
+**Export of expenses.** `GET /exports/expenses?from&to&kind` (`format` before «Member triage»): Team
 Admins (403 “Only Team Admins export expenses.”), independent of
 `invoicing`; `from`/`to` optional, filter on the **receipt's date**;
-`format` `csv` (default) or `datev` (422 otherwise). CSV head
+`kind` `csv` (default) or `datev` (422 otherwise). CSV head
 `person;person_name;report;report_status;date;supplier;text;project;currency;net;vat_rate;vat;gross;without_receipt`
 (`without_receipt` 1/0). DATEV: EXTF head as for invoices with the label
 «TimeSister Spesen»; per receipt Umsatz = |gross| (S, H when negative),
@@ -3763,3 +3763,73 @@ reports exist.
 `CostWrites` (the record writes), `ReceiptService`, `ExpenseService`,
 `QuoteDocumentService`, `DossierService`, `ExpenseExportService`,
 `ReceiptFiles`, `ReceiptCopyPages`, `ExpenseReportPdf`, `TeamTree`.
+
+## Member triage, 0.22.0 (2026-10-16)
+
+Members propose, Leads and Team Admins assign. Version stays 0.22.0
+(unpublished); no schema change.
+
+**New field `cost_kind`** on `receipt`: `null`, `"expense"` or
+`"third_party"` (the kinds of cost positions, 0.21.0). Only with a
+project: `cost_kind` without `project` → 422 “A receipt without a project
+has no “cost_kind”.”, another value → 422 “cost_kind” must be one of ….
+
+**Position.** `project`, `budget`, `cost` all null (general), or a project
+with `budget` and `cost` **both null** (triaged, not yet assigned) or
+both set (422 “budget” and “cost” are both null or name …). A cost
+position must exist in the budget and, when `cost_kind` is set, be of
+that kind (422 “The cost position 2 is not of the receipt’s kind
+“expense”.”); checked after the rights, so a billed receipt still answers
+409 first.
+
+**A member's write** (not a Team Admin, not a Lead of the receipt's
+project after the write): `budget`, `cost` and `invoice_effect` are the
+Lead's. The server keeps the stored values while `project` and
+`cost_kind` stay (no error); with another project, or another cost kind,
+`budget` and `cost` become null and `invoice_effect` its default (none
+without project, `show_only` when the customer paid, else `charge`). The
+client maps the member's question «expenses?» to `paid_by: person`,
+`person` = the member, `reimburse: true`, else `paid_by: company`,
+`reimburse: false`; the server does not force this.
+
+**Proposal and correction.** Before approval Team Admins correct any
+field; a Lead any field of receipts of the projects they lead, but moving
+one to a project they do not lead is 403 (unless it is their own).
+`cost_kind` joins the fields correctable after approval (`project`,
+`cost_kind`, `budget`, `cost`, `invoice_effect`, `note`); an approved
+receipt of a project keeps budget and cost position (422 “An approved
+receipt of a project keeps a budget and a cost position.”).
+
+**Reading.** A Lead reads (single, list, delta, history) and writes the
+receipts of every project they lead as soon as `project` is set, also
+without budget and cost position. Members still see no budgets, cost
+positions or caps; a project they read is its booking catalog.
+
+**Approve.** `POST /receipts/{key}/approve` of a receipt with a project
+needs `budget` and `cost`: 422 “Before approval a Lead or Team Admin
+assigns the receipt to a budget and a cost position.”; the cost position
+must exist and match `cost_kind` (422 as above). Order: rights, status
+(409), file (422), assignment (422).
+
+**File name while open.** While a receipt is `open` (a write to a
+rejected one opens it), every client write moves the file to its current
+name and folder (`Belege/` or `Spesen/<person>/` by `reimburse` and
+`person`) and updates `file.path` – also on a write that changes date,
+supplier, gross, currency, project or cost. A name the file already
+carries as `_2` … stays (no renaming back and forth). A failed batch moves
+the files back. Approval moves it a last time; from `approved` on it never
+moves. Name parts: no amount part while `gross` is 0
+(`2026-10-02_Bahn.pdf`), a project without cost position only `_<code>`,
+with one `_<code>-K<n>`.
+
+**Export of expenses.** The parameter is now `kind`:
+`GET /exports/expenses?from&to&kind=csv|datev` (422 “kind” must be one of
+csv, datev.). `format` is no longer read – OCS uses it for json/xml. No
+transition.
+
+**Receipt copies (client side).** The free FPDI parser reads no PDF with
+a cross-reference stream or object streams (see «As built»). The Mac app
+therefore rewrites such a PDF before `PUT /receipts/{key}/file` with a
+classic cross-reference table and without object streams (same pages);
+if that fails, it uploads the file unchanged and the server's
+placeholder page stays the fallback. `sha256` is the uploaded file's.

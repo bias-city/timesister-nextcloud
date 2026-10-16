@@ -10,7 +10,7 @@ use OCA\TimeSister\Db\RecordMapper;
 use OCP\AppFramework\Utility\ITimeFactory;
 
 /**
- * `GET /exports/expenses?from&to&format=csv|datev` (0.22.0, Team Admins):
+ * `GET /exports/expenses?from&to&kind=csv|datev` (0.22.0, Team Admins):
  * the receipts of approved and paid expense reports dated in the period.
  */
 final class ExpenseExportService {
@@ -26,7 +26,7 @@ final class ExpenseExportService {
 		if (!$m->manages()) {
 			throw ApiException::forbidden('Only Team Admins export expenses.');
 		}
-		$format = ExpenseExportRules::format($format);
+		$format = ExpenseExportRules::kind($format);
 		$from = ExportRules::day($from, 'from');
 		$to = ExportRules::day($to, 'to');
 		$tid = $m->tenantId;

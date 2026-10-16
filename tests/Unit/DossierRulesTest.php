@@ -38,7 +38,7 @@ class DossierRulesTest extends TestCase {
 		$this->assertSame(['5,00', 'S', 'CHF', '', '', '', '6300', '70001', '', '0210', 'sb-1', '', '', 'Parking Meter'], ExpenseExportRules::datevRow($r, 'sb-1', '6300', '70001'));
 		$this->assertTrue(ExpenseExportRules::takes($report));
 		$this->assertFalse(ExpenseExportRules::takes((object)['status' => 'submitted']));
-		$this->assertSame('csv', ExpenseExportRules::format(null));
+		$this->assertSame('csv', ExpenseExportRules::kind(null));
 		$fail = static function (callable $fn): string {
 			try {
 				$fn();
@@ -47,7 +47,7 @@ class DossierRulesTest extends TestCase {
 				return $e->getStatus() . ' ' . $e->getMessage();
 			}
 		};
-		$this->assertSame('422 “format” must be one of csv, datev.', $fail(fn () => ExpenseExportRules::format('xls')));
+		$this->assertSame('422 “kind” must be one of csv, datev.', $fail(fn () => ExpenseExportRules::kind('xls')));
 		$this->assertSame('422 The DATEV export needs the accounts in the team setting “datev”: “expense_account” is missing.', $fail(fn () => ExpenseExportRules::requireExpenseAccount(['expense_account' => null])));
 		$this->assertSame('422 The DATEV export needs the creditor account of Alice Example (“creditor_account” in the person record).', $fail(fn () => ExpenseExportRules::creditorOf((object)[], 'Alice Example')));
 		$this->assertSame('70001', ExpenseExportRules::creditorOf((object)['creditor_account' => '70001'], 'x'));

@@ -157,26 +157,32 @@ export async function belege() {
 
 		head('Receipts: content, defaults, server fields')
 		{
-			const r = await ocs(U1, 'PUT', rec('receipt', R1), { version: 0, data: receipt({ status: 'approved', created_by: 'mallory', file: { path: 'x' } }) })
+			// Member triage: spesen, project and cost kind; amounts follow, budget and cost position are the Lead's.
+			const r = await ocs(U1, 'PUT', rec('receipt', R1), { version: 0, data: receipt({ net: 0, vat: 0, gross: 0, cost_kind: 'expense', invoice_effect: 'none', status: 'approved', created_by: 'mallory', file: { path: 'x' } }) })
 			expect('Member writes a receipt paid and reimbursed to them', r, 200)
 			const d = r.data?.data
-			check('… open, created_by the caller, file null, defaults charge and CHF (the budget’s)', d?.status === 'open' && d?.created_by === 'pbuser1' && d?.file === null && d?.invoice_effect === 'charge' && d?.currency === 'CHF' && d?.reimburse === true && /^\d{4}-\d{2}-\d{2}$/.test(d?.created_on ?? ''), d)
+			check('… open, created_by the caller, file null, defaults charge and CHF', d?.status === 'open' && d?.created_by === 'pbuser1' && d?.file === null && d?.invoice_effect === 'charge' && d?.currency === 'CHF' && d?.reimburse === true && /^\d{4}-\d{2}-\d{2}$/.test(d?.created_on ?? ''), d)
+			check('… the member’s budget, cost and effect are ignored, the cost kind stays', d?.budget === null && d?.cost === null && d?.cost_kind === 'expense' && d?.project === PB, d)
 			for (const [name, data, status, error] of [
 				['net + vat ≠ gross', receipt({ gross: 110 }), 422, 'invalid'],
 				['vat not net × rate', receipt({ vat: 9, gross: 109 }), 422, 'invalid'],
 				['paid by a person without person', receipt({ person: null }), 422, 'invalid'],
 				['reimbursed though the company paid', receipt({ paid_by: 'company', person: null }), 422, 'invalid'],
-				['a cost position the budget lacks', receipt({ cost: 9 }), 422, 'invalid'],
+				['a cost kind without a project', receipt({ project: null, budget: null, cost: null, cost_kind: 'expense' }), 422, 'invalid'],
+				['an unknown cost kind', receipt({ cost_kind: 'travel' }), 422, 'invalid'],
 				['a project that does not exist', receipt({ project: `nope-${RUN}` }), 422, 'invalid'],
 				['charge without a project', receipt({ project: null, budget: null, cost: null, invoice_effect: 'charge' }), 422, 'invalid'],
 				['a person outside the team', receipt({ person: 'atuser1' }), 422, 'invalid'],
 			]) {
 				expect(`receipt: ${name}`, await ocs(U1, 'PUT', rec('receipt', `rc-${RUN}-bad`), { version: 0, data }), status, error)
 			}
+			expect('Team Admin: a cost position the budget lacks', await ocs(A, 'PUT', rec('receipt', `rc-${RUN}-bad`), { version: 0, data: receipt({ cost: 9 }) }), 422, 'invalid')
+			expect('Team Admin: a cost position of the other kind', await ocs(A, 'PUT', rec('receipt', `rc-${RUN}-bad`), { version: 0, data: receipt({ cost_kind: 'expense', cost: 2 }) }), 422, 'invalid')
 			expect('a key without rc-', await ocs(U1, 'PUT', rec('receipt', `x-${RUN}`), { version: 0, data: receipt() }), 422, 'invalid')
 			expect('another member reads it', await ocs(U2, 'GET', rec('receipt', R1)), 403, 'forbidden')
 			expect('another member writes it', await ocs(U2, 'PUT', rec('receipt', R1), { version: r.data?.version ?? 1, data: receipt() }), 403, 'forbidden')
-			expect('the project’s Lead reads it', await ocs(L, 'GET', rec('receipt', R1)), 200)
+			expect('the project’s Lead reads it (project, no budget yet)', await ocs(L, 'GET', rec('receipt', R1)), 200)
+			check('… and finds it in the delta', ((await ocs(L, 'GET', '/records?since=0')).data?.records || []).some((x) => x.key === R1))
 			check('the member’s delta carries it, the other’s does not', ((await ocs(U1, 'GET', '/records?since=0')).data?.records || []).some((x) => x.key === R1)
 				&& !((await ocs(U2, 'GET', '/records?since=0')).data?.records || []).some((x) => x.key === R1))
 		}
@@ -188,13 +194,27 @@ export async function belege() {
 			check('a text file → 422', bad.status === 422 && bad.data?.error === 'invalid', [bad.status, bad.text.slice(0, 200)])
 			const other = await raw(U2, 'PUT', `/receipts/${R1}/file`, pdf('Bahn'), 'application/pdf')
 			check('another member → 403', other.status === 403, other.status)
+			const dir = `${FOLDER}/Buchhaltung/${Y}/Spesen/${person}`
+			const first = `${dir}/${Y}-03-10_Bahn-Muster_${CODE}.pdf`
 			const f = await raw(U1, 'PUT', `/receipts/${R1}/file`, pdf('Bahn Muster Basel Bern'), 'application/pdf')
-			const want = `${FOLDER}/Buchhaltung/${Y}/Spesen/${person}/${Y}-03-10_Bahn-Muster_108.10-CHF_${CODE}-K1.pdf`
-			check('the member stores a PDF: path under Spesen/<person>/, sha256, size, mime, version', f.status === 200 && f.data?.path === want && f.data?.sha256 === sha256(pdf('Bahn Muster Basel Bern')) && f.data?.mime === 'application/pdf' && f.data?.version === 2, [f.status, f.data, want])
-			check('… the record carries file', (await get('receipt', R1))?.data?.file?.path === want)
+			check('the member stores a PDF: under Spesen/<person>/, no amount yet, project without cost position; sha256, mime, version', f.status === 200 && f.data?.path === first && f.data?.sha256 === sha256(pdf('Bahn Muster Basel Bern')) && f.data?.mime === 'application/pdf' && f.data?.version === 2, [f.status, f.data, first])
+			check('… the record carries file', (await get('receipt', R1))?.data?.file?.path === first)
 			const g = await raw(U1, 'GET', `/receipts/${R1}/file`)
 			check('GET file returns it', g.status === 200 && g.buf.equals(pdf('Bahn Muster Basel Bern')), g.status)
-			check('… it lies in the owner’s files', (await davGet(want)).status === 200)
+			check('… it lies in the owner’s files', (await davGet(first)).status === 200)
+			// While open the file follows every change of its name.
+			const amounts = await put(U1, 'receipt', R1, { ...(await get('receipt', R1)).data, net: 100, vat: 8.1, gross: 108.1 })
+			const priced = `${dir}/${Y}-03-10_Bahn-Muster_108.10-CHF_${CODE}.pdf`
+			check('the member enters the amounts: the file is renamed', amounts.status === 200 && amounts.data?.data?.file?.path === priced && (await davGet(priced)).status === 200 && (await davGet(first)).status === 404, amounts.data?.data?.file)
+			const early = await ocs(L, 'POST', `/receipts/${R1}/approve`, {})
+			check('the Lead approves before assigning budget and cost position → 422', early.status === 422 && String(early.data?.message || '').includes('budget and a cost position'), early.data)
+			const wrongKind = await put(L, 'receipt', R1, { ...(await get('receipt', R1)).data, budget: 'b1', cost: 2 })
+			expect('the Lead assigns a cost position of the other kind', wrongKind, 422, 'invalid')
+			const asg = await put(L, 'receipt', R1, { ...(await get('receipt', R1)).data, budget: 'b1', cost: 1, invoice_effect: 'charge' })
+			const want = `${dir}/${Y}-03-10_Bahn-Muster_108.10-CHF_${CODE}-K1.pdf`
+			check('the Lead assigns budget and cost position: the file follows', asg.status === 200 && asg.data?.data?.budget === 'b1' && asg.data?.data?.cost === 1 && asg.data?.data?.file?.path === want && (await davGet(want)).status === 200, asg.data?.data)
+			const keep = await put(U1, 'receipt', R1, { ...(await get('receipt', R1)).data, budget: null, cost: null, invoice_effect: 'none', text: 'Basel–Bern' })
+			check('the member writes again: budget, cost position and effect stay, the name too', keep.status === 200 && keep.data?.data?.budget === 'b1' && keep.data?.data?.cost === 1 && keep.data?.data?.invoice_effect === 'charge' && keep.data?.data?.file?.path === want, keep.data?.data)
 			const again = await raw(U1, 'PUT', `/receipts/${R1}/file`, pdf('Bahn Muster Basel Bern 2'), 'application/pdf')
 			check('a second file replaces the first under the same name', again.status === 200 && again.data?.path === want && again.data?.sha256 === sha256(pdf('Bahn Muster Basel Bern 2')), again.data)
 		}
@@ -212,6 +232,7 @@ export async function belege() {
 			expect('the Lead books it to their project before approval (show_only)', moved, 403, 'forbidden')
 			const m2 = await ocs(A, 'PUT', rec('receipt', R2), { version: cur.version, data: { ...cur.data, project: PB, budget: 'b1', cost: 2, invoice_effect: 'show_only', note: 'paid by the customer' } })
 			expect('Team Admin books it to the project (show_only)', m2, 200)
+			check('… the open receipt’s file follows at once', m2.data?.data?.file?.path === `${FOLDER}/Buchhaltung/${Y}/Belege/${Y}-03-10_Druckerei_500.00-CHF_${CODE}-K2.png`, m2.data?.data?.file)
 			expect('a member approves', await ocs(U1, 'POST', `/receipts/${R1}/approve`, {}), 403, 'forbidden')
 			const a = await ocs(L, 'POST', `/receipts/${R2}/approve`, {})
 			expect('the project’s Lead approves', a, 200)
@@ -311,15 +332,15 @@ export async function belege() {
 			const accounts = { ...(datevBefore || {}), consultant: '1234567', client: '12345', account_length: 4 }
 			delete accounts.expense_account
 			await ocs(A, 'PUT', '/team/settings', { datev: accounts })
-			const no = await raw(A, 'GET', `/exports/expenses?from=${Y}-01-01&to=${Y}-12-31&format=datev`)
+			const no = await raw(A, 'GET', `/exports/expenses?from=${Y}-01-01&to=${Y}-12-31&kind=datev`)
 			check('DATEV without expense_account → 422 naming it', no.status === 422 && no.text.includes('expense_account'), [no.status, no.text.slice(0, 200)])
 			expect('Team Admin sets datev.expense_account', await ocs(A, 'PUT', '/team/settings', { datev: { ...accounts, expense_account: '6300' } }), 200)
-			const noCred = await raw(A, 'GET', `/exports/expenses?from=${Y}-01-01&to=${Y}-12-31&format=datev`)
+			const noCred = await raw(A, 'GET', `/exports/expenses?from=${Y}-01-01&to=${Y}-12-31&kind=datev`)
 			check('DATEV without the person’s creditor account → 422 naming creditor_account', noCred.status === 422 && noCred.text.includes('creditor_account'), [noCred.status, noCred.text.slice(0, 200)])
 			const pdata = personBefore.status === 200 ? { ...personBefore.data.data } : { schema: 1, login: 'pbuser1', name: nameOf('pbuser1') }
 			expect('a creditor account of 10 digits', await put(A, 'person', 'pbuser1', { ...pdata, creditor_account: '1234567890' }), 422, 'invalid')
 			expect('the person gets creditor_account 70001', await put(A, 'person', 'pbuser1', { ...pdata, creditor_account: '70001' }), 200)
-			const dv = await raw(A, 'GET', `/exports/expenses?from=${Y}-01-01&to=${Y}-12-31&format=datev`)
+			const dv = await raw(A, 'GET', `/exports/expenses?from=${Y}-01-01&to=${Y}-12-31&kind=datev`)
 			const rows = dv.text.split('\r\n').filter((l) => l.includes(`;${SB};`))
 			check('DATEV: EXTF head, one booking per receipt, debit 6300, credit 70001', dv.status === 200 && dv.text.includes('TimeSister Spesen') && rows.length === 2 && rows.some((l) => l.startsWith('108,10;S;CHF;;;;6300;70001;;1003;')), rows)
 		}
