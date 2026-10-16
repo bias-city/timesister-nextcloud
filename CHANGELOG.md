@@ -46,6 +46,17 @@ reports and the document tree, 0.22.0» with «As built». No schema change.
   its name until approval; no amount part while gross is 0.
 - **Export of expenses:** the parameter is `kind=csv|datev` (was
   `format`, which OCS reserves).
+- **Recognition fields** (`API.md` «Recognition fields, 0.22.0»): optional
+  receipt fields `review` and `review_reasons` (the mark «please check»,
+  cleared by approval or by Team Admins, the project's Leads and who
+  recorded it), `recognized_by`, `qr_reference` and `vat_lines` for
+  receipts with several VAT rates; such a receipt stands on one invoice
+  line per rate, expense report sums count it per rate. The recognition
+  runs in the Mac app, never on the server.
+- **Another currency:** receipt field `booked: { gross, currency }`, the
+  amount paid in the team's currency; required for approving a receipt in
+  another currency (422); expense reports and the export of expenses count
+  it.
 
 ## 0.21.0 – 2026-10-16 (beta)
 

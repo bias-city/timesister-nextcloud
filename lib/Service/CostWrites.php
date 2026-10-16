@@ -101,6 +101,7 @@ final class CostWrites {
 			$project = $this->live($tid, 'project', $projectKey) ?? throw ApiException::invalid('The receipt’s project does not exist.');
 		}
 		$after->currency ??= $this->currency($tid, $project, $after);
+		ReceiptBooking::requireTeamCurrency($after, ReceiptBooking::teamCurrency($this->live($tid, 'setting', 'settings')));
 		$this->requireMember($tid, $after->person ?? null);
 		$ruleApproved = false;
 		if (($after->kind ?? null) === ReceiptRules::RECURRING

@@ -674,7 +674,21 @@
 		"The receipt has no file yet.": "Der Beleg hat noch keine Datei.",
 		"Root folder": "Wurzelordner",
 		"The root of the team’s documents: a folder in the files of the backup owner, e.g. a group folder like “TimeSister Example Team”. Type the path as it appears in that account’s Files. Below it the server keeps a fixed scheme: Buchhaltung/<year>/ with Offerten, Rechnungen, Belege, Spesen and Kette, and Projekte/ with the project dossiers. Empty: “TimeSister/<team>”.": "Die Wurzel der Dokumente des Teams: ein Ordner in den Dateien des Sicherungs-Eigners, z. B. ein Gruppenordner wie „TimeSister Example Team“. Gib den Pfad so ein, wie er in den Dateien dieses Kontos erscheint. Darunter führt der Server ein festes Schema: Buchhaltung/<year>/ mit Offerten, Rechnungen, Belege, Spesen und Kette, und Projekte/ mit den Projektakten. Leer: „TimeSister/<team>“.",
-		"Optional. Every day the app writes the ledger’s chain head (last entry and hash) as chain-<date>.txt into Buchhaltung/<year>/Kette and sends the same text to this address, e.g. the accountant.": "Optional. Jeden Tag schreibt die App den Kettenkopf des Journals (letzter Eintrag und Hash) als chain-<date>.txt nach Buchhaltung/<year>/Kette und schickt denselben Text an diese Adresse, z. B. die Treuhand."
+		"Optional. Every day the app writes the ledger’s chain head (last entry and hash) as chain-<date>.txt into Buchhaltung/<year>/Kette and sends the same text to this address, e.g. the accountant.": "Optional. Jeden Tag schreibt die App den Kettenkopf des Journals (letzter Eintrag und Hash) als chain-<date>.txt nach Buchhaltung/<year>/Kette und schickt denselben Text an diese Adresse, z. B. die Treuhand.",
+		"The receipt {key} stands on one line per VAT rate; the line at {rate} is missing.": "Der Beleg {key} steht mit einer Zeile je MwSt-Satz auf der Rechnung; die Zeile zu {rate} fehlt.",
+		"The receipt {key} has several VAT rates; its line names one of them in “vat” ({rates}).": "Der Beleg {key} hat mehrere MwSt-Sätze; seine Zeile nennt einen davon in „vat“ ({rates}).",
+		"“{field}” must be null or one of {values}.": "„{field}“ muss null oder eines von {values} sein.",
+		"“{field}” must be null or text of at most {max} characters.": "„{field}“ muss null oder Text mit höchstens {max} Zeichen sein.",
+		"Each rate stands once in “vat_lines”.": "Jeder Satz steht einmal in „vat_lines“.",
+		"In “vat_lines” the VAT at {rate} must be the net × rate / 100, rounded to cents.": "In „vat_lines“ muss die MwSt zu {rate} netto × Satz / 100 sein, auf Rappen gerundet.",
+		"A receipt with “vat_lines” has no single “vat_rate”: it is null.": "Ein Beleg mit „vat_lines“ hat keinen einzelnen „vat_rate“: er ist null.",
+		"The “vat_lines” add up to “net” and “vat”.": "Die „vat_lines“ ergeben zusammen „net“ und „vat“.",
+		"Only Team Admins, the project’s Leads and who recorded the receipt mark it as checked.": "Nur Team Admins, die Leads des Projekts und wer den Beleg erfasst hat, markieren ihn als geprüft.",
+		"“review_reasons” must be a list of at most {n} texts of at most {max} characters.": "„review_reasons“ muss eine Liste von höchstens {n} Texten mit höchstens {max} Zeichen sein.",
+		"“vat_lines” must be a list of at most {n} lines with “rate” (0 to 100), “net” and “vat”.": "„vat_lines“ muss eine Liste von höchstens {n} Zeilen mit „rate“ (0 bis 100), „net“ und „vat“ sein.",
+		"“booked” is null or the amount paid: { “gross”, “currency” }.": "„booked“ ist null oder der bezahlte Betrag: { „gross“, „currency“ }.",
+		"“booked” is the amount paid in the team’s currency {currency}.": "„booked“ ist der bezahlte Betrag in der Teamwährung {currency}.",
+		"Enter the amount in {currency} that was paid.": "Gib den Betrag in {currency} ein, der bezahlt wurde."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

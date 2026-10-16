@@ -3833,3 +3833,84 @@ therefore rewrites such a PDF before `PUT /receipts/{key}/file` with a
 classic cross-reference table and without object streams (same pages);
 if that fails, it uploads the file unchanged and the server's
 placeholder page stays the fallback. `sha256` is the uploaded file's.
+
+## Recognition fields, 0.22.0 (2026-10-16)
+
+The Mac app reads a receipt's file itself (Apple Vision, Swiss QR code,
+ZUGFeRD/XRechnung in a PDF, the local language model, a heuristic as
+fallback) and fills the receipt with what it found. **The recognition
+never runs on the server**; the server only stores and checks these
+optional fields. Version stays 0.22.0 (unpublished); no schema change.
+
+| Field | Rule |
+|---|---|
+| `review` | bool, default `false`: the mark «please check». The client sets it when the recognition is not sure (the sum does not add up, a rate is unknown, a keyword is missing). |
+| `review_reasons` | list of at most 10 texts of 1–200 characters, default `[]`; stored as `[]` while `review` is `false` |
+| `recognized_by` | `null`, `"zugferd"`, `"qr"`, `"model"` or `"heuristic"`: where the amounts came from |
+| `qr_reference` | `null` or 1–35 characters: the reference of a Swiss QR bill |
+| `vat_lines` | `null` or 1–10 lines `{ rate, net, vat }` with distinct rates (0–100), for receipts with several VAT rates (as an invoice's `vat_lines` since 0.21.0); `[]` is stored as `null` |
+
+**VAT lines.** With `vat_lines` the receipt has no single rate:
+`vat_rate` must be `null` (422 “A receipt with “vat_lines” has no single
+“vat_rate”: it is null.”). Σ `net` of the lines = `net`, Σ `vat` = `vat`
+(422 “The “vat_lines” add up to “net” and “vat”.”), `net + vat = gross`
+as before, and on each line `vat = round(net × rate / 100, 2)` – all within
+0.01 (422 “In “vat_lines” the VAT at 8.1 % must be …”). A rate twice: 422
+“Each rate stands once in “vat_lines”.”
+
+**The mark.** Every writer of an open receipt may set `review` (the
+recognition of a member's client sets it). Clearing it (stored `true`,
+written `false` – «checked») is for Team Admins, the Leads of the
+receipt's project and who created it (`created_by`): else 403 “Only Team
+Admins, the project’s Leads and who recorded the receipt mark it as
+checked.” `POST /receipts/{key}/approve` clears it (`review: false`,
+`review_reasons: []`) in the same write. After approval the fields are
+not among the correctable ones (409 like `net`); a record from before
+these fields compares as having their defaults, so writing them unchanged
+is no change.
+
+**Invoicing.** A receipt with `vat_lines` and `invoice_effect: charge` on
+a taxable line (`vat_mode` not `pass_through`) stands on **one line per
+rate**: each line names it in `receipts[]` and carries one of its rates in
+`vat` (422 “Position n: The receipt rc-… has several VAT rates; its line
+names one of them in “vat” (2.6 %, 8.1 %).”), each rate once (422 “… is on
+the invoice twice.”) and every rate present (422 “The receipt rc-… stands
+on one line per VAT rate; the line at 8.1 % is missing.”). The amount of
+each line is the client's (the Mac app: the line's net). On a
+pass-through line, and with `show_only`, the receipt stands once as
+before. Markup bases sum all its lines.
+
+**Expense reports.** `sums` count a receipt with `vat_lines` once per
+rate (`VatLines`); its row in the PDF shows the rates joined
+(`2.6 % / 8.1 %`). The CSV export leaves `vat_rate` empty for it.
+
+**Another currency (`booked`).** A receipt whose `currency` differs from
+the team's currency (`settings.currency`, else the currency of the
+issuer's first account, else CHF) carries the amount actually paid in the
+team's currency: `booked: { gross, currency }` – e.g. a USD invoice paid
+by card in CHF, `gross` from the card statement. A `rate` sent along is
+not stored. `booked` in the receipt's own currency is stored as `null`;
+in another than the team's currency 422 ““booked” is the amount paid in
+the team’s currency CHF.”; not an object of a number and a currency 422.
+Approving a foreign receipt without it: 422 “Enter the amount in CHF that
+was paid.” (after the other checks). Like the amounts it does not change
+after approval. Expense reports (sums and rows, the original amount in
+brackets after the text), the export of expenses (CSV, DATEV) and the
+Mac app's invoice lines and cost consumption count the booked amount as
+gross with the receipt's rate(s): split over its VAT lines by their share
+of the gross (the last line takes the rest), net = gross / (1 + rate)
+rounded half away from zero, VAT the rest. `net`, `vat`, `gross`,
+`vat_rate` and `vat_lines` of the receipt stay as on the receipt, for
+information. A receipt in the team's currency has `booked: null` and
+everything stays as before.
+
+**Rates.** `vat_rate` and the rates of `vat_lines` are any number from 0
+to 100 – also old Swiss rates (7.7, 3.7, 2.5 until 2023) and foreign VAT;
+the server checks only the arithmetic.
+
+**As built.** Class `ReceiptRecognition` (pure: content, defaults, who
+clears the mark, the receipt's amounts by rate) and `ReceiptBooking`
+(pure: the team's currency, `booked`, the amounts as they count); `ReceiptRules` calls it
+from `validate`, `requireWrite` and `changed`, `ReceiptLineRules` for the
+lines per rate, `ExpenseReportRules::sums` and `ExpenseService` for the
+report.

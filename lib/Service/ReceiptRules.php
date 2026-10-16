@@ -67,6 +67,7 @@ final class ReceiptRules {
 		self::text($d, 'text', self::TEXT_MAX, self::CONTROL_NOTE);
 		self::text($d, 'note', self::NOTE_MAX, self::CONTROL_NOTE);
 		self::amounts($d);
+		ReceiptRecognition::validate($d);
 		$c = $d->currency ?? null;
 		if ($c !== null) {
 			if (!is_string($c) || preg_match(ProjectRules::CURRENCY_PATTERN, $c) !== 1) {
@@ -74,6 +75,7 @@ final class ReceiptRules {
 			}
 			$d->currency = strtoupper($c);
 		}
+		ReceiptBooking::validate($d);
 		self::position($d);
 		self::payer($d);
 		self::recurring($d);
@@ -94,6 +96,9 @@ final class ReceiptRules {
 			}
 		}
 		$rate = $d->vat_rate ?? null;
+		if ($rate !== null && ReceiptRecognition::hasLines($d)) {
+			throw ApiException::invalid('A receipt with “vat_lines” has no single “vat_rate”: it is null.');
+		}
 		if ($rate !== null && !(ProjectRules::isRate($rate) && $rate <= 100)) {
 			throw ApiException::invalid(Message::of('“{field}” must be null or a percentage from 0 to 100.', ['field' => 'vat_rate']));
 		}
@@ -359,6 +364,9 @@ final class ReceiptRules {
 			}
 			return;
 		}
+		if ($after !== null) {
+			ReceiptRecognition::requireClear($manages, $uid, $led, $before, $after);
+		}
 		if ($manages) {
 			return;
 		}
@@ -381,7 +389,7 @@ final class ReceiptRules {
 			if (in_array($k, self::SERVER, true)) {
 				continue;
 			}
-			if (Json::encode([$before->{$k} ?? null]) !== Json::encode([$after->{$k} ?? null])) {
+			if (Json::encode([ReceiptRecognition::value($before, $k)]) !== Json::encode([ReceiptRecognition::value($after, $k)])) {
 				$out[] = $k;
 			}
 		}
