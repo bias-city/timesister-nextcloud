@@ -692,7 +692,8 @@
 		"“billed” is null or the amount for the budget: { “gross”, “currency” }.": "„billed“ ist null oder der Betrag für das Budget: { „gross“, „currency“ }.",
 		"“billed” is the amount for the budget in its currency {currency}.": "„billed“ ist der Betrag für das Budget in dessen Währung {currency}.",
 		"Enter the amount in {currency} for the budget.": "Gib den Betrag in {currency} für das Budget ein.",
-		"The team’s “currency” is null or three capital letters, for example CHF.": "Die „currency“ des Teams ist null oder drei Grossbuchstaben, zum Beispiel CHF."
+		"The team’s “currency” is null or three capital letters, for example CHF.": "Die „currency“ des Teams ist null oder drei Grossbuchstaben, zum Beispiel CHF.",
+		"The team’s “language” is null, “de” or “en”.": "Die „language“ des Teams ist null, „de“ oder „en“."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

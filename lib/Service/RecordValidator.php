@@ -82,6 +82,10 @@ final class RecordValidator {
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, 'currency')) {
 			ReceiptBooking::validateTeamCurrency($data->currency);
 		}
+		// The document language (0.22.0): null, de or en.
+		if ($kind === 'setting' && $key === 'settings' && property_exists($data, 'language')) {
+			DocumentRules::validateLanguage($data->language);
+		}
 		// 0.21.0: the module switches (costs among them) are booleans.
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, ModuleRules::FIELD)) {
 			ModuleRules::validate($data->{ModuleRules::FIELD});

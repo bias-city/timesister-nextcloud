@@ -9,6 +9,7 @@ namespace OCA\TimeSister\Tests\Unit;
 use OCA\TimeSister\Capabilities;
 use OCA\TimeSister\Service\ApiException;
 use OCA\TimeSister\Service\DocumentRules;
+use OCA\TimeSister\Service\RecordValidator;
 use OCA\TimeSister\Service\TeamRules;
 use OCP\App\IAppManager;
 use PHPUnit\Framework\TestCase;
@@ -82,6 +83,15 @@ class DocumentRulesTest extends TestCase {
 		$this->assertSame('en', DocumentRules::language((object)['language' => 'en'], 'de'));
 		$this->assertSame('de', DocumentRules::language(null, 'de'));
 		$this->assertSame('en', DocumentRules::language((object)['language' => 'fr'], 'fr'));
+		// What a client may write (0.22.0): null, de or en, else 422.
+		foreach ([null, 'de', 'en'] as $ok) {
+			$this->assertSame('ok', self::outcome(fn () => DocumentRules::validateLanguage($ok)));
+		}
+		foreach (['de_CH', 'DE', 'fr', '', 1, true] as $bad) {
+			$this->assertSame('422 The team’s “language” is null, “de” or “en”.', self::outcome(fn () => DocumentRules::validateLanguage($bad)));
+		}
+		$this->assertSame('ok', self::outcome(fn () => RecordValidator::validate('setting', 'settings', (object)['language' => 'de', 'currency' => 'CHF'])));
+		$this->assertStringStartsWith('422 ', self::outcome(fn () => RecordValidator::validate('setting', 'settings', (object)['language' => 'fr'])));
 		$this->assertSame('Rechnung', DocumentRules::texts('de')['invoice']);
 		$this->assertSame('Invoice', DocumentRules::texts('en')['invoice']);
 		$t = DocumentRules::texts('en');

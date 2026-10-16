@@ -167,6 +167,18 @@ final class DocumentRules {
 	}
 
 	/**
+	 * The team's document language as written (0.22.0): null (the server's
+	 * default decides) or `de` / `en`.
+	 *
+	 * @throws ApiException 422 otherwise
+	 */
+	public static function validateLanguage(mixed $v): void {
+		if ($v !== null && $v !== self::DE && $v !== self::EN) {
+			throw ApiException::invalid('The team’s “language” is null, “de” or “en”.');
+		}
+	}
+
+	/**
 	 * The document's language: the team's `settings.language` when it is
 	 * German or English, else the server's default language (German when
 	 * it starts with `de`, English otherwise).
