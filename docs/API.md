@@ -2897,7 +2897,8 @@ rely on it:
   (null until `done`).
 - **The document's language:** `setting/settings.language` (`de…` or
   `en…`, case-insensitive) decides, else the server's `default_language`;
-  anything else renders English. Labels, the watermark (VORABZUG/DRAFT),
+  anything else renders English. Since 0.22.0 a write accepts only
+  `null`, `de` or `en` (see «Document language» below). Labels, the watermark (VORABZUG/DRAFT),
   dates (`15.10.2026` / `2026-10-15`) and amounts (`1’234.50` / `1,234.50`)
   follow it. The chain line is always `Beleg <number> · Kette <seq> <hash[0:12]> ← <prev_hash[0:12]>`
   (`← –` for the first entry); a preview carries
@@ -3930,6 +3931,13 @@ CHF.”); T is `settings.currency`, else CHF. The fallback to the currency
 of the issuer's first account is gone (development, no transition). The
 Mac app sets it under Accounting settings › Team currency, locally as in
 a team.
+
+**Document language.** `settings.language` is `null`, `de` or `en` when
+written (422 “The team’s “language” is null, “de” or “en”.”); `null` or
+absent leaves it to the server's `default_language`. Invoice and preview,
+expense report and the e-invoice texts follow it. The Mac
+app sets it under Accounting settings › Document language and fills it on
+the first save of those settings with the Team Admin's app language.
 
 **For expenses** (expense reports with sums and rows, the export of
 expenses as CSV and DATEV) nothing changes: R = T the receipt's own

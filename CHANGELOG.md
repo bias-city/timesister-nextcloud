@@ -69,6 +69,10 @@ reports and the document tree, 0.22.0» with «As built». No schema change.
 - **Team currency:** `settings.currency` is null or three capital letters
   (422); the team's currency no longer falls back to the issuer's first
   account, only to CHF.
+- **Document language:** `settings.language` is null, `de` or `en` when
+  written (422 otherwise); invoice, preview (watermark VORABZUG/DRAFT),
+  expense report and e-invoice texts follow it, unset the server's
+  default language. The Mac app sets it beside the team currency.
 
 ## 0.21.0 – 2026-10-16 (beta)
 
