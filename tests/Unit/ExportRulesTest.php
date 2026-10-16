@@ -72,7 +72,10 @@ class ExportRulesTest extends TestCase {
 		$this->assertSame("a;\"b;c\";\"say \"\"hi\"\"\";d\r\n", ExportRules::line(['a', 'b;c', 'say "hi"', 'd']));
 		$row = ExportRules::csvRow(self::fixed(), null);
 		$this->assertCount(count(ExportRules::CSV_HEAD), $row);
-		$this->assertSame(['RE-2026-0007', 'issued', '2026-10-15', '2026-11-14', '', 'Müller AG', 'CHE-1', 'd200', 'b1', 'CHF', '1825.00', '8.10', '147.83', '1972.83', 'domestic', '', 'abc', '3', 'def'], $row);
+		$this->assertSame(['RE-2026-0007', 'issued', '2026-10-15', '2026-11-14', '', 'Müller AG', 'CHE-1', 'd200', 'b1', 'CHF', '1825.00', '8.10', '147.83', '1972.83', 'domestic', '', 'abc', '3', 'def', '8.1:1825.00', '8.1:147.83', '0.00', '1972.83'], $row, 'an invoice of 0.20.0: one rate, no pass-through items');
+		$two = ExportRules::csvRow(self::fixed(['vat_lines' => [['rate' => 2.6, 'net' => 100.0, 'vat' => 2.6], ['rate' => 8.1, 'net' => 1234.0, 'vat' => 99.95]], 'pass_through' => 50.0, 'total' => 1486.55]), null);
+		$this->assertSame(['2.6:100.00;8.1:1234.00', '2.6:2.60;8.1:99.95', '50.00', '1486.55'], array_slice($two, 19), 'per rate, pass-through, total');
+		$this->assertStringContainsString(';"2.6:100.00;8.1:1234.00";', ExportRules::line($two), 'quoted: the separator is inside');
 		$this->assertSame('RE-2026-0007', ExportRules::csvRow(self::fixed(['reverses' => 'inv-1']), 'RE-2026-0007')[15], 'the reversed number');
 		$this->assertSame(['3', '2026-10-15T14:30:00Z', 'pbadmin', 'issued', 'RE-2026-0007', 'p', 'q', 'h'], ExportRules::ledgerRow(['seq' => 3, 'at' => '2026-10-15T14:30:00Z', 'actor' => 'pbadmin', 'action' => 'issued', 'number' => 'RE-2026-0007', 'payload_hash' => 'p', 'prev_hash' => 'q', 'hash' => 'h', 'payload' => '{}']));
 	}
@@ -87,15 +90,29 @@ class ExportRulesTest extends TestCase {
 		$this->assertSame('pbadmin', $head[8]);
 		$this->assertSame(['1234567', '12345', '20260401', '4', '20261001', '20261031', 'TimeSister Rechnungen', '', '1', '0', '0', 'CHF'], array_slice($head, 10, 12));
 		$this->assertSame('20250401', ExportRules::datevHeader($datev, '2026-02-01', '2026-02-28', 0, 'x', 'EUR')[12], 'a fiscal year starting in April: February belongs to the previous one');
-		$row = ExportRules::datevRow(self::fixed(), $datev, 'Umbau Rheingasse');
+		$row = ExportRules::datevRows(self::fixed(), $datev, 'Umbau Rheingasse')[0];
 		$this->assertSame(['1972,83', 'S', 'CHF', '', '', '', '10000', '8400', '', '1510', 'RE-2026-0007', '', '', 'Müller AG Umbau Rheingasse'], $row);
 		$this->assertCount(count(ExportRules::DATEV_HEAD), $row);
-		$rev = ExportRules::datevRow(self::fixed(['reverses' => 'inv-1', 'gross' => -1972.83]), $datev, 'P');
+		$rev = ExportRules::datevRows(self::fixed(['reverses' => 'inv-1', 'gross' => -1972.83]), $datev, 'P')[0];
 		$this->assertSame(['1972,83', 'H'], array_slice($rev, 0, 2), 'a reversal is Haben with the absolute amount');
-		$eu = ExportRules::datevRow(self::fixed(['customer' => ['name' => 'SARL', 'tax_case' => 'eu_reverse', 'datev_account' => '10077']]), $datev, 'P');
+		$eu = ExportRules::datevRows(self::fixed(['customer' => ['name' => 'SARL', 'tax_case' => 'eu_reverse', 'datev_account' => '10077']]), $datev, 'P')[0];
 		$this->assertSame(['10077', '8336', '94'], array_slice($eu, 6, 3), 'the customer’s debtor account, the EU revenue account, the BU key of the setting');
-		$export = ExportRules::datevRow(self::fixed(['customer' => ['name' => 'Inc', 'tax_case' => 'export']]), $datev, 'P');
+		$export = ExportRules::datevRows(self::fixed(['customer' => ['name' => 'Inc', 'tax_case' => 'export']]), $datev, 'P')[0];
 		$this->assertSame(['10000', '8338', ''], array_slice($export, 6, 3));
+		// 0.21.0: one booking per rate and one for the pass-through items on their own account.
+		$datev['revenue_pass_through'] = '1590';
+		$rows = ExportRules::datevRows(self::fixed(['vat_lines' => [['rate' => 2.6, 'net' => 100.0, 'vat' => 2.6], ['rate' => 8.1, 'net' => 1234.0, 'vat' => 99.95]], 'pass_through' => 50.0, 'total' => 1486.55]), $datev, 'P');
+		$this->assertSame([['102,60', 'S', '8400', ''], ['1333,95', 'S', '8400', ''], ['50,00', 'S', '1590', '']],
+			array_map(static fn (array $r): array => [$r[0], $r[1], $r[7], $r[8]], $rows));
+		$rev = ExportRules::datevRows(self::fixed(['reverses' => 'inv-1', 'vat_lines' => [['rate' => 8.1, 'net' => -100.0, 'vat' => -8.1]], 'pass_through' => -50.0, 'total' => -158.1]), $datev, 'P');
+		$this->assertSame([['108,10', 'H'], ['50,00', 'H']], array_map(static fn (array $r): array => [$r[0], $r[1]], $rev), 'a reversal: every booking Haben');
+		try {
+			ExportRules::requirePassThroughAccount(ExportRules::datev(null));
+			$this->fail('pass-through account missing');
+		} catch (ApiException $e) {
+			$this->assertStringContainsString('“revenue_pass_through” is missing', $e->getMessage());
+		}
+		$this->assertSame('1590', ExportRules::validateDatev((object)['revenue_pass_through' => 1590])['revenue_pass_through']);
 		$this->assertSame('RE-2026-0007', ExportRules::belegfeld('RE/2026_0007') === 'RE/2026-0007' ? 'RE-2026-0007' : 'x', 'slash allowed, underscore not');
 		$this->assertSame(36, strlen(ExportRules::belegfeld(str_repeat('1', 40))));
 	}

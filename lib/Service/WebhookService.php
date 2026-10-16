@@ -53,6 +53,7 @@ final class WebhookService {
 			$invoice = [
 				'key' => $row?->getRkey() ?? '', 'number' => $entry->getNumber(), 'status' => $row?->getStatus() ?? '',
 				'gross' => (float)($row?->getGross() ?? '0'), 'currency' => $row?->getCurrency() ?? '',
+				'total' => $row === null ? 0.0 : InvoiceFixed::sumsOf($row)->total,
 			];
 			$body = WebhookRules::body($t->getSlug(), $event, $entry->getAction(), $entry->getAt(), $invoice, $entry->getSeq(), $entry->getHash());
 			foreach ($hooks as $h) {

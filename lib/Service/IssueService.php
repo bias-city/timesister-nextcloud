@@ -152,7 +152,6 @@ final class IssueService {
 		$customerKey = $r['customerKey'];
 		$settings = $r['settings'];
 		$issuer = $r['issuer'];
-		$vat = $r['vat'];
 		$bookings = $r['bookings'];
 		$positions = $r['positions'];
 		$sums = $r['sums'];
@@ -180,16 +179,13 @@ final class IssueService {
 		$row->setPeriodFrom((string)$d->from);
 		$row->setPeriodTo((string)$d->to);
 		$row->setCurrency($currency);
-		$row->setVat(IssueRules::decimal($vat));
 		$row->setIssuerJson(Json::encode($issuer));
 		$row->setCustomerJson(Json::encode($customerBlock));
 		$row->setPositionsJson(json_encode($positions, Json::FLAGS));
 		$row->setGreeting(IssueRules::textOf($d, 'greeting'));
 		$row->setBody(IssueRules::textOf($d, 'body'));
 		$row->setFooter(IssueRules::textOf($d, 'footer'));
-		$row->setNet(IssueRules::decimal($sums['net']));
-		$row->setVatAmount(IssueRules::decimal($sums['vat_amount']));
-		$row->setGross(IssueRules::decimal($sums['gross']));
+		self::setSums($row, $sums);
 		$row->setHours(IssueRules::decimal(IssueRules::totalHours($hours)));
 		$row->setIssuedOn($issuedOn);
 		$row->setIssuedBy($m->uid);
@@ -203,7 +199,7 @@ final class IssueService {
 			$this->insertHour($tid, $row->getId(), $h);
 		}
 
-		$payload = IssueRules::payload($key, $number, $issuedOn, $m->uid, $dueOn, $projectKey, (string)$d->budget, $customerKey, (string)$d->from, (string)$d->to, $currency, $vat, $sums, $issuer, $customerBlock, $positions, $hours, $row->getGreeting(), $row->getBody(), $row->getFooter(), null, null, $qrReference);
+		$payload = IssueRules::payload($key, $number, $issuedOn, $m->uid, $dueOn, $projectKey, (string)$d->budget, $customerKey, (string)$d->from, (string)$d->to, $currency, $sums, $issuer, $customerBlock, $positions, $hours, $row->getGreeting(), $row->getBody(), $row->getFooter(), null, null, $qrReference);
 		$entry = $this->append($tid, $m->uid, LedgerRules::ISSUED, $row->getId(), $number, LedgerRules::canonical($payload), $now);
 		$this->chain($row, $entry, $now);
 
@@ -216,9 +212,10 @@ final class IssueService {
 		$d->issued_on = $issuedOn;
 		$d->due_on = $dueOn;
 		$d->hours = IssueRules::totalHours($hours);
-		$d->amount = $sums['net'];
+		// 0.21.0: the record's amount is what the customer pays.
+		$d->amount = $sums->total;
 		$d->currency = $currency;
-		$d->vat = $vat;
+		$d->vat = $sums->rate;
 		$d->ledger_seq = $entry->getSeq();
 		$d->hash = $entry->getHash();
 		$ops[] = $this->invoiceOp($key, $cur, $d);
@@ -304,10 +301,22 @@ final class IssueService {
 			'net' => (float)$row->getNet(),
 			'vat_amount' => (float)$row->getVatAmount(),
 			'gross' => (float)$row->getGross(),
+			...InvoiceFixed::sumsOf($row)->frozen(),
 			'currency' => $row->getCurrency(),
 			'due_on' => $row->getDueOn(),
 			'document_state' => $row->getDocumentState(),
 		];
+	}
+
+	/** The frozen sums on the row: the invoice's rate, the taxable part, per rate, pass-through, total. */
+	private static function setSums(InvInvoice $row, VatLines $sums): void {
+		$row->setVat(IssueRules::decimal($sums->rate));
+		$row->setNet(IssueRules::decimal($sums->net));
+		$row->setVatAmount(IssueRules::decimal($sums->vatAmount));
+		$row->setGross(IssueRules::decimal($sums->gross));
+		$row->setVatLinesJson(json_encode($sums->lines, Json::FLAGS));
+		$row->setPassThrough(IssueRules::decimal($sums->passThrough));
+		$row->setTotal(IssueRules::decimal($sums->total));
 	}
 
 	// ------------------------------------------------------------ reverse
@@ -350,9 +359,10 @@ final class IssueService {
 		$customerBlock = InvoiceRules::decode($orig->getCustomerJson()) ?? new \stdClass();
 		$origPositions = json_decode((string)$orig->getPositionsJson(), false);
 		$origPositions = is_array($origPositions) ? array_values(array_filter($origPositions, static fn (mixed $x): bool => $x instanceof \stdClass)) : [];
-		$positions = $given ?? IssueRules::negate($origPositions);
-		$vat = (float)$orig->getVat();
-		$sums = IssueRules::sums($positions, $vat);
+		// Negated lines keep their rate and mode; a credit note's own lines without a rate take the original's.
+		$taxCase = TaxRules::ofBlock(get_object_vars($customerBlock));
+		$positions = VatLines::freeze($given ?? IssueRules::negate($origPositions), (float)$orig->getVat(), $taxCase);
+		$sums = VatLines::of($positions, (float)$orig->getVat(), $taxCase);
 		$dueOn = IssueRules::dueOn($issuedOn, IssueRules::DUE_DAYS);
 		$newKey = IssueRules::newKey();
 		while ($this->records->findOne($tid, InvoiceRules::KIND, $newKey) !== null) {
@@ -390,16 +400,13 @@ final class IssueService {
 		$row->setPeriodFrom($orig->getPeriodFrom());
 		$row->setPeriodTo($orig->getPeriodTo());
 		$row->setCurrency($orig->getCurrency());
-		$row->setVat($orig->getVat());
 		$row->setIssuerJson($orig->getIssuerJson());
 		$row->setCustomerJson($orig->getCustomerJson());
 		$row->setPositionsJson(json_encode($positions, Json::FLAGS));
 		$row->setGreeting($orig->getGreeting());
 		$row->setBody($reason ?? $orig->getBody());
 		$row->setFooter($orig->getFooter());
-		$row->setNet(IssueRules::decimal($sums['net']));
-		$row->setVatAmount(IssueRules::decimal($sums['vat_amount']));
-		$row->setGross(IssueRules::decimal($sums['gross']));
+		self::setSums($row, $sums);
 		$row->setIssuedOn($issuedOn);
 		$row->setIssuedBy($m->uid);
 		$row->setDueOn($dueOn);
@@ -414,7 +421,7 @@ final class IssueService {
 		$row->setModifiedAt($now);
 		$row = $this->invoices->insert($row);
 
-		$payload = IssueRules::payload($newKey, $number, $issuedOn, $m->uid, $dueOn, $orig->getProject(), $orig->getBudget(), $orig->getCustomer(), $orig->getPeriodFrom(), $orig->getPeriodTo(), $orig->getCurrency(), $vat, $sums, $issuer, $customerBlock, $positions, [], $row->getGreeting(), $row->getBody(), $row->getFooter(), $row->getReverses(), $row->getCredits());
+		$payload = IssueRules::payload($newKey, $number, $issuedOn, $m->uid, $dueOn, $orig->getProject(), $orig->getBudget(), $orig->getCustomer(), $orig->getPeriodFrom(), $orig->getPeriodTo(), $orig->getCurrency(), $sums, $issuer, $customerBlock, $positions, [], $row->getGreeting(), $row->getBody(), $row->getFooter(), $row->getReverses(), $row->getCredits());
 		$entry = $this->append($tid, $m->uid, $kind, $row->getId(), $number, LedgerRules::canonical($payload), $now);
 		$this->chain($row, $entry, $now);
 
@@ -427,7 +434,8 @@ final class IssueService {
 		$n->paid_on = null;
 		$n->bookings = [];
 		$n->hours = 0;
-		$n->amount = $sums['net'];
+		$n->amount = $sums->total;
+		$n->vat = $sums->rate;
 		$n->positions = $positions;
 		$n->note = $reason;
 		$n->created_by = $m->uid;

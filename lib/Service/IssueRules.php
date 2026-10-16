@@ -8,9 +8,9 @@ namespace OCA\TimeSister\Service;
 
 /**
  * Issuing an invoice (0.18.0), the pure part: what a draft needs, the
- * request fields, the sums the server computes from the positions, the
- * hours per booking, the frozen blocks (issuer, customer) and the payload
- * the ledger hashes. The service (IssueService) does the reading and the
+ * request fields, the hours per booking, the frozen blocks (issuer,
+ * customer) and the payload the ledger hashes; the sums come from
+ * {@see VatLines}. The service (IssueService) does the reading and the
  * transaction.
  */
 final class IssueRules {
@@ -110,25 +110,8 @@ final class IssueRules {
 	}
 
 	/**
-	 * The sums from the positions: net = Σ amount, VAT rounded to cents,
-	 * gross. The client's amounts are taken as sent.
-	 *
-	 * @param list<\stdClass> $positions
-	 * @return array{net:float,vat_amount:float,gross:float}
-	 */
-	public static function sums(array $positions, float $vat): array {
-		$net = 0.0;
-		foreach ($positions as $p) {
-			$a = $p->amount ?? 0;
-			$net += is_int($a) || is_float($a) ? (float)$a : 0.0;
-		}
-		$net = round($net, 2);
-		$vatAmount = round($net * $vat / 100.0, 2);
-		return ['net' => $net, 'vat_amount' => $vatAmount, 'gross' => round($net + $vatAmount, 2)];
-	}
-
-	/**
-	 * The positions with every amount negated (reversal, credit note).
+	 * The positions with every amount negated (reversal, credit note);
+	 * rate and mode of each line stay.
 	 *
 	 * @param list<\stdClass> $positions
 	 * @return list<\stdClass>
@@ -282,7 +265,7 @@ final class IssueRules {
 	 * @param list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string}> $hours
 	 * @return array<string,mixed>
 	 */
-	public static function payload(string $key, string $number, string $issuedOn, string $issuedBy, string $dueOn, string $project, string $budget, ?string $customerKey, string $from, string $to, string $currency, float $vat, array $sums, \stdClass $issuer, \stdClass $customer, array $positions, array $hours, ?string $greeting, ?string $body, ?string $footer, ?string $reverses, ?string $credits, ?string $qrReference = null): array {
+	public static function payload(string $key, string $number, string $issuedOn, string $issuedBy, string $dueOn, string $project, string $budget, ?string $customerKey, string $from, string $to, string $currency, VatLines $sums, \stdClass $issuer, \stdClass $customer, array $positions, array $hours, ?string $greeting, ?string $body, ?string $footer, ?string $reverses, ?string $credits, ?string $qrReference = null): array {
 		return [
 			'key' => $key,
 			'number' => $number,
@@ -294,10 +277,14 @@ final class IssueRules {
 			'customer_key' => $customerKey,
 			'period' => ['from' => $from, 'to' => $to],
 			'currency' => $currency,
-			'vat' => $vat,
-			'net' => $sums['net'],
-			'vat_amount' => $sums['vat_amount'],
-			'gross' => $sums['gross'],
+			'vat' => $sums->rate,
+			'net' => $sums->net,
+			'vat_amount' => $sums->vatAmount,
+			'gross' => $sums->gross,
+			// 0.21.0: net and VAT per rate, the pass-through items, the amount to pay.
+			'vat_lines' => $sums->lines,
+			'pass_through' => $sums->passThrough,
+			'total' => $sums->total,
 			'issuer' => $issuer,
 			'customer' => $customer,
 			'positions' => $positions,

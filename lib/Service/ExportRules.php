@@ -30,7 +30,7 @@ final class ExportRules {
 	/** The DATEV setting with its defaults (null: not set). */
 	public const DATEV_DEFAULTS = ['consultant' => null, 'client' => null, 'fiscal_year_start' => null, 'account_length' => null,
 		'debtor_account' => null, 'revenue_domestic' => null, 'revenue_eu' => null, 'revenue_export' => null,
-		'bu_domestic' => null, 'bu_eu' => null, 'bu_export' => null];
+		'bu_domestic' => null, 'bu_eu' => null, 'bu_export' => null, 'revenue_pass_through' => null];
 	/** Belegfeld 1 takes 36 characters of these. */
 	private const BELEG_PATTERN = '/[^A-Za-z0-9$&%*+\-\/]/';
 
@@ -96,6 +96,7 @@ final class ExportRules {
 				case 'revenue_domestic':
 				case 'revenue_eu':
 				case 'revenue_export':
+				case 'revenue_pass_through':
 					$out[$key] = self::digits($value, $field, 9);
 					break;
 				case 'bu_domestic':
@@ -136,6 +137,13 @@ final class ExportRules {
 			if (!is_string($datev[$k] ?? null) || $datev[$k] === '') {
 				throw ApiException::invalid(Message::of('The DATEV export needs the accounts in the team setting “datev”: “{field}” is missing.', ['field' => $k]));
 			}
+		}
+	}
+
+	/** Pass-through items (0.21.0) are booked to their own account: 422 when it is missing. @param array<string,mixed> $datev */
+	public static function requirePassThroughAccount(array $datev): void {
+		if (!is_string($datev['revenue_pass_through'] ?? null) || $datev['revenue_pass_through'] === '') {
+			throw ApiException::invalid(Message::of('The DATEV export needs the accounts in the team setting “datev”: “{field}” is missing.', ['field' => 'revenue_pass_through']));
 		}
 	}
 
@@ -185,7 +193,9 @@ final class ExportRules {
 		return number_format($v, 2, '.', '');
 	}
 
-	public const CSV_HEAD = ['number', 'status', 'issued_on', 'due_on', 'paid_on', 'customer', 'customer_vat_id', 'project', 'budget', 'currency', 'net', 'vat_rate', 'vat_amount', 'gross', 'tax_case', 'reverses', 'document_sha256', 'chain_seq', 'chain_hash'];
+	/** 0.21.0 appends the net and the VAT per rate (`8.1:1234.00;2.6:100.00`), the pass-through items and the total. */
+	public const CSV_HEAD = ['number', 'status', 'issued_on', 'due_on', 'paid_on', 'customer', 'customer_vat_id', 'project', 'budget', 'currency', 'net', 'vat_rate', 'vat_amount', 'gross', 'tax_case', 'reverses', 'document_sha256', 'chain_seq', 'chain_hash',
+		'vat_lines', 'vat_by_rate', 'pass_through', 'total'];
 
 	/**
 	 * One invoice as a CSV row (the frozen content, as `fixed`).
@@ -195,13 +205,20 @@ final class ExportRules {
 	 */
 	public static function csvRow(array $f, ?string $reversesNumber): array {
 		$c = self::arr($f['customer'] ?? null);
+		$sums = VatLines::fromFixed($f);
 		return [
 			self::str($f['number'] ?? ''), self::str($f['status'] ?? ''), self::str($f['issued_on'] ?? ''), self::str($f['due_on'] ?? ''), self::str($f['paid_on'] ?? ''),
 			self::str($c['name'] ?? ''), self::str($c['vat_id'] ?? ''), self::str($f['project'] ?? ''), self::str($f['budget'] ?? ''), self::str($f['currency'] ?? ''),
 			self::amount(self::float($f['net'] ?? 0)), self::amount(self::float($f['vat'] ?? 0)), self::amount(self::float($f['vat_amount'] ?? 0)), self::amount(self::float($f['gross'] ?? 0)),
 			TaxRules::ofBlock($c), $reversesNumber ?? '', self::str($f['document_sha256'] ?? ''),
 			self::str(self::arr($f['chain'] ?? null)['seq'] ?? ''), self::str(self::arr($f['chain'] ?? null)['hash'] ?? ''),
+			self::perRate($sums, 'net'), self::perRate($sums, 'vat'), self::amount($sums->passThrough), self::amount($sums->total),
 		];
+	}
+
+	/** `8.1:1234.00;2.6:100.00` – the rate and one amount per VAT line. @param 'net'|'vat' $which */
+	public static function perRate(VatLines $sums, string $which): string {
+		return implode(';', array_map(static fn (array $l): string => rtrim(rtrim(number_format($l['rate'], 2, '.', ''), '0'), '.') . ':' . self::amount($l[$which]), $sums->lines));
 	}
 
 	public const LEDGER_HEAD = ['seq', 'at', 'actor', 'action', 'number', 'payload_hash', 'prev_hash', 'hash'];
@@ -245,21 +262,24 @@ final class ExportRules {
 		'Konto', 'Gegenkonto (ohne BU-Schlüssel)', 'BU-Schlüssel', 'Belegdatum', 'Belegfeld 1', 'Belegfeld 2', 'Skonto', 'Buchungstext'];
 
 	/**
-	 * One invoice as a booking: Umsatz = |gross| with a decimal comma,
-	 * Soll (S) for an invoice, Haben (H) for a reversal or credit note,
-	 * Konto = the customer's debtor account or the team's, Gegenkonto =
-	 * the revenue account of the tax case, BU-Schlüssel from the setting
-	 * (`bu_*`, empty for automatic accounts), Belegdatum DDMM, Belegfeld 1
-	 * = the number, Buchungstext = customer and project (60 characters).
+	 * One invoice as bookings (0.21.0: one per VAT rate and one for the
+	 * pass-through items): Umsatz = |net + VAT| of the rate with a decimal
+	 * comma, Soll (S) for an invoice, Haben (H) for a reversal, a credit
+	 * note or a negative amount, Konto = the customer's debtor account or
+	 * the team's, Gegenkonto = the revenue account of the tax case (the
+	 * pass-through items: `revenue_pass_through`), BU-Schlüssel from the
+	 * setting (`bu_*`, empty for automatic accounts and pass-through
+	 * items), Belegdatum DDMM, Belegfeld 1 = the number, Buchungstext =
+	 * customer and project (60 characters). An invoice without amounts:
+	 * one row of its gross.
 	 *
 	 * @param array<string,mixed> $f the frozen content
 	 * @param array<string,mixed> $datev
-	 * @return list<string>
+	 * @return list<list<string>>
 	 */
-	public static function datevRow(array $f, array $datev, string $projectName): array {
+	public static function datevRows(array $f, array $datev, string $projectName): array {
 		$c = self::arr($f['customer'] ?? null);
-		$gross = self::float($f['gross'] ?? 0);
-		$credit = ($f['reverses'] ?? null) !== null || ($f['credits'] ?? null) !== null || $gross < 0;
+		$sums = VatLines::fromFixed($f);
 		$taxCase = TaxRules::ofBlock($c);
 		$revenue = match ($taxCase) {
 			TaxRules::EU_REVERSE => 'revenue_eu',
@@ -271,18 +291,33 @@ final class ExportRules {
 			TaxRules::EXPORT => 'bu_export',
 			default => 'bu_domestic',
 		};
+		$parts = [];
+		foreach ($sums->lines as $l) {
+			$parts[] = [round($l['net'] + $l['vat'], 2), self::str($datev[$revenue] ?? ''), self::str($datev[$bu] ?? '')];
+		}
+		if ($sums->passThrough !== 0.0) {
+			$parts[] = [$sums->passThrough, self::str($datev['revenue_pass_through'] ?? ''), ''];
+		}
+		if ($parts === []) {
+			$parts[] = [$sums->gross, self::str($datev[$revenue] ?? ''), self::str($datev[$bu] ?? '')];
+		}
+		$creditDoc = ($f['reverses'] ?? null) !== null || ($f['credits'] ?? null) !== null;
 		$debtor = self::str($c['datev_account'] ?? '');
 		if (!preg_match('/^\d+$/', $debtor)) {
 			$debtor = self::str($datev['debtor_account'] ?? '');
 		}
 		$issued = self::str($f['issued_on'] ?? '');
-		$text = trim(self::str($c['name'] ?? '') . ' ' . $projectName);
-		return [
-			number_format(abs($gross), 2, ',', ''), $credit ? 'H' : 'S', self::str($f['currency'] ?? ''), '', '', '',
-			$debtor, self::str($datev[$revenue] ?? ''), self::str($datev[$bu] ?? ''),
-			substr($issued, 8, 2) . substr($issued, 5, 2),
-			self::belegfeld(self::str($f['number'] ?? '')), '', '', mb_substr($text, 0, 60),
-		];
+		$text = mb_substr(trim(self::str($c['name'] ?? '') . ' ' . $projectName), 0, 60);
+		$rows = [];
+		foreach ($parts as [$amount, $account, $key]) {
+			$rows[] = [
+				number_format(abs($amount), 2, ',', ''), $creditDoc || $amount < 0 ? 'H' : 'S', self::str($f['currency'] ?? ''), '', '', '',
+				$debtor, $account, $key,
+				substr($issued, 8, 2) . substr($issued, 5, 2),
+				self::belegfeld(self::str($f['number'] ?? '')), '', '', $text,
+			];
+		}
+		return $rows;
 	}
 
 	/** Belegfeld 1: at most 36 of A–Z, a–z, 0–9 and $ & % * + - /. */

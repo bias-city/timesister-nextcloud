@@ -8,7 +8,8 @@
 // concurrency, the time entries (named calendars, job, roles), invoicing
 // on the server (issue, reverse, paid, ledger and chain) and the invoice
 // documents (folders, preview, stored PDF, ledger hash, chain head) and the
-// e-invoices and exports (tax case, ZUGFeRD, XRechnung, QRR, exports, webhooks).
+// e-invoices and exports (tax case, ZUGFeRD, XRechnung, QRR, exports, webhooks),
+// VAT per invoice line and the cost positions of a budget (0.21.0).
 //
 //   NC_URL=http://localhost:8081 node tests/integration/integration.mjs
 //
@@ -29,6 +30,7 @@ import { eintraege } from './teil-eintraege.mjs'
 import { faktura } from './teil-faktura.mjs'
 import { dokumente } from './teil-dokumente.mjs'
 import { erechnung } from './teil-erechnung.mjs'
+import { kosten } from './teil-kosten.mjs'
 import { summary } from './harness.mjs'
 
 await teams()
@@ -45,6 +47,7 @@ await eintraege()
 await faktura()
 await dokumente()
 await erechnung()
+await kosten()
 await rest()
 await sicherungen()
 process.exit(summary())

@@ -206,7 +206,7 @@ final class DocumentService {
 			'project' => $r['projectKey'], 'budget' => (string)$d->budget,
 			'greeting' => IssueRules::textOf($d, 'greeting'), 'body' => IssueRules::textOf($d, 'body'), 'footer' => IssueRules::textOf($d, 'footer'),
 			'positions' => $r['positions'], 'currency' => $r['currency'], 'vat' => $r['vat'],
-			'net' => $r['sums']['net'], 'vat_amount' => $r['sums']['vat_amount'], 'gross' => $r['sums']['gross'],
+			...$r['sums']->taxable(), ...$r['sums']->frozen(),
 			'hours' => $r['hours'], 'hours_total' => IssueRules::totalHours($r['hours']),
 			'chain' => ['seq' => null, 'prev_hash' => null, 'hash' => null],
 			'customer_key' => $r['customerKey'], 'qr_reference' => null,
@@ -370,9 +370,7 @@ final class DocumentService {
 		$doc->positions = array_values(array_map(static fn (mixed $p): array => self::toArray($p), is_array($f['positions'] ?? null) ? $f['positions'] : []));
 		$doc->currency = self::str($f['currency'] ?? 'CHF');
 		$doc->vat = self::float($f['vat'] ?? 0);
-		$doc->net = self::float($f['net'] ?? 0);
-		$doc->vatAmount = self::float($f['vat_amount'] ?? 0);
-		$doc->gross = self::float($f['gross'] ?? 0);
+		$doc->sums = VatLines::fromFixed($f);
 		$doc->hoursTotal = self::float($f['hours_total'] ?? 0);
 		foreach (is_array($f['hours'] ?? null) ? $f['hours'] : [] as $h) {
 			$h = self::toArray($h);

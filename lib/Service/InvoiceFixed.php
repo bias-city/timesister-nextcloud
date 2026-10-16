@@ -14,7 +14,8 @@ use OCA\TimeSister\Db\InvInvoice;
  * The frozen content of an issued invoice as `GET /invoices/{key}/fixed`
  * hands it out and the team ZIP stores it; since 0.19.0 with the
  * document's state, error, path and hash; since 0.20.0 with the tax case,
- * the QR reference, the XRechnung file and the hand-over.
+ * the QR reference, the XRechnung file and the hand-over; since 0.21.0
+ * with net and VAT per rate, the pass-through items and the total.
  */
 final class InvoiceFixed {
 	public function __construct(
@@ -27,6 +28,7 @@ final class InvoiceFixed {
 		$positions = json_decode((string)$row->getPositionsJson(), false);
 		$customer = InvoiceRules::decode($row->getCustomerJson());
 		$external = $row->getExternalJson() === null ? null : InvoiceRules::decode($row->getExternalJson());
+		$sums = self::sumsOf($row);
 		return [
 			'key' => $row->getRkey(),
 			'number' => $row->getNumber(),
@@ -45,6 +47,8 @@ final class InvoiceFixed {
 			'net' => (float)$row->getNet(),
 			'vat_amount' => (float)$row->getVatAmount(),
 			'gross' => (float)$row->getGross(),
+			// 0.21.0: per rate, pass-through, the amount to pay (older invoices: one line, gross).
+			...$sums->frozen(),
 			'hours_total' => (float)$row->getHours(),
 			'issuer' => InvoiceRules::decode($row->getIssuerJson()),
 			'customer' => $customer,
@@ -69,5 +73,13 @@ final class InvoiceFixed {
 			'xml_sha256' => $row->getXmlSha256(),
 			'external' => $external,
 		];
+	}
+
+	/** The frozen sums of a row; an invoice from before 0.21.0 gets one line of its rate. */
+	public static function sumsOf(InvInvoice $row): VatLines {
+		$pass = $row->getPassThrough();
+		$total = $row->getTotal();
+		return VatLines::restore($row->getVatLinesJson(), $pass === null ? 0.0 : (float)$pass, $total === null ? null : (float)$total,
+			(float)$row->getVat(), (float)$row->getNet(), (float)$row->getVatAmount(), (float)$row->getGross());
 	}
 }

@@ -38,10 +38,10 @@ final class InvoiceDocument {
 	/** @var list<array<string,mixed>> kind, text, hours, rate, amount */
 	public array $positions = [];
 	public string $currency = 'CHF';
+	/** The invoice's single rate (0.20.0 readers); the sums per rate are in `sums`. */
 	public float $vat = 0.0;
-	public float $net = 0.0;
-	public float $vatAmount = 0.0;
-	public float $gross = 0.0;
+	/** 0.21.0: net and VAT per rate, gross, pass-through items, total – frozen, or the preview's. */
+	public VatLines $sums;
 	/** @var list<array{date:string,person:string,code:string,title:string,hours:float}> */
 	public array $appendix = [];
 	public float $hoursTotal = 0.0;
@@ -58,6 +58,10 @@ final class InvoiceDocument {
 	public ?string $leitwegId = null;
 	public bool $eInvoice = false;
 
+	public function __construct() {
+		$this->sums = VatLines::of([], 0.0, TaxRules::DOMESTIC);
+	}
+
 	/** @return array<string,string> the labels in the document's language */
 	public function texts(): array {
 		return DocumentRules::texts($this->lang);
@@ -71,7 +75,7 @@ final class InvoiceDocument {
 		return DocumentRules::title($t, $this->number, $this->reverses, $this->credits, $this->originalNumber);
 	}
 
-	/** The VAT rate shown: the invoice's at home, 0 for reverse charge and export. */
+	/** The single VAT rate (one line): the invoice's at home, 0 for reverse charge and export. */
 	public function vatRate(): float {
 		return TaxRules::rate($this->taxCase, $this->vat);
 	}
@@ -86,8 +90,22 @@ final class InvoiceDocument {
 		return $this->eInvoice || ($this->leitwegId !== null && $this->leitwegId !== '');
 	}
 
-	/** A QR bill is drawn for a positive amount in CHF or EUR with an IBAN. */
+	/** A QR bill is drawn for a positive total in CHF or EUR with an IBAN. */
 	public function wantsQrBill(): bool {
-		return $this->iban !== null && $this->gross > 0 && in_array($this->currency, ['CHF', 'EUR'], true);
+		return $this->iban !== null && $this->sums->total > 0 && in_array($this->currency, ['CHF', 'EUR'], true);
+	}
+
+	/** The taxable lines (the positions table) and the pass-through items (their own block). @return array{0:list<array<string,mixed>>,1:list<array<string,mixed>>} */
+	public function splitPositions(): array {
+		$taxable = [];
+		$pass = [];
+		foreach ($this->positions as $p) {
+			if (VatLines::isPassThrough($p)) {
+				$pass[] = $p;
+			} else {
+				$taxable[] = $p;
+			}
+		}
+		return [$taxable, $pass];
 	}
 }

@@ -14,6 +14,7 @@ use OCA\TimeSister\Service\DocumentRules;
 use OCA\TimeSister\Service\EInvoiceXml;
 use OCA\TimeSister\Service\InvoiceDocument;
 use OCA\TimeSister\Service\InvoicePdf;
+use OCA\TimeSister\Service\VatLines;
 use OCA\TimeSister\Service\QrReferenceRules;
 use PHPUnit\Framework\TestCase;
 
@@ -46,9 +47,7 @@ class EInvoiceXmlTest extends TestCase {
 		];
 		$d->currency = 'CHF';
 		$d->vat = 8.1;
-		$d->net = 1825.0;
-		$d->vatAmount = 147.83;
-		$d->gross = 1972.83;
+		$d->sums = VatLines::of($d->positions, $d->vat, $d->taxCase);
 		$d->accountIban = 'CH9300762011623852957';
 		$d->iban = 'CH9300762011623852957';
 		$d->chainLine = DocumentRules::chainLine('RE-2026-0007', 3, '3f9c0123abcdef0123', 'a1b2c3d4e5f6a7b8c9');
@@ -104,8 +103,7 @@ class EInvoiceXmlTest extends TestCase {
 		$eu->customer = ['id' => 'fr', 'name' => 'SARL Exemple', 'street' => 'Rue 1', 'postcode' => '75001', 'city' => 'Paris', 'country' => 'FR', 'vat_id' => 'FR12345678901', 'email' => 'c@example.test', 'tax_case' => 'eu_reverse'];
 		$eu->taxCase = 'eu_reverse';
 		$eu->vat = 0.0;
-		$eu->vatAmount = 0.0;
-		$eu->gross = 1825.0;
+		$eu->sums = VatLines::of($eu->positions, $eu->vat, $eu->taxCase);
 		$eu->currency = 'EUR';
 		$eu->accountIban = 'DE89370400440532013000';
 		$eu->iban = null;
@@ -119,8 +117,7 @@ class EInvoiceXmlTest extends TestCase {
 		$export->customer = ['id' => 'us', 'name' => 'Inc', 'city' => 'Boston', 'postcode' => '02101', 'country' => 'US', 'tax_case' => 'export'];
 		$export->taxCase = 'export';
 		$export->vat = 0.0;
-		$export->vatAmount = 0.0;
-		$export->gross = 1825.0;
+		$export->sums = VatLines::of($export->positions, $export->vat, $export->taxCase);
 		$xml = (new EInvoiceXml())->xml($export);
 		$this->assertStringContainsString('<ram:CategoryCode>G</ram:CategoryCode>', $xml);
 		$this->assertStringContainsString('VATEX-EU-G', $xml);
@@ -137,8 +134,7 @@ class EInvoiceXmlTest extends TestCase {
 		$xr->eInvoice = true;
 		$xr->currency = 'EUR';
 		$xr->vat = 19.0;
-		$xr->vatAmount = 346.75;
-		$xr->gross = 2171.75;
+		$xr->sums = VatLines::of($xr->positions, $xr->vat, $xr->taxCase);
 		$xr->accountIban = 'DE89370400440532013000';
 		$this->assertTrue($xr->wantsXRechnung());
 		$xml = (new EInvoiceXml())->xrechnung($xr);
@@ -159,9 +155,7 @@ class EInvoiceXmlTest extends TestCase {
 		$rev->reverses = 'inv-1';
 		$rev->originalNumber = 'RE-2026-0007';
 		$rev->positions = [['kind' => 'hours', 'text' => 'Planung', 'hours' => 12.5, 'rate' => 150, 'amount' => -1875]];
-		$rev->net = -1875.0;
-		$rev->vatAmount = -151.88;
-		$rev->gross = -2026.88;
+		$rev->sums = VatLines::of($rev->positions, $rev->vat, $rev->taxCase);
 		$xml = (new EInvoiceXml())->xml($rev);
 		$this->assertStringContainsString('<ram:TypeCode>384</ram:TypeCode>', $xml, 'a reversal is a corrected invoice');
 		$this->assertStringContainsString('<ram:IssuerAssignedID>RE-2026-0007</ram:IssuerAssignedID>', $xml, 'referring to the original');
@@ -188,5 +182,54 @@ class EInvoiceXmlTest extends TestCase {
 		$this->assertSame('Reverse charge: VAT to be accounted for by the recipient.', $eu->taxNote());
 		$this->assertSame(0.0, $eu->vatRate());
 		$this->assertStringStartsWith('%PDF-', (new InvoicePdf())->render($eu));
+	}
+
+	/**
+	 * 0.21.0: two rates and a pass-through item – one tax group per rate,
+	 * the pass-through item as E with VATEX-EU-79-C, totals including it;
+	 * the XML passes the XSD, reads back from the PDF, and the PDF text
+	 * shows both rates and the block.
+	 */
+	public function testTwoRatesAndPassThrough(): void {
+		$d = self::document();
+		$d->positions = [
+			['kind' => 'hours', 'text' => 'Planung', 'hours' => 10, 'rate' => 150, 'amount' => 1500, 'vat' => 8.1, 'vat_mode' => 'taxable'],
+			['kind' => 'expense_flat', 'text' => 'Druckkosten', 'amount' => 200, 'vat' => 2.6, 'vat_mode' => 'taxable', 'cost' => 2],
+			['kind' => 'text', 'text' => 'Hinweis', 'amount' => 0, 'vat' => 3.8, 'vat_mode' => 'taxable'],
+			['kind' => 'costs', 'text' => 'Gebühr Baubewilligung', 'amount' => 350, 'vat' => null, 'vat_mode' => 'pass_through', 'cost' => 4],
+		];
+		$d->sums = VatLines::of($d->positions, 8.1, 'domestic');
+		$d->vat = $d->sums->rate;
+		$this->assertSame([1700.0, 126.7, 1826.7, 350.0, 2176.7], [$d->sums->net, $d->sums->vatAmount, $d->sums->gross, $d->sums->passThrough, $d->sums->total]);
+		$xml = (new EInvoiceXml())->xml($d);
+		self::xsd($d, ZugferdProfiles::PROFILE_EN16931);
+		self::xsd($d, ZugferdProfiles::PROFILE_XRECHNUNG_3);
+		$this->assertSame(3, substr_count($xml, '<ram:ApplicableTradeTax>') - 4, 'three tax groups besides the four lines');
+		$this->assertStringContainsString('<ram:RateApplicablePercent>2.60</ram:RateApplicablePercent>', $xml);
+		$this->assertStringContainsString('<ram:ExemptionReasonCode>VATEX-EU-79-C</ram:ExemptionReasonCode>', $xml);
+		$this->assertStringContainsString('<ram:ExemptionReason>Durchlaufender Posten / disbursement</ram:ExemptionReason>', $xml);
+		$this->assertStringContainsString('<ram:TaxBasisTotalAmount>2050.00</ram:TaxBasisTotalAmount>', $xml, 'the tax basis includes the pass-through item');
+		$this->assertStringContainsString('<ram:GrandTotalAmount>2176.70</ram:GrandTotalAmount>', $xml);
+		$this->assertStringContainsString('<ram:DuePayableAmount>2176.70</ram:DuePayableAmount>', $xml);
+
+		$pdf = (new InvoicePdf())->render($d);
+		$out = (new EInvoiceXml())->embed($d, $pdf);
+		$reader = ZugferdDocumentPdfReader::readAndGuessFromContent($out);
+		$this->assertInstanceOf(ZugferdDocumentReader::class, $reader);
+		$reader->getDocumentSummation($grand, $due, $lines, $charges, $allowances, $basis, $tax, $rounding, $prepaid);
+		$this->assertSame([2176.7, 2176.7, 2050.0, 2050.0, 126.7], [$grand, $due, $lines, $basis, $tax]);
+		$groups = [];
+		if ($reader->firstDocumentTax()) {
+			do {
+				$reader->getDocumentTax($category, $type, $taxBasis, $calculated, $rate, $reason, $reasonCode, $lineBasis, $chargeBasis, $taxPoint, $dueType);
+				$groups[] = [$category, $rate, $taxBasis, $calculated];
+			} while ($reader->nextDocumentTax());
+		}
+		$this->assertSame([['S', 2.6, 200.0, 5.2], ['S', 8.1, 1500.0, 121.5], ['E', 0.0, 350.0, 0.0]], $groups);
+
+		$text = (new \Smalot\PdfParser\Parser())->parseContent($pdf)->getText();
+		foreach (['MWST 2.6 % auf 200.00', 'MWST 8.1 % auf 1’500.00', 'Total inkl. MWST CHF', 'Durchlaufende Posten (ohne MWST)', 'Gebühr Baubewilligung', 'Summe durchlaufende Posten', '2’176.70'] as $want) {
+			$this->assertStringContainsString($want, $text);
+		}
 	}
 }

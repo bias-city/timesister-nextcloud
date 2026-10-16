@@ -3167,3 +3167,184 @@ rely on it:
   Helvetica (not embedded) – strict PDF/A validators flag that; several
   VAT rates per invoice stay one rate; KoSIT not run in this repository's
   CI.
+
+## Cost positions and VAT per line, 0.21.0 (2026-10-16) – wave 1 of PLAN-BELEGE
+
+Steps B1 and B2 of `PLAN-BELEGE.md`. Capabilities `vat_lines: 1` and
+`costs: 1`. Receipts (B3), invoicing from receipts (B4) and expense
+reports (B4a) follow in 0.22.0.
+
+### B1 – VAT and mode per invoice line
+
+Every entry of `positions[]` (draft record `invoice`) may carry:
+
+| Field | Rule |
+|---|---|
+| `vat` | `null` or a percentage 0–100: the VAT rate of this line; `null` = the invoice's `vat` (as before) |
+| `vat_mode` | `"taxable"` (default) or `"pass_through"` – a pass-through item (*durchlaufender Posten*): billed in the customer's name and for the customer's account, outside the taxable amount, no VAT, amount as gross |
+| `cost` | optional integer ≥ 1: the number of the budget's cost position (B2) the line belongs to |
+
+New position kinds (besides `hours`, `flat`, `discount`, `text`):
+`expense_percent` (an expense position computed as a percentage of the
+hour positions of the same invoice; `rate` = the percentage, `amount` =
+the client's result), `expense_flat` (a flat expense), `costs` (cost
+lines; in 0.22.0 also from receipts).
+
+Issuing computes, all rounded to 2 decimals:
+
+```text
+taxable lines grouped by their effective rate r:
+  net_r   = Σ amount of the taxable lines with rate r   (tax_case abroad: all r = 0)
+  vat_r   = round(net_r × r / 100, 2)
+net         = Σ net_r
+vat_amount  = Σ vat_r
+gross       = net + vat_amount
+pass_through = Σ amount of the pass-through lines
+total       = gross + pass_through          (the amount to pay; the QR bill uses it)
+```
+
+Frozen and returned by `fixed` and the `issue` answer: `vat_lines:
+[{ rate, net, vat }]` (sorted by rate), `pass_through`, `total`. `net`,
+`vat_amount`, `gross` keep their meaning (taxable part only); `vat` (the
+invoice's single rate) stays for old readers and is the rate of the
+largest `net_r`. The record field `amount` becomes `total`. The ledger
+payload carries `vat_lines`, `pass_through` and `total`.
+
+Documents: the PDF sums show one VAT line per rate, then gross, then a
+block «Pass-through items (no VAT)» with its lines and sum, then «Total».
+ZUGFeRD/XRechnung: one `ApplicableTradeTax` per rate and category; the
+pass-through items as category `O` is not allowed together with others
+(BR-O-11) – carry them as category `E` with exemption reason «Durchlaufender
+Posten / disbursement» and code `VATEX-EU-79-C` (EN 16931 allows this);
+document the choice in «As built».
+
+### B2 – cost positions in a budget (module «costs»)
+
+Team setting `modules.costs` (bool, default `false`), like `jobs`,
+`budgets`, `customers`. Off: nothing below is shown by clients; the data
+stays.
+
+Each budget of a project record may carry `costs[]`, separate from
+`work_packages[]`:
+
+| Field | Rule |
+|---|---|
+| `no` | integer ≥ 1, unique within the budget |
+| `name` | 1–120 characters |
+| `kind` | `"expense"` (Nebenkosten) or `"third_party"` (Drittkosten, Umsetzung) |
+| `rule` | `expense` only: `"percent"`, `"flat"` or `"receipts"`; `third_party`: always `"receipts"` (missing = receipts) |
+| `percent` | `rule: percent`: 0–100 |
+| `amount` | `rule: flat`: ≥ 0; with `per`: `"invoice"` or `"budget"` |
+| `cap` | ≥ 0, the cost cap in the budget's currency; required for `receipts` |
+| `mode` | `"rebill"` (default; taxable, the invoice's rate or `vat`) or `"pass_through"` |
+| `markup` | `rebill` only: 0–100 percent |
+| `vat` | `rebill` only: `null` or 0–100 – a rate of its own for this position |
+| `description` | `null` or up to 300 characters |
+
+`422 invalid` naming the field otherwise. Consumption of a cost position
+is computed by the client (0.21.0: from the issued invoices' lines with
+that `cost`; 0.22.0 adds receipts). The server stores and checks only.
+
+### As built, 0.21.0 (2026-10-16)
+
+What the server does beyond or beside the lines above, so the Mac app can
+rely on it:
+
+- **One place for the sums:** `VatLines` (pure) computes them for
+  issuing, the preview, reversal and credit note, `fixed`, the PDF, the
+  e-invoice, the exports and the webhook body. Amounts are counted in
+  cents: `net_r` = Σ amount of the taxable lines of rate r, rounded to
+  cents once per rate (not per line); `vat_r` = net_r × r rounded **half
+  away from zero**, computed exactly in integers (cents × rate in
+  hundredths, /10 000) – e.g. 1825.00 at 8.1 → 147.83, 12.50 at 2.6 →
+  0.33, −12.50 at 2.6 → −0.33; a rate counts with two decimals. Text
+  lines (`kind: "text"`) and lines of amount 0 open no rate of their own.
+  `vat_lines` is sorted by rate (ascending); a rate 0 at home is a line of
+  its own. Without taxable lines `vat_lines` is `[]` and `net`,
+  `vat_amount`, `gross` are 0.
+- **The effective rate of a line:** abroad (`tax_case` `eu_reverse` or
+  `export`) 0; else the line's `vat`; else the draft's `vat`, else
+  `settings.vat`, else 0. A pass-through line's `vat` is ignored.
+- **The frozen positions carry their rate and mode:** at issue every
+  position gets `vat_mode` (`taxable` or `pass_through`) and a taxable
+  line its effective `vat` (0 abroad; also on text lines), a pass-through
+  line `vat: null`. `fixed.positions` and the ledger payload show them so;
+  the invoice record keeps the positions as the client sent them. A
+  reversal negates the frozen lines and keeps rate and mode; a credit
+  note's own `positions` (body) take the original's frozen `vat` where
+  they name no rate, and the original's tax case.
+- **`vat`** (the single rate, frozen and in the record) is the rate of the
+  largest |net_r|; on a tie the higher rate; without taxable lines the
+  invoice's rate (0 abroad).
+- **`issue` answer, `fixed`, ledger payload:** `vat_lines: [{rate, net, vat}]`,
+  `pass_through`, `total` besides `net`, `vat_amount`, `gross` (floats).
+  The payload of `issued`, `reversal` and `credit` adds the three keys
+  (canonical JSON as before). Invoices issued before 0.21.0 answer
+  `vat_lines: [{rate: vat, net, vat: vat_amount}]` (or `[]` when net and
+  VAT are 0), `pass_through: 0`, `total: gross`; their stored payloads
+  and hashes are unchanged.
+- **Record `amount`** = `total` (before: `net`), also on a reversal or
+  credit note (negative).
+- **Positions:** `vat` null or 0–100 (“vat” must be null or a percentage
+  from 0 to 100.), `vat_mode` null, `taxable` or `pass_through`, `cost`
+  null or an integer ≥ 1, `rate` of `expense_percent` null or 0–100; the
+  kinds `expense_percent`, `expense_flat`, `costs` otherwise behave like
+  `flat` (the client's `amount` is taken as sent; the server does not
+  recompute the percentage). Errors read “Position n: …”.
+- **PDF:** the positions table holds the taxable lines; with more than
+  one rate each line names its rate (“Druckkosten (MWST 2.6 %)”). Sums:
+  Netto, one line per rate (“MWST 8.1 %”, with several rates “MWST 8.1 %
+  auf 1’500.00”), then “Total CHF” – or, with pass-through items, “Total
+  inkl. MWST CHF”, a block “Durchlaufende Posten (ohne MWST)” with its
+  lines and “Summe durchlaufende Posten”, and “Total CHF” = `total`.
+  English: “VAT 8.1 % on …”, “Total incl. VAT”, “Pass-through items (no
+  VAT)”, “Pass-through items”. Only pass-through items: no taxable block.
+  The QR bill's amount is `total` (drawn when `total` > 0).
+- **ZUGFeRD / XRechnung – the category of pass-through items: `E`** with
+  exemption reason code `VATEX-EU-79-C` and the text “Durchlaufender
+  Posten / disbursement”. `O` (not subject to VAT) is refused by BR-O-11
+  together with any other category, which a disbursement next to taxable
+  work always has. Checked with the library's XSD validator and the KoSIT
+  validator 1.5.0 (configuration XRechnung 3.0.2, EN 16931 CII schematron
+  1.3.13): domestic with 19 %, 7 %, a text line, a discount and a
+  pass-through item, 0 % (Z), reverse charge (AE + E), export outside the
+  EU (G + E), export to an EU customer (E), and a reversal – all accepted,
+  for EN 16931 and XRechnung; the same file with `O` is rejected
+  (BR-O-02, -05, -11, -12). Each line carries its own category and rate
+  (`S`/`Z`/`AE`/`G`/`E`, pass-through `E` 0 %); a line of amount 0 at a
+  rate no group has takes the first group's. One tax group per category
+  and rate; BR-E-01 allows one `E` group only, so an export to an EU
+  customer (`E`) and pass-through items share it (basis summed, both
+  reasons as text, no reason code). Totals: line total = tax basis =
+  `net + pass_through`, tax = `vat_amount`, grand total = due = `total`.
+- **CSV export:** four columns appended: `vat_lines` (`2.6:200.00;8.1:1500.00`
+  – rate and net per rate, ascending, quoted because of the `;`),
+  `vat_by_rate` (rate and VAT, same form), `pass_through`, `total`.
+- **DATEV export:** one booking per rate (Umsatz = |net_r + vat_r|,
+  Gegenkonto by tax case, BU key as before) and one for the pass-through
+  items (Umsatz = |pass_through|, Gegenkonto = the new optional setting
+  `datev.revenue_pass_through`, ≤ 9 digits, no BU key); `S`, or `H` for a
+  reversal, a credit note or a negative amount. A period with
+  pass-through items and no `revenue_pass_through`: `422` naming it. An
+  invoice without amounts: one row of its gross, as before. All rates of
+  one invoice book to the same revenue account and BU key of the tax case.
+- **Webhook body:** `invoice` also carries `total`.
+- **Team setting `modules`** stays in `setting/settings` (written by the
+  clients, as for jobs, budgets and customers). Since 0.21.0 the server
+  checks it when present: an object; `jobs`, `budgets`, `customers`,
+  `kunden`, `costs` each null or a boolean (“modules.costs” must be true
+  or false.); other keys pass.
+- **`costs[]`** (project and quote budgets, `CostRules`): at most 200; the
+  errors read “Cost position n: …” naming the field. `rule` is required
+  for `expense`; `third_party` without `rule` is stored with `"receipts"`
+  (any other rule: 422); `mode` missing is stored as `"rebill"`.
+  `percent` is required with `rule: percent` (0–100); `amount` (≥ 0) and
+  `per` (`invoice`/`budget`) are required with `rule: flat`; `cap` (≥ 0)
+  is required with `rule: receipts` (so for every `third_party`);
+  `markup` and `vat` (0–100) only with `mode: rebill` – on a
+  pass-through position a non-null value is `422` (“markup” applies only
+  when “mode” is “rebill”.). `percent`, `amount`, `per`, `cap` on other
+  rules are checked for range when given and kept.
+- **Stored** (`Version1016Date20261016120000`, additive):
+  `ts_inv_invoices` + `vat_lines_json` TEXT, `pass_through`
+  DECIMAL(14,2), `total` DECIMAL(14,2), null for invoices issued before.

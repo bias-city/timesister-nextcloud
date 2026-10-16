@@ -12,6 +12,7 @@ use OCA\TimeSister\Service\InvoiceNumbering;
 use OCA\TimeSister\Service\IssueRules;
 use OCA\TimeSister\Service\Json;
 use OCA\TimeSister\Service\LedgerRules;
+use OCA\TimeSister\Service\VatLines;
 use OCP\App\IAppManager;
 use PHPUnit\Framework\TestCase;
 
@@ -100,10 +101,11 @@ class LedgerRulesTest extends TestCase {
 
 	public function testSumsAndNegation(): void {
 		$p = static fn (int|float $amount, string $kind = 'flat'): \stdClass => (object)['kind' => $kind, 'text' => 'x', 'amount' => $amount];
-		$this->assertSame(['net' => 250.0, 'vat_amount' => 20.25, 'gross' => 270.25], IssueRules::sums([$p(300), $p(-50, 'discount'), $p(0, 'text')], 8.1));
-		$this->assertSame(['net' => 0.0, 'vat_amount' => 0.0, 'gross' => 0.0], IssueRules::sums([], 7.7), 'no positions: nothing');
-		$this->assertSame(['net' => 10.0, 'vat_amount' => 0.0, 'gross' => 10.0], IssueRules::sums([$p(10)], 0));
-		$this->assertSame(['net' => 33.33, 'vat_amount' => 2.7, 'gross' => 36.03], IssueRules::sums([$p(11.11), $p(22.22)], 8.1), 'rounded to cents');
+		$sums = static fn (array $p, float $vat): array => VatLines::of($p, $vat, 'domestic')->taxable();
+		$this->assertSame(['net' => 250.0, 'vat_amount' => 20.25, 'gross' => 270.25], $sums([$p(300), $p(-50, 'discount'), $p(0, 'text')], 8.1));
+		$this->assertSame(['net' => 0.0, 'vat_amount' => 0.0, 'gross' => 0.0], $sums([], 7.7), 'no positions: nothing');
+		$this->assertSame(['net' => 10.0, 'vat_amount' => 0.0, 'gross' => 10.0], $sums([$p(10)], 0));
+		$this->assertSame(['net' => 33.33, 'vat_amount' => 2.7, 'gross' => 36.03], $sums([$p(11.11), $p(22.22)], 8.1), 'rounded to cents');
 		$neg = IssueRules::negate([$p(300), $p(-50), $p(12.5)]);
 		$this->assertSame([-300, 50, -12.5], array_map(static fn (\stdClass $x): int|float => $x->amount, $neg), 'amounts negated, ints stay ints');
 		$this->assertSame('300.00', IssueRules::decimal(300.0));

@@ -58,7 +58,7 @@ class WebhookRulesTest extends TestCase {
 		$this->assertSame('exported', WebhookRules::eventOf('exported'));
 		$this->assertNull(WebhookRules::eventOf('other'));
 		$body = WebhookRules::body('pb', 'issued', 'issued', '2026-10-15T14:30:00Z', ['key' => 'inv-1', 'number' => 'RE-2026-0007', 'status' => 'issued', 'gross' => 1972.83, 'currency' => 'CHF'], 3, 'abc');
-		$this->assertSame('{"team":"pb","event":"issued","at":"2026-10-15T14:30:00Z","invoice":{"key":"inv-1","number":"RE-2026-0007","status":"issued","gross":1972.83,"currency":"CHF"},"ledger":{"seq":3,"hash":"abc","action":"issued"}}', $body);
+		$this->assertSame('{"team":"pb","event":"issued","at":"2026-10-15T14:30:00Z","invoice":{"key":"inv-1","number":"RE-2026-0007","status":"issued","gross":1972.83,"total":1972.83,"currency":"CHF"},"ledger":{"seq":3,"hash":"abc","action":"issued"}}', $body);
 		$this->assertSame('sha256=' . hash_hmac('sha256', $body, 's3cret'), WebhookRules::signature('s3cret', $body));
 		$this->assertSame('sha256=f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8', WebhookRules::signature('key', 'The quick brown fox jumps over the lazy dog'), 'RFC 2104 example');
 		$this->assertSame(60, WebhookRules::delay(1));

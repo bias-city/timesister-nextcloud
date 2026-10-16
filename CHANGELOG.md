@@ -1,5 +1,40 @@
 # Changes
 
+## 0.21.0 – 2026-10-16 (beta)
+
+API unchanged in form (`api: 2`); new capabilities `vat_lines: 1` and
+`costs: 1`. Plan: `PLAN-BELEGE.md` (B1, B2), contract: `API.md` «Cost
+positions and VAT per line, 0.21.0».
+
+- **VAT per invoice line:** positions take `vat` (a rate of their own),
+  `vat_mode` (`taxable` or `pass_through` – a disbursement outside the
+  taxable amount) and `cost` (the budget's cost position); new kinds
+  `expense_percent`, `expense_flat`, `costs`. One class (`VatLines`)
+  computes the sums for issuing, preview, reversal, documents and exports:
+  net and VAT per rate, gross, the pass-through items and the total to
+  pay. Frozen as `vat_lines`, `pass_through`, `total` (in `fixed`, the
+  `issue` answer and the ledger payload); the record's `amount` is now
+  the total; the frozen positions carry their rate and mode.
+- **Documents:** the PDF shows VAT per rate, gross, a block of
+  pass-through items and the total; the QR bill asks for the total.
+  ZUGFeRD/XRechnung carry one tax group per rate and category and the
+  pass-through items as category `E` with `VATEX-EU-79-C` (`O` is refused
+  next to other categories, BR-O-11); checked with KoSIT.
+- **Exports:** the CSV appends `vat_lines`, `vat_by_rate`,
+  `pass_through`, `total`; DATEV books one row per rate and one for the
+  pass-through items against the new optional account
+  `datev.revenue_pass_through`.
+- **Cost positions:** `budgets[].costs[]` of projects and quotes
+  (`CostRules`): number, name, kind (expense, third-party), rule
+  (percentage, flat, receipts), cap, mode (re-billed, pass-through),
+  markup, own rate, description – checked and stored, 422 naming the
+  field. The module switch `settings.modules.costs` (and the other
+  switches) must be booleans.
+- Webhook bodies carry `total`.
+- Tables: `ts_inv_invoices` + `vat_lines_json`, `pass_through`, `total`
+  (additive). Invoices issued before keep their single rate and read as
+  one VAT line.
+
 ## 0.20.0 – 2026-10-15 (beta)
 
 API unchanged in form (`api: 2`); new capabilities `e_invoice: 1` and

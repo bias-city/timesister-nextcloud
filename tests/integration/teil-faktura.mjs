@@ -130,7 +130,7 @@ export async function faktura() {
 			check('issue: due 30 days later, document pending', i?.due_on === `${Y}-04-14` && i?.document_state === 'pending', i)
 			check('issue: seq, prev_hash, hash', Number.isInteger(seq) && typeof i?.prev_hash === 'string' && HEX64.test(hash ?? ''), i)
 			const data = r.data?.data
-			check('record: hours 1, amount 200, due_on, ledger_seq, hash, vat', data?.hours === 1 && data?.amount === 200 && data?.due_on === i?.due_on && data?.ledger_seq === seq && data?.hash === hash && data?.vat === 8.1 && data?.issued_on === ISSUED_ON, data)
+			check('record: hours 1, amount = total 216.2 (0.21.0), due_on, ledger_seq, hash, vat', data?.hours === 1 && data?.amount === 216.2 && data?.due_on === i?.due_on && data?.ledger_seq === seq && data?.hash === hash && data?.vat === 8.1 && data?.issued_on === ISSUED_ON, data)
 			const mark = await ocs(A, 'GET', `/records/billing/${billingKey('pbuser1', EV1)}`)
 			expect('the billing mark exists', mark, 200)
 			check('… document = number, source timesister, by pbadmin, billed_on = issued_on', mark.data?.data?.document === number && mark.data?.data?.source === 'timesister' && mark.data?.data?.by === 'pbadmin' && mark.data?.data?.billed_on === ISSUED_ON, mark.data?.data)
@@ -211,7 +211,7 @@ export async function faktura() {
 			}
 			const n = r.data?.record?.data
 			check('the reversal: own key and number, positions negated, reverses the original', /^inv-[0-9a-f]{8}$/.test(rev ?? '') && NUMBER.test(n?.number ?? '') && n?.number !== number && n?.status === 'issued' && n?.reverses === K1
-				&& JSON.stringify(n?.positions?.map((p) => p.amount)) === '[-150,-100,50,0]' && n?.amount === -200 && n?.bookings?.length === 0 && n?.note === 'Wrong hours', n)
+				&& JSON.stringify(n?.positions?.map((p) => p.amount)) === '[-150,-100,50,0]' && n?.amount === -216.2 && n?.bookings?.length === 0 && n?.note === 'Wrong hours', n)
 			check('the issue block of the reversal: net -200, gross -216.2', r.data?.issue?.net === -200 && r.data?.issue?.gross === -216.2 && HEX64.test(r.data?.issue?.hash ?? ''), r.data?.issue)
 			const o = r.data?.original
 			check('the original: cancelled, reversed_by', o?.key === K1 && o?.data?.status === 'cancelled' && o?.data?.reversed_by === rev && o?.version === 5, o)

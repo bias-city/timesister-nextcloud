@@ -85,7 +85,14 @@ final class ExportService {
 		foreach ($rows as $row) {
 			$key = $row->getProject();
 			$names[$key] ??= DraftResolver::nameOf($this->drafts->live($m->tenantId, 'project', $key), $key);
-			$out .= ExportRules::line(ExportRules::datevRow($this->fixed->of($row), $datev, $names[$key]));
+			$f = $this->fixed->of($row);
+			// 0.21.0: pass-through items need their own revenue account.
+			if (VatLines::fromFixed($f)->passThrough !== 0.0) {
+				ExportRules::requirePassThroughAccount($datev);
+			}
+			foreach (ExportRules::datevRows($f, $datev, $names[$key]) as $line) {
+				$out .= ExportRules::line($line);
+			}
 		}
 		return $out;
 	}
