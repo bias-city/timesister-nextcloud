@@ -56,7 +56,11 @@ final class DraftResolver {
 		$project = $this->live($tenantId, 'project', $projectKey) ?? throw ApiException::invalid('The invoice’s project does not exist.');
 		$budget = IssueRules::budgetOf($project, (string)$d->budget) ?? throw ApiException::invalid('The invoice’s budget is not in the project.');
 		$currency = IssueRules::currencyOf($budget, $d) ?? throw ApiException::invalid('The budget has no currency.');
-		$customerKey = IssueRules::customerKeyOf($project) ?? throw ApiException::invalid('The project names no customer.');
+		$quotes = array_values(array_filter(array_map(
+			static fn ($r) => InvoiceRules::decode($r->getData()),
+			$this->records->findLiveByKind($tenantId, 'quote'))));
+		$customerKey = IssueRules::customerKeyFor($project, $projectKey, (string)$d->budget, $quotes)
+			?? throw ApiException::invalid('Neither the quote of the budget nor the project names a customer.');
 		$customer = $this->live($tenantId, 'customer', $customerKey) ?? throw ApiException::invalid('The project’s customer does not exist.');
 		$settings = $this->live($tenantId, 'setting', 'settings');
 		$issuer = IssueRules::issuerOf($settings) ?? throw ApiException::invalid('The team has no invoice issuer; set “issuer” in the settings first.');

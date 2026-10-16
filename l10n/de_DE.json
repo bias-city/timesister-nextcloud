@@ -25,7 +25,7 @@
 		"The invoice’s budget is not in the project.": "Das Budget der Rechnung gehört nicht zum Projekt.",
 		"The invoice’s project does not exist.": "Das Projekt der Rechnung gibt es nicht.",
 		"The number {number} is already taken; check the invoice number pattern.": "Die Nummer {number} ist schon vergeben; prüfen Sie das Muster der Rechnungsnummer.",
-		"The project names no customer.": "Das Projekt nennt keinen Kunden.",
+		"Neither the quote of the budget nor the project names a customer.": "Weder die Offerte des Budgets noch das Projekt nennt einen Kunden.",
 		"The project’s customer does not exist.": "Den Kunden des Projekts gibt es nicht.",
 		"The team has no invoice issuer; set “issuer” in the settings first.": "Das Team hat keinen Rechnungssteller; setzen Sie zuerst „issuer“ in den Einstellungen.",
 		"This invoice does not exist.": "Diese Rechnung gibt es nicht.",
