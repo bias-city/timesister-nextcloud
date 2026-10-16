@@ -34,7 +34,9 @@ final class ReceiptRules {
 	/** Owned by the server: ignored on write, the stored value is kept. */
 	public const SERVER = ['status', 'file', 'invoice', 'report', 'created_by', 'created_on', 'approved_by', 'approved_on', 'reject_reason'];
 	/** What a Lead or Team Admin may still change after approval; after billing only the note. */
-	public const CORRECTABLE = ['project', 'budget', 'cost', 'invoice_effect', 'note'];
+	public const CORRECTABLE = ['project', 'cost_kind', 'budget', 'cost', 'invoice_effect', 'note'];
+	/** Set only by Team Admins and the project's Leads; a member's write keeps the stored values (member triage). */
+	public const ASSIGNED = ['budget', 'cost', 'invoice_effect'];
 	public const SUPPLIER_MAX = 120;
 	public const TEXT_MAX = 300;
 	public const NOTE_MAX = 300;
@@ -105,16 +107,36 @@ final class ReceiptRules {
 		}
 	}
 
-	/** `project`, `budget`, `cost`: all null (a general cost) or all set. */
+	/**
+	 * `project`, `cost_kind`, `budget`, `cost`: all null (a general cost),
+	 * or a project with a cost kind or none, and budget and cost position
+	 * both null (triaged, not yet assigned) or both set.
+	 */
 	private static function position(\stdClass $d): void {
 		$p = $d->project ?? null;
 		$b = $d->budget ?? null;
 		$c = $d->cost ?? null;
-		if ($p === null && $b === null && $c === null) {
+		$k = $d->cost_kind ?? null;
+		if ($k !== null && !in_array($k, CostRules::KINDS, true)) {
+			throw self::oneOf('cost_kind', CostRules::KINDS);
+		}
+		if ($p === null) {
+			if ($b !== null || $c !== null) {
+				throw ApiException::invalid('“project”, “budget” and “cost” are all null or name a project, one of its budgets and a cost position of that budget.');
+			}
+			if ($k !== null) {
+				throw ApiException::invalid('A receipt without a project has no “cost_kind”.');
+			}
 			return;
 		}
-		if (!is_string($p) || !RecordValidator::isKey($p) || !is_string($b) || $b === '' || mb_strlen($b) > self::BUDGET_MAX || preg_match(self::CONTROL, $b) || !is_int($c) || $c < 1) {
-			throw ApiException::invalid('“project”, “budget” and “cost” are all null or name a project, one of its budgets and a cost position of that budget.');
+		if (!is_string($p) || !RecordValidator::isKey($p)) {
+			throw ApiException::invalid('“project” must be the key of a project.');
+		}
+		if ($b === null && $c === null) {
+			return;
+		}
+		if (!is_string($b) || $b === '' || mb_strlen($b) > self::BUDGET_MAX || preg_match(self::CONTROL, $b) || !is_int($c) || $c < 1) {
+			throw ApiException::invalid('“budget” and “cost” are both null or name one of the project’s budgets and a cost position of that budget.');
 		}
 	}
 
@@ -143,7 +165,7 @@ final class ReceiptRules {
 		$d->reimburse = $re;
 		$effect = $d->invoice_effect ?? null;
 		if ($effect === null) {
-			$effect = ($d->project ?? null) === null ? self::NONE : ($by === self::CUSTOMER ? self::SHOW_ONLY : self::CHARGE);
+			$effect = self::defaultEffect($d);
 		}
 		if (!in_array($effect, self::EFFECTS, true)) {
 			throw self::oneOf('invoice_effect', self::EFFECTS);
@@ -152,6 +174,14 @@ final class ReceiptRules {
 			throw ApiException::invalid('A receipt without a project is never on an invoice: “invoice_effect” is “none”.');
 		}
 		$d->invoice_effect = $effect;
+	}
+
+	/** The effect on the invoice when none is given: none without project, show only when the customer paid, else charge. */
+	public static function defaultEffect(\stdClass $d): string {
+		if (($d->project ?? null) === null) {
+			return self::NONE;
+		}
+		return ($d->paid_by ?? null) === self::CUSTOMER ? self::SHOW_ONLY : self::CHARGE;
 	}
 
 	/** `rule` and `period` only on a recurring receipt, and there both. */
@@ -217,6 +247,68 @@ final class ReceiptRules {
 		}
 	}
 
+	// ------------------------------------------------------------- triage
+
+	/**
+	 * A member's write (not a Team Admin, not a Lead of the receipt's
+	 * project): budget, cost position and invoice effect stay as stored
+	 * while project and cost kind stay; otherwise budget and cost are
+	 * cleared and the effect is the default. No error.
+	 */
+	public static function keepAssigned(?\stdClass $before, \stdClass $after): void {
+		$project = $after->project ?? null;
+		$same = $before !== null && $project !== null && ($before->project ?? null) === $project;
+		$keep = $same && ($before->cost_kind ?? null) === ($after->cost_kind ?? null);
+		$after->budget = $keep ? ($before->budget ?? null) : null;
+		$after->cost = $keep ? ($before->cost ?? null) : null;
+		$effect = $same ? ($before->invoice_effect ?? null) : null;
+		$after->invoice_effect = in_array($effect, self::EFFECTS, true) && ($project !== null || $effect === self::NONE) ? $effect : self::defaultEffect($after);
+	}
+
+	/** The kind of a budget's cost position, null when the budget has none such. */
+	public static function costKind(\stdClass $project, string $budgetId, int $cost): ?string {
+		foreach (Fields::list(IssueRules::budgetOf($project, $budgetId), 'costs') as $c) {
+			if ($c instanceof \stdClass && ($c->no ?? null) === $cost) {
+				return is_string($c->kind ?? null) ? $c->kind : null;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * The assignment against the project: the budget carries the cost
+	 * position, and its kind is the receipt's cost kind when one is set.
+	 */
+	public static function requireCost(\stdClass $d, \stdClass $project): void {
+		$b = $d->budget ?? null;
+		$c = $d->cost ?? null;
+		if (!is_string($b) || !is_int($c)) {
+			return;
+		}
+		if (!self::hasCost($project, $b, $c)) {
+			throw ApiException::invalid('The budget of the project has no such cost position.');
+		}
+		$kind = $d->cost_kind ?? null;
+		$of = self::costKind($project, $b, $c);
+		if ($kind !== null && $of !== null && $of !== $kind) {
+			throw ApiException::invalid(Message::of('The cost position {no} is not of the receipt’s kind “{kind}”.', ['no' => $c, 'kind' => (string)$kind]));
+		}
+	}
+
+	/** Before approval a receipt of a project is assigned to a budget and a cost position (of its kind). */
+	public static function requireApprovable(\stdClass $d, ?\stdClass $project): void {
+		if (($d->project ?? null) === null) {
+			return;
+		}
+		if ($project === null) {
+			throw ApiException::invalid('The receipt’s project does not exist.');
+		}
+		if (!is_string($d->budget ?? null) || !is_int($d->cost ?? null)) {
+			throw ApiException::invalid('Before approval a Lead or Team Admin assigns the receipt to a budget and a cost position.');
+		}
+		self::requireCost($d, $project);
+	}
+
 	// ------------------------------------------------------------- rights
 
 	/** Created by the caller or paid by them. */
@@ -260,7 +352,10 @@ final class ReceiptRules {
 				if (($before->status ?? null) === self::BILLED) {
 					throw ApiException::conflict(Message::of('A billed receipt changes only in “note”; “{field}” stays.', ['field' => $f]));
 				}
-				throw ApiException::conflict(Message::of('An approved receipt changes only in project, budget, cost, invoice effect and note; “{field}” stays.', ['field' => $f]));
+				throw ApiException::conflict(Message::of('An approved receipt changes only in project, cost kind, budget, cost, invoice effect and note; “{field}” stays.', ['field' => $f]));
+			}
+			if (($after->project ?? null) !== null && (!is_string($after->budget ?? null) || !is_int($after->cost ?? null))) {
+				throw ApiException::invalid('An approved receipt of a project keeps a budget and a cost position.');
 			}
 			return;
 		}

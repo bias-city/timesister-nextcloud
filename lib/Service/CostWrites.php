@@ -22,6 +22,8 @@ use OCP\AppFramework\Utility\ITimeFactory;
 final class CostWrites {
 	/** @var list<array{0:string,1:string}> owner and path, trashed after the commit */
 	private array $trash = [];
+	/** @var list<array{0:string,1:string,2:string}> files moved to their current name, moved back after a rollback */
+	private array $moved = [];
 
 	public function __construct(
 		private RecordMapper $records,
@@ -29,6 +31,7 @@ final class CostWrites {
 		private TenantService $team,
 		private ITimeFactory $time,
 		private DocumentFolder $folders,
+		private ReceiptPlace $places,
 	) {
 	}
 
@@ -88,13 +91,14 @@ final class CostWrites {
 			return null;
 		}
 		$tid = $m->tenantId;
+		if (!$m->manages() && !ReceiptRules::ofLed($after, $led)) {
+			// Member triage: budget, cost position and invoice effect are the Lead's.
+			ReceiptRules::keepAssigned($before, $after);
+		}
 		$project = null;
 		$projectKey = Fields::str($after, 'project');
 		if ($projectKey !== null) {
 			$project = $this->live($tid, 'project', $projectKey) ?? throw ApiException::invalid('The receipt’s project does not exist.');
-			if (!ReceiptRules::hasCost($project, (string)$after->budget, (int)$after->cost)) {
-				throw ApiException::invalid('The budget of the project has no such cost position.');
-			}
 		}
 		$after->currency ??= $this->currency($tid, $project, $after);
 		$this->requireMember($tid, $after->person ?? null);
@@ -105,6 +109,16 @@ final class CostWrites {
 		}
 		ReceiptRules::mergeServer($before, $after, $m->uid, $this->today(), ReceiptRules::initialStatus($after, $ruleApproved));
 		ReceiptRules::requireWrite($m->manages(), $m->uid, $led, $before, $after);
+		if ($project !== null) {
+			ReceiptRules::requireCost($after, $project);
+		}
+		if (($after->status ?? null) === ReceiptRules::OPEN) {
+			// Until approval the file follows every change of its name.
+			$moved = $this->places->follow($tid, $after);
+			if ($moved !== null) {
+				$this->moved[] = $moved;
+			}
+		}
 		return $after;
 	}
 
@@ -227,6 +241,7 @@ final class CostWrites {
 	public function afterCommit(): void {
 		$trash = $this->trash;
 		$this->trash = [];
+		$this->moved = [];
 		foreach ($trash as [$owner, $path]) {
 			try {
 				$this->folders->trash($owner, $path);
@@ -236,8 +251,16 @@ final class CostWrites {
 		}
 	}
 
-	/** After a rollback: nothing is trashed. */
+	/** After a rollback: nothing is trashed, moved files go back. */
 	public function discard(): void {
 		$this->trash = [];
+		foreach (array_reverse($this->moved) as $moved) {
+			try {
+				$this->places->back($moved);
+			} catch (\Throwable) {
+				// The record names the old path; the file stays findable under the new one.
+			}
+		}
+		$this->moved = [];
 	}
 }

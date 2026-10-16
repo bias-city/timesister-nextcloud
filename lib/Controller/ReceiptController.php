@@ -112,13 +112,13 @@ final class ReceiptController extends BaseController {
 		});
 	}
 
-	/** GET /exports/expenses?from=&to=&format=csv|datev – Team Admins. */
+	/** GET /exports/expenses?from=&to=&kind=csv|datev – Team Admins. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/exports/expenses')]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 30, period: 60)]
 	public function export(): Response {
 		return $this->respond(function (): Response {
-			$r = $this->exports->export($this->tenants->current(), $this->request->getParam('from'), $this->request->getParam('to'), $this->request->getParam('format'));
+			$r = $this->exports->export($this->tenants->current(), $this->request->getParam('from'), $this->request->getParam('to'), $this->request->getParam('kind'));
 			return new DataDownloadResponse($r['content'], $r['name'], 'text/csv; charset=utf-8');
 		});
 	}

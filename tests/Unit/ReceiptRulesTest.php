@@ -67,8 +67,11 @@ class ReceiptRulesTest extends TestCase {
 		$this->assertSame('422 “vat” must be “net” × “vat_rate” / 100, rounded to cents.', self::check(['vat' => 99.0, 'gross' => 1339.0]));
 		$this->assertSame('422 “vat_rate” must be null or a percentage from 0 to 100.', self::check(['vat_rate' => 101]));
 		$this->assertSame('422 “currency” must be three letters, for example CHF.', self::check(['currency' => 'Franken']));
-		$this->assertStringStartsWith('422 “project”, “budget” and “cost” are all null', self::check(['cost' => null]));
-		$this->assertStringStartsWith('422 “project”, “budget” and “cost” are all null', self::check(['cost' => 0]));
+		$this->assertStringStartsWith('422 “budget” and “cost” are both null', self::check(['cost' => null]));
+		$this->assertStringStartsWith('422 “budget” and “cost” are both null', self::check(['cost' => 0]));
+		$this->assertStringStartsWith('422 “project”, “budget” and “cost” are all null', self::check(['project' => null]));
+		$this->assertSame('422 A receipt without a project has no “cost_kind”.', self::check(['project' => null, 'budget' => null, 'cost' => null, 'cost_kind' => 'expense']));
+		$this->assertSame('422 “cost_kind” must be one of expense, third_party.', self::check(['cost_kind' => 'travel']));
 		$this->assertSame('422 “paid_by” must be one of person, company, customer.', self::check(['paid_by' => 'me']));
 		$this->assertSame('422 “person” is required when a person paid: the account’s user ID.', self::check(['paid_by' => 'person']));
 		$this->assertSame('422 “person” is only set when a person paid.', self::check(['person' => 'alice']));
@@ -78,6 +81,58 @@ class ReceiptRulesTest extends TestCase {
 		$this->assertSame('422 “invoice_effect” must be one of charge, show_only, none.', self::check(['invoice_effect' => 'maybe']));
 		$this->assertSame('422 “rule” and “period” belong only to a recurring receipt.', self::check(['rule' => 'er-1']));
 		$this->assertStringStartsWith('422 A recurring receipt names its “rule” and its “period”', self::check(['kind' => 'recurring', 'rule' => 'er-1', 'period' => '2026-13', 'paid_by' => 'person', 'person' => 'alice']));
+	}
+
+	/** Member triage: spesen or not, project and cost kind; budget and cost position follow later. */
+	public function testTriage(): void {
+		$this->assertSame('ok', self::check(['budget' => null, 'cost' => null, 'cost_kind' => 'third_party']), 'a project and a kind without budget');
+		$this->assertSame('ok', self::check(['budget' => null, 'cost' => null]), 'a project alone');
+		$this->assertSame('ok', self::check(['cost_kind' => 'expense']));
+		// A member's write keeps the stored assignment while project and kind stay.
+		$stored = self::receipt(['cost_kind' => 'third_party', 'invoice_effect' => 'show_only']);
+		$w = self::receipt(['cost_kind' => 'third_party', 'budget' => 'b9', 'cost' => 9, 'invoice_effect' => 'none']);
+		ReceiptRules::keepAssigned($stored, $w);
+		$this->assertSame(['b1', 2, 'show_only'], [$w->budget, $w->cost, $w->invoice_effect], 'the Lead’s fields stay, no error');
+		$k = self::receipt(['cost_kind' => 'expense']);
+		ReceiptRules::keepAssigned($stored, $k);
+		$this->assertSame([null, null, 'show_only'], [$k->budget, $k->cost, $k->invoice_effect], 'another kind: the cost position is cleared');
+		$p = self::receipt(['project' => 'd300', 'cost_kind' => 'third_party']);
+		ReceiptRules::keepAssigned($stored, $p);
+		$this->assertSame([null, null, 'charge'], [$p->budget, $p->cost, $p->invoice_effect], 'another project: cleared, the default effect');
+		$n = self::receipt(['cost_kind' => 'expense', 'invoice_effect' => 'none']);
+		ReceiptRules::keepAssigned(null, $n);
+		$this->assertSame([null, null, 'charge'], [$n->budget, $n->cost, $n->invoice_effect], 'a new receipt of a member');
+		$g = self::receipt(['project' => null, 'budget' => null, 'cost' => null, 'invoice_effect' => 'none']);
+		ReceiptRules::keepAssigned($stored, $g);
+		$this->assertSame([null, null, 'none'], [$g->budget, $g->cost, $g->invoice_effect]);
+		// The cost position must be of the receipt's kind.
+		$project = (object)['budgets' => [(object)['id' => 'b1', 'costs' => [(object)['no' => 1, 'kind' => 'expense'], (object)['no' => 2, 'kind' => 'third_party']]]]];
+		$this->assertSame('third_party', ReceiptRules::costKind($project, 'b1', 2));
+		$this->assertNull(ReceiptRules::costKind($project, 'b1', 5));
+		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireCost(self::receipt(['cost_kind' => 'third_party']), $project)));
+		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireCost(self::receipt(), $project)), 'no kind: any position');
+		$this->assertSame('422 The cost position 2 is not of the receipt’s kind “expense”.', self::outcome(fn () => ReceiptRules::requireCost(self::receipt(['cost_kind' => 'expense']), $project)));
+		$this->assertSame('422 The budget of the project has no such cost position.', self::outcome(fn () => ReceiptRules::requireCost(self::receipt(['cost' => 7]), $project)));
+		// Approval needs budget and cost position of a project receipt.
+		$this->assertSame('422 Before approval a Lead or Team Admin assigns the receipt to a budget and a cost position.', self::outcome(fn () => ReceiptRules::requireApprovable(self::receipt(['budget' => null, 'cost' => null, 'cost_kind' => 'expense']), $project)));
+		$this->assertSame('422 The cost position 2 is not of the receipt’s kind “expense”.', self::outcome(fn () => ReceiptRules::requireApprovable(self::receipt(['cost_kind' => 'expense']), $project)));
+		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireApprovable(self::receipt(['cost_kind' => 'third_party']), $project)));
+		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireApprovable(self::receipt(['project' => null, 'budget' => null, 'cost' => null]), null)), 'general');
+		$this->assertSame('422 The receipt’s project does not exist.', self::outcome(fn () => ReceiptRules::requireApprovable(self::receipt(), null)));
+		// After approval a project receipt keeps its assignment.
+		$ok = self::receipt(['created_by' => 'alice', 'status' => 'approved']);
+		$bare = self::receipt(['created_by' => 'alice', 'status' => 'approved', 'budget' => null, 'cost' => null]);
+		$this->assertSame('422 An approved receipt of a project keeps a budget and a cost position.', self::outcome(fn () => ReceiptRules::requireWrite(true, 'admin', [], $ok, $bare)));
+		$kind = self::receipt(['created_by' => 'alice', 'status' => 'approved', 'cost_kind' => 'third_party']);
+		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireWrite(false, 'lea', ['d200' => true], $ok, $kind)), 'a Lead corrects the kind');
+		// Before approval the member's triage is a proposal: Team Admins correct anything, a Lead only within their projects.
+		$proposal = self::receipt(['created_by' => 'alice', 'status' => 'open', 'paid_by' => 'person', 'person' => 'alice', 'reimburse' => true, 'budget' => null, 'cost' => null]);
+		$elsewhere = self::receipt(['created_by' => 'alice', 'status' => 'open', 'project' => 'd300', 'budget' => null, 'cost' => null]);
+		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireWrite(false, 'lea', ['d200' => true], $proposal, self::receipt(['created_by' => 'alice', 'status' => 'open']))), 'the Lead turns spesen into a company cost');
+		$this->assertStringStartsWith('403', self::outcome(fn () => ReceiptRules::requireWrite(false, 'lea', ['d200' => true], $proposal, $elsewhere)), 'a project the Lead does not lead');
+		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireWrite(true, 'admin', [], $proposal, $elsewhere)));
+		// A Lead reads a triaged receipt of their project without budget.
+		$this->assertTrue(ReceiptRules::canRead(false, 'lea', ['d200' => true], self::receipt(['created_by' => 'alice', 'budget' => null, 'cost' => null, 'cost_kind' => 'expense'])));
 	}
 
 	public function testServerFieldsAndStatus(): void {
@@ -121,7 +176,7 @@ class ReceiptRulesTest extends TestCase {
 		$net->net = 1.0;
 		$this->assertStringStartsWith('403', self::outcome(fn () => ReceiptRules::requireWrite(false, 'alice', [], $ok, $note)));
 		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireWrite(false, 'lea', $led, $ok, $note)));
-		$this->assertSame('409 An approved receipt changes only in project, budget, cost, invoice effect and note; “net” stays.', self::outcome(fn () => ReceiptRules::requireWrite(true, 'admin', [], $ok, $net)));
+		$this->assertSame('409 An approved receipt changes only in project, cost kind, budget, cost, invoice effect and note; “net” stays.', self::outcome(fn () => ReceiptRules::requireWrite(true, 'admin', [], $ok, $net)));
 		$this->assertSame('409 An approved receipt is not deleted.', self::outcome(fn () => ReceiptRules::requireWrite(true, 'admin', [], $ok, null)));
 		$billed = self::receipt(['created_by' => 'alice', 'status' => 'billed']);
 		$cost = clone $billed;

@@ -25,7 +25,7 @@ final class ReceiptService {
 		private RecordRights $rights,
 		private TeamTree $tree,
 		private DocumentFolder $folders,
-		private TenantService $team,
+		private ReceiptPlace $places,
 		private ITimeFactory $time,
 	) {
 	}
@@ -66,7 +66,7 @@ final class ReceiptService {
 		}
 		$mime = ReceiptRules::sniff($content) ?? throw ApiException::invalid('The file must be a PDF, JPEG or PNG.');
 		$place = $this->tree->of($m->tenantId);
-		[$folder, $name] = $this->place($m->tenantId, $place['root'], $d, DocumentTree::extension($mime));
+		[$folder, $name] = $this->places->place($m->tenantId, $place['root'], $d, DocumentTree::extension($mime));
 		$old = $d->file->path ?? null;
 		$written = $this->folders->store($place['owner'], $folder, $name, $content, is_string($old) ? $old : null);
 		$d->file = (object)['path' => $written['path'], 'sha256' => hash('sha256', $content), 'size' => strlen($content), 'mime' => $mime];
@@ -84,23 +84,6 @@ final class ReceiptService {
 			throw ApiException::notFound('This receipt has no file.');
 		}
 		return ['content' => $file->getContent(), 'name' => basename($path), 'type' => Fields::str(Fields::obj($d, 'file'), 'mime') ?? 'application/octet-stream'];
-	}
-
-	/** Folder and name of the receipt's file in the tree: `Spesen/<person>/` when reimbursed, else `Belege/`. @return array{0:string,1:string} */
-	private function place(int $tid, string $root, \stdClass $d, string $ext): array {
-		$date = (string)$d->date;
-		$person = Fields::str($d, 'person');
-		$folder = ($d->reimburse ?? false) === true && $person !== null
-			? DocumentTree::expenseFolder($root, $date, $this->team->displayName($person))
-			: DocumentTree::receiptFolder($root, $date);
-		$code = null;
-		$project = Fields::str($d, 'project');
-		if ($project !== null) {
-			$p = $this->records->findOne($tid, 'project', $project);
-			$code = ReceiptRules::projectCode($p === null || $p->isTombstone() ? null : InvoiceRules::decode($p->getData()), $project);
-		}
-		$name = DocumentTree::receiptName($date, (string)($d->supplier ?? ''), (float)$d->gross, (string)($d->currency ?? 'CHF'), $code, is_int($d->cost ?? null) ? $d->cost : null, $ext);
-		return [$folder, $name];
 	}
 
 	// ----------------------------------------------------------- approval
@@ -122,21 +105,13 @@ final class ReceiptService {
 		if (($d->status ?? null) !== ReceiptRules::OPEN) {
 			throw ApiException::conflict('Only an open receipt is approved or rejected.');
 		}
-		$file = Fields::obj($d, 'file');
-		if (($d->kind ?? null) === ReceiptRules::RECEIPT && $file === null) {
+		if (($d->kind ?? null) === ReceiptRules::RECEIPT && Fields::obj($d, 'file') === null) {
 			throw ApiException::invalid('The receipt has no file yet.');
 		}
-		$moved = null;
-		$path = Fields::str($file, 'path');
-		if ($file !== null && $path !== null) {
-			$place = $this->tree->of($m->tenantId);
-			[$folder, $name] = $this->place($m->tenantId, $place['root'], $d, DocumentTree::extension(Fields::text($file, 'mime')));
-			$new = $this->folders->move($place['owner'], $path, $folder, $name);
-			if ($new !== $path) {
-				$moved = [$place['owner'], $new, $path];
-				$file->path = $new;
-			}
-		}
+		$project = Fields::str($d, 'project');
+		$p = $project === null ? null : $this->records->findOne($m->tenantId, 'project', $project);
+		ReceiptRules::requireApprovable($d, $p === null || $p->isTombstone() ? null : InvoiceRules::decode($p->getData()));
+		$moved = $this->places->follow($m->tenantId, $d);
 		$d->status = ReceiptRules::approvedStatus($d);
 		$d->approved_by = $m->uid;
 		$d->approved_on = gmdate('Y-m-d', $this->time->getTime());
@@ -146,8 +121,7 @@ final class ReceiptService {
 		} catch (\Throwable $e) {
 			if ($moved !== null) {
 				// The record still names the old path: move the file back.
-				[$owner, $new, $old] = $moved;
-				$this->folders->move($owner, $new, dirname($old), basename($old));
+				$this->places->back($moved);
 			}
 			throw $e;
 		}

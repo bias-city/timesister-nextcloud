@@ -160,7 +160,7 @@ final class DocumentFolder {
 
 	/** Moves a file to `<folder>/<name>` (a free name), creating the folders. @return string the new path */
 	public function move(string $owner, string $path, string $folder, string $name): string {
-		if ($path === $folder . '/' . $name) {
+		if (DocumentTree::isPlaced($path, $folder, $name)) {
 			return $path;
 		}
 		$file = $this->read($owner, $path) ?? throw new NotFoundException($path);

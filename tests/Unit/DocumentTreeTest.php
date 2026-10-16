@@ -36,6 +36,13 @@ class DocumentTreeTest extends TestCase {
 		$this->assertSame('2026-10-16_RE-2026-12.pdf', DocumentTree::invoiceName('2026-10-16', 'RE/2026/12', ''), 'slashes become -, an empty part is left out');
 		$this->assertSame('2026-10-03_Druckerei-Muster-AG_1340.44-CHF_D196-K2.pdf', DocumentTree::receiptName('2026-10-03', 'Druckerei Muster AG', 1340.44, 'chf', 'D196', 2, 'pdf'));
 		$this->assertSame('2026-10-02_Bahn_84.00-CHF.jpg', DocumentTree::receiptName('2026-10-02', 'Bahn', 84, 'CHF', null, null, 'jpg'));
+		$this->assertSame('2026-10-02_Bahn.pdf', DocumentTree::receiptName('2026-10-02', 'Bahn', 0, 'CHF', null, null, 'pdf'), 'no amount yet: left out');
+		$this->assertSame('2026-10-02_84.00-CHF_D196.pdf', DocumentTree::receiptName('2026-10-02', '', 84, 'CHF', 'D196', null, 'pdf'), 'a project without cost position');
+		$this->assertTrue(DocumentTree::isPlaced('R/Belege/a_b.pdf', 'R/Belege', 'a_b.pdf'));
+		$this->assertTrue(DocumentTree::isPlaced('R/Belege/a_b_2.pdf', 'R/Belege', 'a_b.pdf'), 'a free name of unique() stays');
+		$this->assertFalse(DocumentTree::isPlaced('R/Belege/a_c.pdf', 'R/Belege', 'a_b.pdf'));
+		$this->assertFalse(DocumentTree::isPlaced('R/Spesen/X/a_b.pdf', 'R/Belege', 'a_b.pdf'));
+		$this->assertFalse(DocumentTree::isPlaced('R/Belege/a_b_x.pdf', 'R/Belege', 'a_b.pdf'));
 		$this->assertSame('2026-10_Spesenblatt.pdf', DocumentTree::reportName('2026-10-31'));
 		$this->assertSame('chain-2026-10-16.txt', DocumentTree::chainName('2026-10-16'));
 		$this->assertSame('Projektakte-2026-10-16.zip', DocumentTree::dossierName('2026-10-16'));
