@@ -111,11 +111,14 @@ final class ReceiptService {
 		$project = Fields::str($d, 'project');
 		$p = $project === null ? null : $this->records->findOne($m->tenantId, 'project', $project);
 		ReceiptRules::requireApprovable($d, $p === null || $p->isTombstone() ? null : InvoiceRules::decode($p->getData()));
+		$s = $this->records->findOne($m->tenantId, 'setting', 'settings');
+		ReceiptBooking::requireApprovable($d, ReceiptBooking::teamCurrency($s === null || $s->isTombstone() ? null : InvoiceRules::decode($s->getData())));
 		$moved = $this->places->follow($m->tenantId, $d);
 		$d->status = ReceiptRules::approvedStatus($d);
 		$d->approved_by = $m->uid;
 		$d->approved_on = gmdate('Y-m-d', $this->time->getTime());
 		$d->reject_reason = null;
+		ReceiptRecognition::clear($d);
 		try {
 			return $this->recordService->writeAsServer($m, ReceiptRules::KIND, $key, $rec->getVersion(), $d);
 		} catch (\Throwable $e) {

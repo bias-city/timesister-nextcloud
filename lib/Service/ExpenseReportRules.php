@@ -88,7 +88,7 @@ final class ExpenseReportRules {
 
 	/**
 	 * The sums of the receipts with VatLines: net per rate (a receipt
-	 * without rate counts as 0), VAT per rate, gross; all in one currency.
+	 * without rate counts as 0, one with VAT lines once per rate), VAT per rate, gross; all in one currency.
 	 *
 	 * @param list<\stdClass> $receipts
 	 * @return array{currency:string,net:float,vat_lines:list<array{rate:float,net:float,vat:float}>,gross:float}
@@ -97,13 +97,15 @@ final class ExpenseReportRules {
 		$currency = null;
 		$lines = [];
 		foreach ($receipts as $r) {
-			$c = is_string($r->currency ?? null) ? $r->currency : $fallbackCurrency;
+			$c = ReceiptBooking::currency($r, $fallbackCurrency);
 			if ($currency !== null && $c !== $currency) {
 				throw ApiException::invalid('All receipts of an expense report are in one currency.');
 			}
 			$currency = $c;
-			$rate = $r->vat_rate ?? null;
-			$lines[] = ['kind' => 'costs', 'amount' => (float)($r->net ?? 0), 'vat' => is_int($rate) || is_float($rate) ? (float)$rate : 0.0];
+			// A receipt with several rates counts once per rate.
+			foreach (ReceiptBooking::rates($r) as $l) {
+				$lines[] = ['kind' => 'costs', 'amount' => $l['net'], 'vat' => $l['rate']];
+			}
 		}
 		$s = VatLines::of($lines, 0.0, TaxRules::DOMESTIC);
 		return ['currency' => $currency ?? $fallbackCurrency, 'net' => $s->net, 'vat_lines' => $s->lines, 'gross' => $s->gross];

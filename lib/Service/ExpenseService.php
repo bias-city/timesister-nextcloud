@@ -131,10 +131,14 @@ final class ExpenseService {
 				$projects[$p] = ReceiptRules::projectCode($pr === null ? null : InvoiceRules::decode($pr->getData()), $p);
 			}
 			$rate = $r->vat_rate ?? null;
+			// In another currency: the amount paid, the original beside the text.
+			$eff = ReceiptBooking::rates($r);
+			$own = ReceiptBooking::isForeign($r) ? sprintf(' (%s %s)', (string)$r->currency, number_format((float)($r->gross ?? 0), 2, '.', '')) : '';
 			$rows[] = [
-				'date' => (string)($r->date ?? ''), 'supplier' => (string)($r->supplier ?? ''), 'text' => (string)($r->text ?? ''),
-				'project' => $p === null ? '' : $projects[$p], 'net' => (float)($r->net ?? 0), 'vat_rate' => is_int($rate) || is_float($rate) ? (float)$rate : null,
-				'vat' => (float)($r->vat ?? 0), 'gross' => (float)($r->gross ?? 0), 'without' => ExpenseReportRules::withoutReceipt($r),
+				'date' => (string)($r->date ?? ''), 'supplier' => (string)($r->supplier ?? ''), 'text' => (string)($r->text ?? '') . $own,
+				'project' => $p === null ? '' : $projects[$p], 'net' => array_sum(array_column($eff, 'net')), 'vat_rate' => is_int($rate) || is_float($rate) ? (float)$rate : null,
+				'vat_rates' => ReceiptRecognition::hasLines($r) ? array_map(static fn (array $l): float => $l['rate'], ReceiptRecognition::rates($r)) : [],
+				'vat' => array_sum(array_column($eff, 'vat')), 'gross' => ReceiptBooking::gross($r), 'without' => ExpenseReportRules::withoutReceipt($r),
 			];
 		}
 		$sums = ExpenseReportRules::sums(array_values($receipts), 'CHF');

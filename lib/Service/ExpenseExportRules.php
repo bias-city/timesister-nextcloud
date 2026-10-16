@@ -37,11 +37,12 @@ final class ExpenseExportRules {
 	/** @return list<string> */
 	public static function csvRow(string $personName, string $reportKey, \stdClass $report, \stdClass $r): array {
 		$rate = $r->vat_rate ?? null;
+		$eff = ReceiptBooking::rates($r);
 		return [
 			(string)$report->person, $personName, $reportKey, (string)($report->status ?? ''), (string)($r->date ?? ''),
-			(string)($r->supplier ?? ''), (string)($r->text ?? ''), is_string($r->project ?? null) ? $r->project : '', (string)($r->currency ?? ''),
-			ExportRules::amount((float)($r->net ?? 0)), is_int($rate) || is_float($rate) ? (string)$rate : '',
-			ExportRules::amount((float)($r->vat ?? 0)), ExportRules::amount((float)($r->gross ?? 0)),
+			(string)($r->supplier ?? ''), (string)($r->text ?? ''), is_string($r->project ?? null) ? $r->project : '', ReceiptBooking::currency($r, ''),
+			ExportRules::amount(array_sum(array_column($eff, 'net'))), is_int($rate) || is_float($rate) ? (string)$rate : '',
+			ExportRules::amount(array_sum(array_column($eff, 'vat'))), ExportRules::amount(ReceiptBooking::gross($r)),
 			ExpenseReportRules::withoutReceipt($r) ? '1' : '0',
 		];
 	}
@@ -72,11 +73,11 @@ final class ExpenseExportRules {
 	 * @return list<string>
 	 */
 	public static function datevRow(\stdClass $r, string $reportKey, string $expenseAccount, string $creditor): array {
-		$gross = (float)($r->gross ?? 0);
+		$gross = ReceiptBooking::gross($r);
 		$date = (string)($r->date ?? '');
 		$text = mb_substr(trim((string)($r->supplier ?? '') . ' ' . (string)($r->text ?? '')), 0, 60);
 		return [
-			number_format(abs($gross), 2, ',', ''), $gross < 0 ? 'H' : 'S', (string)($r->currency ?? ''), '', '', '',
+			number_format(abs($gross), 2, ',', ''), $gross < 0 ? 'H' : 'S', ReceiptBooking::currency($r, ''), '', '', '',
 			$expenseAccount, $creditor, '', substr($date, 8, 2) . substr($date, 5, 2), ExportRules::belegfeld($reportKey), '', '', $text,
 		];
 	}

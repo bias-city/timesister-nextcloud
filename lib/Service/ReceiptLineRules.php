@@ -64,11 +64,17 @@ final class ReceiptLineRules {
 				$show = 0;
 				foreach ($list as $k) {
 					$k = (string)$k;
-					if (isset($seen[$k])) {
+					$r = $receipts[$k] ?? null;
+					$rate = self::splitRate($n, $k, $r, $p);
+					if (isset($seen[$k]) && ($rate === null || $seen[$k] === true || isset($seen[$k][$rate]))) {
 						throw self::at($n, Message::of('The receipt {key} is on the invoice twice.', ['key' => $k]));
 					}
-					$seen[$k] = true;
-					$r = $receipts[$k] ?? null;
+					if ($rate === null) {
+						$seen[$k] = true;
+					} else {
+						$seen[$k] = is_array($seen[$k] ?? null) ? $seen[$k] : [];
+						$seen[$k][$rate] = true;
+					}
 					self::requireReceipt($n, $k, $r, $project, $budget, $cost, $invoiceKey, $numberOf);
 					$show += ($r?->invoice_effect ?? null) === ReceiptRules::SHOW_ONLY ? 1 : 0;
 				}
@@ -80,6 +86,16 @@ final class ReceiptLineRules {
 				}
 				if ($show === 0) {
 					$charged[$cost] = ($charged[$cost] ?? 0.0) + self::num($p->amount ?? 0);
+				}
+			}
+		}
+		foreach ($seen as $k => $rates) {
+			if (!is_array($rates)) {
+				continue;
+			}
+			foreach (ReceiptRecognition::rates($receipts[$k]) as $l) {
+				if (!isset($rates[(int)round($l['rate'] * 100.0)])) {
+					throw ApiException::invalid(Message::of('The receipt {key} stands on one line per VAT rate; the line at {rate} is missing.', ['key' => $k, 'rate' => DocumentRules::percent($l['rate'])]));
 				}
 			}
 		}
@@ -116,6 +132,26 @@ final class ReceiptLineRules {
 		if (($r->invoice_effect ?? null) === ReceiptRules::NONE) {
 			throw self::at($n, Message::of('The receipt {key} is not for the invoice.', $p));
 		}
+	}
+
+	/**
+	 * A charged receipt with VAT lines on a taxable line stands on one line
+	 * per rate: the line's `vat` is one of its rates (in hundredths, the
+	 * key of that part). Otherwise null: the receipt stands once.
+	 */
+	private static function splitRate(int $n, string $k, ?\stdClass $r, \stdClass $p): ?int {
+		if (!ReceiptRecognition::hasLines($r) || ($r?->invoice_effect ?? null) !== ReceiptRules::CHARGE || VatLines::isPassThrough($p)) {
+			return null;
+		}
+		/** @var \stdClass $r */
+		$v = $p->vat ?? null;
+		$rates = array_map(static fn (array $l): int => (int)round($l['rate'] * 100.0), ReceiptRecognition::rates($r));
+		$at = is_int($v) || is_float($v) ? (int)round((float)$v * 100.0) : null;
+		if ($at === null || !in_array($at, $rates, true)) {
+			$list = implode(', ', array_map(static fn (array $l): string => DocumentRules::percent($l['rate']), ReceiptRecognition::rates($r)));
+			throw self::at($n, Message::of('The receipt {key} has several VAT rates; its line names one of them in “vat” ({rates}).', ['key' => $k, 'rates' => $list]));
+		}
+		return $at;
 	}
 
 	/** `amount` = round(base × rate / 100, 2) within a cent. */

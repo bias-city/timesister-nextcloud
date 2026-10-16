@@ -20,7 +20,7 @@ final class ExpenseReportPdf {
 
 	/**
 	 * @param array{lang:string,team:string,person:string,from:string,to:string,currency:string,key:string,
-	 *   rows:list<array{date:string,supplier:string,text:string,project:string,net:float,vat_rate:?float,vat:float,gross:float,without:bool}>,
+	 *   rows:list<array{date:string,supplier:string,text:string,project:string,net:float,vat_rate:?float,vat_rates?:list<float>,vat:float,gross:float,without:bool}>,
 	 *   sums:array{net:float,vat_lines:list<array{rate:float,net:float,vat:float}>,gross:float,currency?:string},
 	 *   approved_by:?string,approved_on:?string,
 	 *   copies:list<array{head:string,content:?string,mime:string,path:string,sha256:string}>} $r
@@ -71,7 +71,8 @@ final class ExpenseReportPdf {
 		$header();
 		foreach ($r['rows'] as $row) {
 			$text = $row['text'] . ($row['without'] ? ' (' . $t['without_receipt'] . ')' : '');
-			$vat = DocumentRules::money($row['vat'], $lang) . ($row['vat_rate'] === null ? '' : "\n" . DocumentRules::percent($row['vat_rate']));
+			$rates = $row['vat_rate'] === null ? array_map(DocumentRules::percent(...), $row['vat_rates'] ?? []) : [DocumentRules::percent($row['vat_rate'])];
+			$vat = DocumentRules::money($row['vat'], $lang) . ($rates === [] ? '' : "\n" . implode(' / ', $rates));
 			$cells = [DocumentRules::day($row['date'], $lang), $row['supplier'], $text, $row['project'],
 				DocumentRules::money($row['net'], $lang), $vat, DocumentRules::money($row['gross'], $lang)];
 			$lines = 1;

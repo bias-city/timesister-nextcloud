@@ -99,14 +99,17 @@ export async function belege() {
 	const R1 = `rc-${RUN}-1`
 	const R2 = `rc-${RUN}-2`
 	const R3 = `rc-${RUN}-3`
+	const R4 = `rc-${RUN}-4`
+	const R5 = `rc-${RUN}-5`
 	const RR = `rc-${RUN}-r1`
 	const RULE = `er-${RUN}`
 	const SB = `sb-${RUN}`
 	const K1 = `inv-${RUN}b1`
 	const K2 = `inv-${RUN}b2`
+	const K3 = `inv-${RUN}b3`
 	const Q = `q-${sha256(RUN).slice(0, 8)}`
-	const records = [[ 'receipt', R1 ], ['receipt', R2], ['receipt', R3], ['receipt', RR], ['receipt', `rc-${RUN}-r2`], ['expense_rule', RULE], ['expense_report', SB], ['expense_report', `${SB}x`], ['quote', Q]]
-	const invoices = [K1, K2]
+	const records = [[ 'receipt', R1 ], ['receipt', R2], ['receipt', R3], ['receipt', R4], ['receipt', R5], ['receipt', RR], ['receipt', `rc-${RUN}-r2`], ['expense_rule', RULE], ['expense_report', SB], ['expense_report', `${SB}x`], ['quote', Q]]
+	const invoices = [K1, K2, K3]
 	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'pb'")
 	const settings = await ocs(A, 'GET', '/records/setting/settings')
 	const base = settings.status === 200 ? settings.data.data : {}
@@ -438,6 +441,60 @@ export async function belege() {
 			check('the notice names costs and expenses', md.status === 200 && (md.text.includes('Costs and expenses') || md.text.includes('Kosten und Spesen')), md.text.slice(0, 200))
 		}
 	} finally {
+		head('Receipts: recognition fields')
+		{
+			// Filled by the Mac app's recognition: the mark, its source, the QR reference, VAT lines for two rates.
+			const lines = [{ rate: 2.6, net: 40, vat: 1.04 }, { rate: 8.1, net: 60, vat: 4.86 }]
+			const two = receipt({ supplier: 'Market', text: 'Food and paper', net: 100, vat_rate: null, vat: 5.9, gross: 105.9, reimburse: false, vat_lines: lines,
+				review: true, review_reasons: ['The total differs from the sum of the lines.'], recognized_by: 'qr', qr_reference: '210000000003139471430009017' })
+			expect('vat_lines with a single vat_rate', await ocs(A, 'PUT', rec('receipt', R4), { version: 0, data: { ...two, vat_rate: 8.1 } }), 422, 'invalid')
+			expect('vat_lines not adding up', await ocs(A, 'PUT', rec('receipt', R4), { version: 0, data: { ...two, vat: 6, gross: 106 } }), 422, 'invalid')
+			expect('an unknown source', await ocs(A, 'PUT', rec('receipt', R4), { version: 0, data: { ...two, recognized_by: 'ocr' } }), 422, 'invalid')
+			const w = await ocs(A, 'PUT', rec('receipt', R4), { version: 0, data: two })
+			expect('Team Admin writes a receipt with two rates, marked «please check», for pbuser1', w, 200)
+			check('… the fields are stored', w.data?.data?.review === true && w.data?.data?.review_reasons?.length === 1 && w.data?.data?.recognized_by === 'qr'
+				&& w.data?.data?.qr_reference === '210000000003139471430009017' && w.data?.data?.vat_lines?.length === 2, w.data?.data)
+			const plain = await get('receipt', R2)
+			check('a receipt without them answers the defaults', plain?.data?.review === false && JSON.stringify(plain?.data?.review_reasons) === '[]' && plain?.data?.vat_lines === null, plain?.data)
+			const c = await get('receipt', R4)
+			expect('the person who paid (not who recorded it) clears the mark', await ocs(U1, 'PUT', rec('receipt', R4), { version: c.version, data: { ...c.data, review: false } }), 403, 'forbidden')
+			const ok = await ocs(L, 'PUT', rec('receipt', R4), { version: c.version, data: { ...c.data, review: false } })
+			check('the project’s Lead marks it checked: reasons go with the mark', ok.status === 200 && ok.data?.data?.review === false && JSON.stringify(ok.data?.data?.review_reasons) === '[]', ok.data)
+			const again = await ocs(U1, 'PUT', rec('receipt', R4), { version: ok.data?.version, data: { ...ok.data?.data, review: true, review_reasons: ['Please check the date.'] } })
+			expect('the member sets the mark again', again, 200)
+			expect('… a file', await raw(A, 'PUT', `/receipts/${R4}/file`, pdf('Market'), 'application/pdf').then((x) => ({ status: x.status, data: x.data, text: x.text })), 200)
+			const a = await ocs(L, 'POST', `/receipts/${R4}/approve`, {})
+			check('approval clears the mark', a.status === 200 && a.data?.data?.status === 'approved' && a.data?.data?.review === false && JSON.stringify(a.data?.data?.review_reasons) === '[]', a.data)
+			const draft = (positions) => ({ schema: 1, project: PB, budget: 'b1', from: `${Y}-03-01`, to: `${Y}-03-31`, status: 'draft', number: null, bookings: [], positions, created_by: 'pbadmin', created_on: `${Y}-04-05` })
+			expect('a draft with the receipt on one line', await ocs(A, 'PUT', rec('invoice', K3), { version: 0, data: draft([{ kind: 'costs', text: 'Market', amount: 100, cost: 1, receipts: [R4] }]) }), 200)
+			const one = await raw(A, 'GET', `/invoices/${K3}/preview`)
+			check('… preview: the line must name one of its rates → 422', one.status === 422 && one.text.includes('several VAT rates'), [one.status, one.text.slice(0, 200)])
+			expect('… one line per rate', await put(A, 'invoice', K3, draft([{ kind: 'costs', text: 'Market 2.6 %', amount: 40, vat: 2.6, cost: 1, receipts: [R4] }])), 200)
+			const half = await raw(A, 'GET', `/invoices/${K3}/preview`)
+			check('… only one of the two rates → 422', half.status === 422 && half.text.includes('the line at 8.1 % is missing'), [half.status, half.text.slice(0, 200)])
+			expect('… both rates', await put(A, 'invoice', K3, draft([{ kind: 'costs', text: 'Market 2.6 %', amount: 40, vat: 2.6, cost: 1, receipts: [R4] }, { kind: 'costs', text: 'Market 8.1 %', amount: 60, vat: 8.1, cost: 1, receipts: [R4] }])), 200)
+			const pre = await raw(A, 'GET', `/invoices/${K3}/preview`)
+			check('… the preview renders', pre.status === 200 && pre.buf.subarray(0, 5).toString() === '%PDF-', [pre.status, pre.text.slice(0, 200)])
+		}
+
+		head('Receipts: another currency')
+		{
+			// A receipt in USD paid by card in the team's currency: the amount paid is needed for approval.
+			const usd = receipt({ kind: 'trust', supplier: 'Jotform', text: 'Subscription', date: `${Y}-03-12`, net: 234.01, vat_rate: 7.7, vat: 18.02, gross: 252.03, currency: 'USD',
+				project: null, budget: null, cost: null, paid_by: 'company', person: null, reimburse: false })
+			expect('booked in another currency than the team’s', await ocs(A, 'PUT', rec('receipt', R5), { version: 0, data: { ...usd, booked: { gross: 228.4, currency: 'EUR' } } }), 422, 'invalid')
+			const w = await ocs(A, 'PUT', rec('receipt', R5), { version: 0, data: usd })
+			expect('a receipt in USD without the amount paid', w, 200)
+			const no = await ocs(A, 'POST', `/receipts/${R5}/approve`, {})
+			check('… approval → 422 asking for the amount in CHF', no.status === 422 && no.data?.message === 'Enter the amount in CHF that was paid.', no.data)
+			const b = await ocs(A, 'PUT', rec('receipt', R5), { version: w.data?.version, data: { ...w.data?.data, booked: { gross: 228.4, currency: 'CHF', rate: 0.9062 } } })
+			check('the amount paid is stored without the rate', b.status === 200 && JSON.stringify(b.data?.data?.booked) === '{"gross":228.4,"currency":"CHF"}', b.data)
+			const ok = await ocs(A, 'POST', `/receipts/${R5}/approve`, {})
+			check('… now approved (general: internal)', ok.status === 200 && ok.data?.data?.status === 'internal', ok.data)
+			const same = await ocs(A, 'PUT', rec('receipt', R2), { version: (await get('receipt', R2)).version, data: { ...(await get('receipt', R2)).data, booked: { gross: 1, currency: 'CHF' } } })
+			check('in the team’s own currency booked stays null', same.status !== 200 || same.data?.data?.booked === null, [same.status, same.data?.data?.booked])
+		}
+
 		head('Receipts: cleaning up')
 		await ocs(A, 'PUT', '/team/settings', { documents: { root: docsBefore.root ?? null, chain_mail: docsBefore.chain_mail ?? null }, datev: datevBefore || {} })
 		const pc = await ocs(A, 'GET', rec('person', 'pbuser1'))
