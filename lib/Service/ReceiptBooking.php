@@ -7,41 +7,73 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Service;
 
 /**
- * A receipt in a foreign currency (0.22.0), pure: `booked` is the amount
+ * A receipt in a foreign currency (0.22.0), pure. `booked` is the amount
  * paid in the team's currency (from the card statement); without it a
- * foreign receipt is not approved. Expense reports, exports and the cost
- * consumption count the booked amount as gross with the receipt's rate(s);
- * net and VAT are recomputed from it (half away from zero).
+ * foreign receipt is not approved. `billed` is the amount for a budget in
+ * a third currency (neither the receipt's nor the team's). The one place
+ * that says which amount counts: {@see forExpenses()} for expense reports
+ * and exports, {@see forBudget()} for invoice lines and cost consumption;
+ * net and VAT are recomputed from that gross (half away from zero).
  */
 final class ReceiptBooking {
-	/** The team's currency: `settings.currency`, else the first account of the issuer, else CHF. */
+	/** The team's currency: `settings.currency`, else CHF. */
 	public static function teamCurrency(?\stdClass $settings): string {
-		$accounts = $settings?->issuer?->accounts ?? null;
-		$first = is_array($accounts) && ($accounts[0] ?? null) instanceof \stdClass ? ($accounts[0]->currency ?? null) : null;
-		foreach ([$settings?->currency ?? null, $first] as $c) {
-			if (is_string($c) && preg_match(ProjectRules::CURRENCY_PATTERN, $c) === 1) {
-				return strtoupper($c);
-			}
-		}
-		return 'CHF';
+		$c = $settings?->currency ?? null;
+		return is_string($c) && preg_match(ProjectRules::CURRENCY_PATTERN, $c) === 1 ? strtoupper($c) : 'CHF';
 	}
 
-	/** Content: null or `{ gross, currency }` (a `rate` sent along is dropped); stored as null in the receipt's own currency. */
+	/** `settings.currency`: null or three capital letters. */
+	public static function validateTeamCurrency(mixed $c): void {
+		if ($c !== null && (!is_string($c) || preg_match('/^[A-Z]{3}$/', $c) !== 1)) {
+			throw ApiException::invalid('The team’s “currency” is null or three capital letters, for example CHF.');
+		}
+	}
+
+	/** The budget's currency: its own `currency`, else the team's. */
+	public static function budgetCurrency(?\stdClass $budget, string $team): string {
+		$c = $budget?->currency ?? null;
+		return is_string($c) && preg_match(ProjectRules::CURRENCY_PATTERN, $c) === 1 ? strtoupper($c) : $team;
+	}
+
+	/** The currency of the receipt's budget in its project; null without a budget. */
+	public static function budgetCurrencyOf(?\stdClass $project, \stdClass $d, string $team): ?string {
+		$id = $d->budget ?? null;
+		return $project === null || !is_string($id) ? null : self::budgetCurrency(IssueRules::budgetOf($project, $id), $team);
+	}
+
+	/** Content of `booked` and `billed`: null or `{ gross, currency }` (a `rate` sent along is dropped); `booked` is null in the receipt's own currency. */
 	public static function validate(\stdClass $d): void {
-		$b = $d->booked ?? null;
-		if ($b === null) {
-			$d->booked = null;
-			return;
-		}
-		$c = $b instanceof \stdClass ? ($b->currency ?? null) : null;
-		if (!$b instanceof \stdClass || !ReceiptRules::isNumber($b->gross ?? null) || !is_string($c)
-			|| preg_match(ProjectRules::CURRENCY_PATTERN, $c) !== 1 || array_diff(array_keys(get_object_vars($b)), ['gross', 'currency', 'rate']) !== []) {
-			throw ApiException::invalid('“booked” is null or the amount paid: { “gross”, “currency” }.');
-		}
-		$cur = strtoupper($c);
 		$o = $d->currency ?? null;
 		$own = is_string($o) ? strtoupper($o) : null;
-		$d->booked = $own === $cur ? null : (object)['gross' => round((float)$b->gross, 2), 'currency' => $cur];
+		$booked = self::amount($d->booked ?? null);
+		if ($booked === false) {
+			throw ApiException::invalid('“booked” is null or the amount paid: { “gross”, “currency” }.');
+		}
+		$d->booked = $booked !== null && $booked->currency === $own ? null : $booked;
+		$billed = self::amount($d->billed ?? null);
+		if ($billed === false) {
+			throw ApiException::invalid('“billed” is null or the amount for the budget: { “gross”, “currency” }.');
+		}
+		$d->billed = $billed;
+	}
+
+	/** `{ gross, currency }` rounded and upper-cased; false when not such an object. */
+	private static function amount(mixed $b): \stdClass|null|false {
+		if ($b === null) {
+			return null;
+		}
+		if (!$b instanceof \stdClass) {
+			return false;
+		}
+		$c = $b->currency ?? null;
+		if (!ReceiptRules::isNumber($b->gross ?? null) || !is_string($c)
+			|| preg_match(ProjectRules::CURRENCY_PATTERN, $c) !== 1 || array_diff(array_keys(get_object_vars($b)), ['gross', 'currency', 'rate']) !== []) {
+			return false;
+		}
+		$o = new \stdClass();
+		$o->gross = round((float)$b->gross, 2);
+		$o->currency = strtoupper($c);
+		return $o;
 	}
 
 	/** The booked amount is in the team's currency (checked when the receipt's currency is known). */
@@ -55,42 +87,86 @@ final class ReceiptBooking {
 		}
 	}
 
-	/** Before approval: a receipt in another currency names the amount paid in the team's. */
-	public static function requireApprovable(\stdClass $d, string $team): void {
+	/**
+	 * Does the budget need its own amount? Only a receipt of a budget whose
+	 * currency is neither the receipt's nor the team's. `$budget` null:
+	 * the receipt has no budget.
+	 */
+	public static function needsBilled(\stdClass $d, string $team, ?string $budget): bool {
+		$own = strtoupper((string)($d->currency ?? $team));
+		return $budget !== null && is_string($d->budget ?? null) && $own !== $budget && $team !== $budget;
+	}
+
+	/**
+	 * `billed` against the budget: null when not needed, else in the
+	 * budget's currency; required once the receipt is approved
+	 * (`$approved`, a correction after approval).
+	 */
+	public static function requireBudgetCurrency(\stdClass $d, string $team, ?string $budget, bool $approved): void {
+		$b = $d->billed ?? null;
+		if (!self::needsBilled($d, $team, $budget)) {
+			$d->billed = null;
+			return;
+		}
+		if ($b instanceof \stdClass && ($b->currency ?? null) !== $budget) {
+			throw ApiException::invalid(Message::of('“billed” is the amount for the budget in its currency {currency}.', ['currency' => (string)$budget]));
+		}
+		if ($approved && !$b instanceof \stdClass) {
+			throw ApiException::invalid(Message::of('Enter the amount in {currency} for the budget.', ['currency' => (string)$budget]));
+		}
+	}
+
+	/** Before approval: a receipt in another currency names the amount paid in the team's, and the amount for a budget in a third currency. */
+	public static function requireApprovable(\stdClass $d, string $team, ?string $budget = null): void {
 		$own = strtoupper((string)($d->currency ?? $team));
 		if ($own !== $team && !(($d->booked ?? null) instanceof \stdClass)) {
 			throw ApiException::invalid(Message::of('Enter the amount in {currency} that was paid.', ['currency' => $team]));
 		}
-	}
-
-	public static function isForeign(?\stdClass $d): bool {
-		return ($d?->booked ?? null) instanceof \stdClass;
-	}
-
-	/** The currency it counts in: the booked one, else its own. */
-	public static function currency(\stdClass $d, string $fallback): string {
-		$own = $d->currency ?? null;
-		return self::isForeign($d) ? (string)$d->booked->currency : (is_string($own) ? $own : $fallback);
-	}
-
-	/** Gross as it counts. */
-	public static function gross(\stdClass $d): float {
-		return self::isForeign($d) ? (float)$d->booked->gross : (float)($d->gross ?? 0);
+		self::requireBudgetCurrency($d, $team, $budget, true);
 	}
 
 	/**
-	 * The amounts by rate as they count: the receipt's own, or - booked -
-	 * the booked gross split over its rates by their share of the gross
-	 * (the last takes the rest), each net = gross / (1 + rate), VAT the rest.
+	 * As it counts for expenses (reports, exports): the receipt's own
+	 * amounts, or the booked ones in the team's currency.
 	 *
+	 * @return array{currency:string,gross:float,rates:list<array{rate:float,net:float,vat:float}>,converted:bool}
+	 */
+	public static function forExpenses(\stdClass $d, string $fallback): array {
+		return self::counted($d, $d->booked ?? null, $fallback);
+	}
+
+	/**
+	 * As it counts for the budget (invoice lines, cost consumption): the
+	 * receipt's own amounts in the budget's currency, else the booked ones
+	 * when the budget is in the team's currency, else `billed`.
+	 *
+	 * @return array{currency:string,gross:float,rates:list<array{rate:float,net:float,vat:float}>,converted:bool}
+	 */
+	public static function forBudget(\stdClass $d, string $team, string $budget): array {
+		$own = strtoupper((string)($d->currency ?? $team));
+		$amount = $own === $budget ? null : ($team === $budget ? ($d->booked ?? null) : ($d->billed ?? null));
+		return self::counted($d, $amount, $team);
+	}
+
+	/** @return array{currency:string,gross:float,rates:list<array{rate:float,net:float,vat:float}>,converted:bool} */
+	private static function counted(\stdClass $d, mixed $amount, string $fallback): array {
+		$own = ReceiptRecognition::rates($d);
+		if (!$amount instanceof \stdClass) {
+			$c = $d->currency ?? null;
+			return ['currency' => is_string($c) ? $c : $fallback, 'gross' => (float)($d->gross ?? 0), 'rates' => $own, 'converted' => false];
+		}
+		return ['currency' => (string)$amount->currency, 'gross' => (float)$amount->gross, 'rates' => self::split($own, (float)$amount->gross), 'converted' => true];
+	}
+
+	/**
+	 * A gross in another currency over the receipt's rates by their share
+	 * of its gross (the last takes the rest), each net = gross / (1 + rate),
+	 * VAT the rest.
+	 *
+	 * @param list<array{rate:float,net:float,vat:float}> $own
 	 * @return list<array{rate:float,net:float,vat:float}>
 	 */
-	public static function rates(\stdClass $d): array {
-		$own = ReceiptRecognition::rates($d);
-		if (!self::isForeign($d)) {
-			return $own;
-		}
-		$total = (float)$d->booked->gross;
+	private static function split(array $own, float $total): array {
 		$base = array_sum(array_map(static fn (array $l): float => $l['net'] + $l['vat'], $own));
 		$out = [];
 		$left = $total;

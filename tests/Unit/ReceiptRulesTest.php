@@ -176,7 +176,7 @@ class ReceiptRulesTest extends TestCase {
 		$net->net = 1.0;
 		$this->assertStringStartsWith('403', self::outcome(fn () => ReceiptRules::requireWrite(false, 'alice', [], $ok, $note)));
 		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireWrite(false, 'lea', $led, $ok, $note)));
-		$this->assertSame('409 An approved receipt changes only in project, cost kind, budget, cost, invoice effect and note; “net” stays.', self::outcome(fn () => ReceiptRules::requireWrite(true, 'admin', [], $ok, $net)));
+		$this->assertSame('409 An approved receipt changes only in project, cost kind, budget, cost, amount for the budget, invoice effect and note; “net” stays.', self::outcome(fn () => ReceiptRules::requireWrite(true, 'admin', [], $ok, $net)));
 		$this->assertSame('409 An approved receipt is not deleted.', self::outcome(fn () => ReceiptRules::requireWrite(true, 'admin', [], $ok, null)));
 		$billed = self::receipt(['created_by' => 'alice', 'status' => 'billed']);
 		$cost = clone $billed;

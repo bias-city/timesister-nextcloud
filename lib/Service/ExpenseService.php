@@ -132,13 +132,14 @@ final class ExpenseService {
 			}
 			$rate = $r->vat_rate ?? null;
 			// In another currency: the amount paid, the original beside the text.
-			$eff = ReceiptBooking::rates($r);
-			$own = ReceiptBooking::isForeign($r) ? sprintf(' (%s %s)', (string)$r->currency, number_format((float)($r->gross ?? 0), 2, '.', '')) : '';
+			$e = ReceiptBooking::forExpenses($r, 'CHF');
+			$eff = $e['rates'];
+			$own = $e['converted'] ? sprintf(' (%s %s)', (string)$r->currency, number_format((float)($r->gross ?? 0), 2, '.', '')) : '';
 			$rows[] = [
 				'date' => (string)($r->date ?? ''), 'supplier' => (string)($r->supplier ?? ''), 'text' => (string)($r->text ?? '') . $own,
 				'project' => $p === null ? '' : $projects[$p], 'net' => array_sum(array_column($eff, 'net')), 'vat_rate' => is_int($rate) || is_float($rate) ? (float)$rate : null,
 				'vat_rates' => ReceiptRecognition::hasLines($r) ? array_map(static fn (array $l): float => $l['rate'], ReceiptRecognition::rates($r)) : [],
-				'vat' => array_sum(array_column($eff, 'vat')), 'gross' => ReceiptBooking::gross($r), 'without' => ExpenseReportRules::withoutReceipt($r),
+				'vat' => array_sum(array_column($eff, 'vat')), 'gross' => $e['gross'], 'without' => ExpenseReportRules::withoutReceipt($r),
 			];
 		}
 		$sums = ExpenseReportRules::sums(array_values($receipts), 'CHF');

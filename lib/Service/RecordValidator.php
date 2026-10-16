@@ -78,6 +78,10 @@ final class RecordValidator {
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, IssuerRules::FIELD)) {
 			IssuerRules::validate($data->{IssuerRules::FIELD});
 		}
+		// The team's currency (0.22.0): null or three capital letters.
+		if ($kind === 'setting' && $key === 'settings' && property_exists($data, 'currency')) {
+			ReceiptBooking::validateTeamCurrency($data->currency);
+		}
 		// 0.21.0: the module switches (costs among them) are booleans.
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, ModuleRules::FIELD)) {
 			ModuleRules::validate($data->{ModuleRules::FIELD});

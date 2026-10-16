@@ -34,9 +34,9 @@ final class ReceiptRules {
 	/** Owned by the server: ignored on write, the stored value is kept. */
 	public const SERVER = ['status', 'file', 'invoice', 'report', 'created_by', 'created_on', 'approved_by', 'approved_on', 'reject_reason'];
 	/** What a Lead or Team Admin may still change after approval; after billing only the note. */
-	public const CORRECTABLE = ['project', 'cost_kind', 'budget', 'cost', 'invoice_effect', 'note'];
+	public const CORRECTABLE = ['project', 'cost_kind', 'budget', 'cost', 'billed', 'invoice_effect', 'note'];
 	/** Set only by Team Admins and the project's Leads; a member's write keeps the stored values (member triage). */
-	public const ASSIGNED = ['budget', 'cost', 'invoice_effect'];
+	public const ASSIGNED = ['budget', 'cost', 'billed', 'invoice_effect'];
 	public const SUPPLIER_MAX = 120;
 	public const TEXT_MAX = 300;
 	public const NOTE_MAX = 300;
@@ -266,6 +266,7 @@ final class ReceiptRules {
 		$keep = $same && ($before->cost_kind ?? null) === ($after->cost_kind ?? null);
 		$after->budget = $keep ? ($before->budget ?? null) : null;
 		$after->cost = $keep ? ($before->cost ?? null) : null;
+		$after->billed = $keep ? ($before->billed ?? null) : null;
 		$effect = $same ? ($before->invoice_effect ?? null) : null;
 		$after->invoice_effect = in_array($effect, self::EFFECTS, true) && ($project !== null || $effect === self::NONE) ? $effect : self::defaultEffect($after);
 	}
@@ -357,7 +358,7 @@ final class ReceiptRules {
 				if (($before->status ?? null) === self::BILLED) {
 					throw ApiException::conflict(Message::of('A billed receipt changes only in “note”; “{field}” stays.', ['field' => $f]));
 				}
-				throw ApiException::conflict(Message::of('An approved receipt changes only in project, cost kind, budget, cost, invoice effect and note; “{field}” stays.', ['field' => $f]));
+				throw ApiException::conflict(Message::of('An approved receipt changes only in project, cost kind, budget, cost, amount for the budget, invoice effect and note; “{field}” stays.', ['field' => $f]));
 			}
 			if (($after->project ?? null) !== null && (!is_string($after->budget ?? null) || !is_int($after->cost ?? null))) {
 				throw ApiException::invalid('An approved receipt of a project keeps a budget and a cost position.');
