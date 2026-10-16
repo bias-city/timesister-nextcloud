@@ -196,6 +196,25 @@ final class IssueRules {
 	}
 
 	/** The project's customer key (`customer`, older records `kunde`). */
+	/**
+	 * The invoice's customer, as the Mac app finds it: the customer of the
+	 * accepted quote this budget came from (same project), else the
+	 * project's customer.
+	 *
+	 * @param list<\stdClass> $quotes data of the team's live quote records
+	 */
+	public static function customerKeyFor(\stdClass $project, string $projectKey, string $budgetId, array $quotes): ?string {
+		foreach ($quotes as $q) {
+			$c = $q->customer ?? null;
+			if (($q->status ?? null) === 'accepted' && ($q->budget_id ?? null) === $budgetId
+				&& is_string($q->project ?? null) && strcasecmp((string)$q->project, $projectKey) === 0
+				&& is_string($c) && trim($c) !== '') {
+				return $c;
+			}
+		}
+		return self::customerKeyOf($project);
+	}
+
 	public static function customerKeyOf(\stdClass $project): ?string {
 		foreach ([$project->customer ?? null, $project->kunde ?? null] as $c) {
 			if (is_string($c) && $c !== '') {
