@@ -97,13 +97,14 @@ final class ExpenseReportRules {
 		$currency = null;
 		$lines = [];
 		foreach ($receipts as $r) {
-			$c = ReceiptBooking::currency($r, $fallbackCurrency);
+			$e = ReceiptBooking::forExpenses($r, $fallbackCurrency);
+			$c = $e['currency'];
 			if ($currency !== null && $c !== $currency) {
 				throw ApiException::invalid('All receipts of an expense report are in one currency.');
 			}
 			$currency = $c;
 			// A receipt with several rates counts once per rate.
-			foreach (ReceiptBooking::rates($r) as $l) {
+			foreach ($e['rates'] as $l) {
 				$lines[] = ['kind' => 'costs', 'amount' => $l['net'], 'vat' => $l['rate']];
 			}
 		}

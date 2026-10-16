@@ -3885,8 +3885,7 @@ rate (`VatLines`); its row in the PDF shows the rates joined
 (`2.6 % / 8.1 %`). The CSV export leaves `vat_rate` empty for it.
 
 **Another currency (`booked`).** A receipt whose `currency` differs from
-the team's currency (`settings.currency`, else the currency of the
-issuer's first account, else CHF) carries the amount actually paid in the
+the team's currency (`settings.currency`, else CHF) carries the amount actually paid in the
 team's currency: `booked: { gross, currency }` – e.g. a USD invoice paid
 by card in CHF, `gross` from the card statement. A `rate` sent along is
 not stored. `booked` in the receipt's own currency is stored as `null`;
@@ -3914,3 +3913,73 @@ clears the mark, the receipt's amounts by rate) and `ReceiptBooking`
 from `validate`, `requireWrite` and `changed`, `ReceiptLineRules` for the
 lines per rate, `ExpenseReportRules::sums` and `ExpenseService` for the
 report.
+
+## Receipts against a budget in another currency, 0.22.0 (2026-10-16)
+
+Which amount of a receipt counts depends on what it counts for. Version
+stays 0.22.0 (unpublished); no schema change, the new field lives in the
+record.
+
+T is the team's currency, R the receipt's (`currency`), B the budget's
+(`budgets[].currency` of the receipt's project; a budget without one uses
+T). The invoice of a budget is in B.
+
+**Team currency.** `settings.currency` is `null` or three capital letters
+(422 “The team’s “currency” is null or three capital letters, for example
+CHF.”); T is `settings.currency`, else CHF. The fallback to the currency
+of the issuer's first account is gone (development, no transition). The
+Mac app sets it under Accounting settings › Team currency, locally as in
+a team.
+
+**For expenses** (expense reports with sums and rows, the export of
+expenses as CSV and DATEV) nothing changes: R = T the receipt's own
+amounts, else `booked` (in T).
+
+**For the budget** (the invoice line from a receipt, the consumption of
+the cost position and its cap, the cost burndown):
+
+| Case | Amount |
+|---|---|
+| R = B | the receipt's own amounts (gross, net, VAT, `vat_lines`) |
+| R ≠ B, T = B | `booked`, as before |
+| R ≠ B, T ≠ B (also R = T ≠ B) | `billed` |
+
+**New field `billed`:** `null` or `{ gross, currency }`, the amount for
+the budget in B (a `rate` sent along is not stored; not an object of a
+number and a currency: 422 ““billed” is null or the amount for the budget:
+{ “gross”, “currency” }.”). Net and VAT follow from it like from `booked`:
+gross over the receipt's rate(s), split over its VAT lines by their share
+of the gross (the last line takes the rest), net = gross / (1 + rate)
+rounded half away from zero, VAT the rest.
+
+- Needed only for a receipt with a budget when R ≠ B and T ≠ B; otherwise
+  every write stores it as `null`.
+- In another currency than B: 422 ““billed” is the amount for the budget
+  in its currency EUR.”
+- `POST /receipts/{key}/approve` without it: 422 “Enter the amount in EUR
+  for the budget.” (after the check of `booked`).
+- A write to an approved receipt (a Lead or Team Admin moving it to
+  another budget, or a project whose budget changes its currency) is
+  checked the same way: an approved receipt that needs it keeps it (422
+  as at approval).
+- After approval `billed` is correctable by Team Admins and the project's
+  Leads until the receipt is billed (it joins `project`, `cost_kind`,
+  `budget`, `cost`, `invoice_effect`, `note`; the 409 names it “amount for
+  the budget”). `booked` stays fixed after approval as before.
+- Member triage: like `budget` and `cost` it is the Lead's – a member's
+  write keeps the stored value while project and cost kind stay, else
+  `null`.
+
+**As built.** `ReceiptBooking` is the one place that decides:
+`forExpenses()` and `forBudget(team, budget)` return currency, gross,
+amounts by rate and whether another amount than the receipt's own counts;
+expense reports, the expense export and the expense report PDF call only
+`forExpenses()`. `teamCurrency()`, `budgetCurrency()`/`budgetCurrencyOf()`,
+`needsBilled()`, `requireBudgetCurrency()` (write and correction, from
+`CostWrites`) and `requireApprovable()` (from `ReceiptService::approve`).
+The server itself computes no budget amounts (invoice lines are the
+client's); the Mac app counts with the same rule (`Beleg::fuer_spesen`,
+`Beleg::fuer_budget` with `Waehrungen`): invoice lines from receipts,
+cost consumption and the cost burndown in B; its receipt sheet shows a
+line «For the budget in EUR» when needed, and approval asks for the
+amount when it is missing.

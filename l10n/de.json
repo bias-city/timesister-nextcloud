@@ -656,7 +656,7 @@
 		"An approved receipt is not deleted.": "Ein freigegebener Beleg wird nicht gelöscht.",
 		"After approval only Team Admins and the project’s Leads change a receipt.": "Nach der Freigabe ändern nur Team Admins und die Leads des Projekts einen Beleg.",
 		"A billed receipt changes only in “note”; “{field}” stays.": "Ein verrechneter Beleg ändert sich nur in „note“; „{field}“ bleibt.",
-		"An approved receipt changes only in project, cost kind, budget, cost, invoice effect and note; “{field}” stays.": "Ein freigegebener Beleg ändert sich nur in Projekt, Kostenart, Budget, Kostenposition, Wirkung auf die Rechnung und Notiz; „{field}“ bleibt.",
+		"An approved receipt changes only in project, cost kind, budget, cost, amount for the budget, invoice effect and note; “{field}” stays.": "Ein freigegebener Beleg ändert sich nur in Projekt, Kostenart, Budget, Kostenposition, Betrag für das Budget, Wirkung auf die Rechnung und Notiz; „{field}“ bleibt.",
 		"A receipt without a project has no “cost_kind”.": "Ein Beleg ohne Projekt hat keine „cost_kind“.",
 		"“budget” and “cost” are both null or name one of the project’s budgets and a cost position of that budget.": "„budget“ und „cost“ sind beide leer oder nennen ein Budget des Projekts und eine Kostenposition dieses Budgets.",
 		"The cost position {no} is not of the receipt’s kind “{kind}”.": "Die Kostenposition {no} ist nicht von der Art des Belegs („{kind}“).",
@@ -688,7 +688,11 @@
 		"“vat_lines” must be a list of at most {n} lines with “rate” (0 to 100), “net” and “vat”.": "„vat_lines“ muss eine Liste von höchstens {n} Zeilen mit „rate“ (0 bis 100), „net“ und „vat“ sein.",
 		"“booked” is null or the amount paid: { “gross”, “currency” }.": "„booked“ ist null oder der bezahlte Betrag: { „gross“, „currency“ }.",
 		"“booked” is the amount paid in the team’s currency {currency}.": "„booked“ ist der bezahlte Betrag in der Teamwährung {currency}.",
-		"Enter the amount in {currency} that was paid.": "Gib den Betrag in {currency} ein, der bezahlt wurde."
+		"Enter the amount in {currency} that was paid.": "Gib den Betrag in {currency} ein, der bezahlt wurde.",
+		"“billed” is null or the amount for the budget: { “gross”, “currency” }.": "„billed“ ist null oder der Betrag für das Budget: { „gross“, „currency“ }.",
+		"“billed” is the amount for the budget in its currency {currency}.": "„billed“ ist der Betrag für das Budget in dessen Währung {currency}.",
+		"Enter the amount in {currency} for the budget.": "Gib den Betrag in {currency} für das Budget ein.",
+		"The team’s “currency” is null or three capital letters, for example CHF.": "Die „currency“ des Teams ist null oder drei Grossbuchstaben, zum Beispiel CHF."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

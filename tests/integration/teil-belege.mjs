@@ -101,6 +101,8 @@ export async function belege() {
 	const R3 = `rc-${RUN}-3`
 	const R4 = `rc-${RUN}-4`
 	const R5 = `rc-${RUN}-5`
+	const R6 = `rc-${RUN}-6`
+	const R7 = `rc-${RUN}-7`
 	const RR = `rc-${RUN}-r1`
 	const RULE = `er-${RUN}`
 	const SB = `sb-${RUN}`
@@ -108,7 +110,7 @@ export async function belege() {
 	const K2 = `inv-${RUN}b2`
 	const K3 = `inv-${RUN}b3`
 	const Q = `q-${sha256(RUN).slice(0, 8)}`
-	const records = [[ 'receipt', R1 ], ['receipt', R2], ['receipt', R3], ['receipt', R4], ['receipt', R5], ['receipt', RR], ['receipt', `rc-${RUN}-r2`], ['expense_rule', RULE], ['expense_report', SB], ['expense_report', `${SB}x`], ['quote', Q]]
+	const records = [[ 'receipt', R1 ], ['receipt', R2], ['receipt', R3], ['receipt', R4], ['receipt', R5], ['receipt', R6], ['receipt', R7], ['receipt', RR], ['receipt', `rc-${RUN}-r2`], ['expense_rule', RULE], ['expense_report', SB], ['expense_report', `${SB}x`], ['quote', Q]]
 	const invoices = [K1, K2, K3]
 	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'pb'")
 	const settings = await ocs(A, 'GET', '/records/setting/settings')
@@ -493,6 +495,34 @@ export async function belege() {
 			check('… now approved (general: internal)', ok.status === 200 && ok.data?.data?.status === 'internal', ok.data)
 			const same = await ocs(A, 'PUT', rec('receipt', R2), { version: (await get('receipt', R2)).version, data: { ...(await get('receipt', R2)).data, booked: { gross: 1, currency: 'CHF' } } })
 			check('in the team’s own currency booked stays null', same.status !== 200 || same.data?.data?.booked === null, [same.status, same.data?.data?.booked])
+		}
+
+		head('Receipts against a budget in another currency')
+		{
+			// Team CHF, budget b2 in EUR: a EUR receipt counts with its original, a USD one needs the amount in EUR.
+			const pr = await get('project', PB)
+			const budgets = [...(pr.data.budgets || []).filter((b) => b.id !== 'b2'), { id: 'b2', name: 'Phase EUR', currency: 'EUR', costs: [{ no: 1, name: 'Spesen', kind: 'expense', rule: 'receipts', cap: 1500, mode: 'rebill' }] }]
+			expect('a second budget in EUR', await ocs(A, 'PUT', rec('project', PB), { version: pr.version, data: { ...pr.data, budgets } }), 200)
+			expect('settings.currency in small letters', await ocs(A, 'PUT', '/records/setting/settings', { version: (await get('setting', 'settings')).version, data: { ...(await get('setting', 'settings')).data, currency: 'chf' } }), 422, 'invalid')
+			const trust = (over) => receipt({ kind: 'trust', supplier: 'Hotel', text: 'Night', date: `${Y}-03-14`, net: 100, vat_rate: 7, vat: 7, gross: 107, budget: 'b2', cost: 1, paid_by: 'company', person: null, reimburse: false, ...over })
+			const eur = await ocs(A, 'PUT', rec('receipt', R6), { version: 0, data: trust({ currency: 'EUR', booked: { gross: 101.5, currency: 'CHF' }, billed: { gross: 1, currency: 'EUR' } }) })
+			check('EUR receipt in the EUR budget: billed not needed, stored as null', eur.status === 200 && eur.data?.data?.billed === null && eur.data?.data?.booked?.gross === 101.5, eur.data)
+			const a6 = await ocs(A, 'POST', `/receipts/${R6}/approve`, {})
+			check('… approved without a second amount', a6.status === 200 && a6.data?.data?.status === 'approved', a6.data)
+			const usd = trust({ currency: 'USD', net: 200, vat: 14, gross: 214, booked: { gross: 172.2, currency: 'CHF' } })
+			expect('billed in another currency than the budget’s', await ocs(A, 'PUT', rec('receipt', R7), { version: 0, data: { ...usd, billed: { gross: 183, currency: 'CHF' } } }), 422, 'invalid')
+			const w = await ocs(A, 'PUT', rec('receipt', R7), { version: 0, data: usd })
+			expect('USD receipt in the EUR budget without the amount in EUR', w, 200)
+			const no = await ocs(A, 'POST', `/receipts/${R7}/approve`, {})
+			check('… approval → 422 asking for the amount in EUR', no.status === 422 && no.data?.message === 'Enter the amount in EUR for the budget.', no.data)
+			const b = await ocs(A, 'PUT', rec('receipt', R7), { version: w.data?.version, data: { ...w.data?.data, billed: { gross: 183.4, currency: 'EUR', rate: 0.857 } } })
+			check('… billed stored without the rate', b.status === 200 && JSON.stringify(b.data?.data?.billed) === '{"gross":183.4,"currency":"EUR"}', b.data)
+			const ok = await ocs(A, 'POST', `/receipts/${R7}/approve`, {})
+			check('… now approved', ok.status === 200 && ok.data?.data?.status === 'approved', ok.data)
+			const drop = await ocs(A, 'PUT', rec('receipt', R7), { version: ok.data?.version, data: { ...ok.data?.data, billed: null } })
+			check('after approval it stays required → 422', drop.status === 422 && drop.data?.message === 'Enter the amount in EUR for the budget.', drop.data)
+			const moved = await ocs(A, 'PUT', rec('receipt', R7), { version: ok.data?.version, data: { ...ok.data?.data, budget: 'b1' } })
+			check('moved to the CHF budget: billed becomes null', moved.status === 200 && moved.data?.data?.billed === null, moved.data)
 		}
 
 		head('Receipts: cleaning up')

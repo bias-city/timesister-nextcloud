@@ -101,7 +101,10 @@ final class CostWrites {
 			$project = $this->live($tid, 'project', $projectKey) ?? throw ApiException::invalid('The receipt’s project does not exist.');
 		}
 		$after->currency ??= $this->currency($tid, $project, $after);
-		ReceiptBooking::requireTeamCurrency($after, ReceiptBooking::teamCurrency($this->live($tid, 'setting', 'settings')));
+		$team = ReceiptBooking::teamCurrency($this->live($tid, 'setting', 'settings'));
+		ReceiptBooking::requireTeamCurrency($after, $team);
+		$budgetCurrency = ReceiptBooking::budgetCurrencyOf($project, $after, $team);
+		ReceiptBooking::requireBudgetCurrency($after, $team, $budgetCurrency, false);
 		$this->requireMember($tid, $after->person ?? null);
 		$ruleApproved = false;
 		if (($after->kind ?? null) === ReceiptRules::RECURRING
@@ -113,6 +116,8 @@ final class CostWrites {
 		if ($project !== null) {
 			ReceiptRules::requireCost($after, $project);
 		}
+		// Approved (also a correction afterwards): a budget in a third currency needs its amount.
+		ReceiptBooking::requireBudgetCurrency($after, $team, $budgetCurrency, ReceiptRules::isApproved($after));
 		if (($after->status ?? null) === ReceiptRules::OPEN) {
 			// Until approval the file follows every change of its name.
 			$moved = $this->places->follow($tid, $after);

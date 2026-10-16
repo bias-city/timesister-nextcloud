@@ -57,6 +57,18 @@ reports and the document tree, 0.22.0» with «As built». No schema change.
   amount paid in the team's currency; required for approving a receipt in
   another currency (422); expense reports and the export of expenses count
   it.
+- **Receipts against a budget in another currency** (`API.md` «Receipts
+  against a budget in another currency, 0.22.0»): for the budget a receipt
+  counts with its own amounts when its currency is the budget's, with
+  `booked` when the budget is in the team's currency, else with the new
+  field `billed: { gross, currency }` in the budget's currency – needed
+  only then (else stored as null), required for approval (422 “Enter the
+  amount in EUR for the budget.”) and correctable by Leads and Team Admins
+  until billed. Expenses stay with `booked`. One place decides:
+  `ReceiptBooking::forExpenses()` / `forBudget()`.
+- **Team currency:** `settings.currency` is null or three capital letters
+  (422); the team's currency no longer falls back to the issuer's first
+  account, only to CHF.
 
 ## 0.21.0 – 2026-10-16 (beta)
 
