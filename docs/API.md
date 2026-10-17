@@ -4067,8 +4067,8 @@ and their lines live in the record, the ledger in `ts_inv_ledger`.
   writer, `approved_on` = today (UTC), `reject_reason: null`.
 - Otherwise the receipt stays `open` and the write's answer (single PUT
   and each record of a batch) carries `missing`, beside `data`: a list of
-  `budget` and `cost` (a project without assignment), `file` (kind
-  `receipt` without file), `review` (marked «please check»), `booked`
+  `gross` and `supplier` (below), `budget` and `cost` (a project
+  without assignment), `file` (kind `receipt` without file), `review` (marked «please check»), `booked`
   (another currency than the team's without the amount paid), `billed`
   (a budget in a third currency without its amount). `missing` is absent
   when the write approved the receipt or does not approve (a member's
@@ -4084,7 +4084,15 @@ and their lines live in the record, the ledger in `ts_inv_ledger`.
   `missing`: `{ path, sha256, size, mime, version, status, missing? }`.
 - The file follows its name while open, then is placed once more at the
   approval in the same write; after that it never moves (as before).
-- `POST /receipts/{key}/approve` and `/reject` are unchanged.
+- **Addition: amount and supplier** (2026-10-17). No receipt is approved
+  – by a write, the file upload or `approve` – while its amount is not
+  above 0 (`gross`; with `vat_lines` their sum) or its `supplier` is
+  empty: it stays `open` and `missing` begins with `gross` and/or
+  `supplier`; `approve` answers 422 “Before approval the receipt needs an
+  amount above 0 and a supplier.” (or only the one that is missing).
+  Recurring receipts are exempt (amount from the rule, supplier its text).
+- `POST /receipts/{key}/approve` checks amount and supplier first (above);
+  otherwise it and `/reject` are unchanged.
 
 **Expense reports (record `expense_report`, schema 2).**
 - Record fields: `schema` (2, set by the server), `person`, `ready_on`
@@ -4185,7 +4193,7 @@ the line, empty for none or several.
 **Capability** `expense_fixing: 1`; `expense_reports` is gone.
 
 **Classes.** Pure: `ReceiptRules` (`canApprove`, `needsNoApproval`,
-`missing`, `approveByWrite`), `ExpenseReportRules` (rewritten: list,
+`missing`, `missingContent`, `requireContent`, `approveByWrite`), `ExpenseReportRules` (rewritten: list,
 `pick`, `line`, `sums`, `payload`, rights), `InvoiceNumbering`
 (parametrised by field and counter), `LedgerRules` (four actions).
 Services: `CostWrites` (approval in the write, the open report),

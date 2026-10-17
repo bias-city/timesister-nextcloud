@@ -12,6 +12,10 @@ expense reports, 0.23.0» with «As built». No schema change.
   approves it in the same write – also the file upload; a general receipt
   the company paid becomes `internal` once complete, from anyone. What is
   missing comes back as `missing`. `approve` stays.
+- **Amount and supplier first** (2026-10-17): no receipt is approved – by
+  a write, the file upload or `approve` – without an amount above 0 (with
+  `vat_lines` their sum) and a supplier; `missing` names `gross` and
+  `supplier`, `approve` answers 422. Not for recurring receipts.
 - **Expense reports fixed like invoices** (schema 2): `ready`, `fix`
   (number from `settings.expense_number`, default `SP-{year}-{no:4}`,
   frozen lines and sums, `report` on the receipts, ledger

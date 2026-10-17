@@ -214,6 +214,17 @@ class ReceiptRulesTest extends TestCase {
 		$this->assertSame([[], 'internal', 'ann'], $approve(false, 'ann', [], $open($general)), 'company paid, no project: internal from a member too');
 		$this->assertSame([['file'], 'open', null], $approve(false, 'ann', [], $open($general + ['file' => null])));
 		$this->assertSame([null, 'open', null], $approve(false, 'ann', [], $open($general + ['kind' => 'trust'])), 'a trust receipt still needs a Team Admin');
+		// 2026-10-17: amount and supplier first – not for recurring ones (both from the rule).
+		$this->assertSame([['gross', 'supplier'], 'open', null], $approve(true, 'admin', [], $open(['net' => 0, 'vat' => 0, 'gross' => 0, 'supplier' => ' '])));
+		$this->assertSame([['gross', 'file'], 'open', null], $approve(true, 'admin', [], $open(['net' => 0, 'vat' => 0, 'gross' => 0, 'file' => null])), 'an upload without amount stays open');
+		$this->assertSame([['supplier'], 'open', null], $approve(false, 'ann', [], $open($general + ['supplier' => null])), 'a company’s general one too');
+		$lines = ['vat_rate' => null, 'vat_lines' => [(object)['rate' => 8.1, 'net' => 100.0, 'vat' => 8.1], (object)['rate' => 2.6, 'net' => 10.0, 'vat' => 0.26]]];
+		$this->assertSame(118.36, ReceiptRules::amount(self::receipt($lines)), 'with vat_lines their sum');
+		$this->assertSame([], ReceiptRules::missingContent(self::receipt(['kind' => 'recurring', 'gross' => 0, 'supplier' => null])));
+		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireContent(self::receipt())));
+		$this->assertSame('422 Before approval the receipt needs an amount above 0 and a supplier.', self::outcome(fn () => ReceiptRules::requireContent(self::receipt(['gross' => 0, 'supplier' => '']))));
+		$this->assertSame('422 Before approval the receipt needs an amount above 0.', self::outcome(fn () => ReceiptRules::requireContent(self::receipt(['gross' => -5]))));
+		$this->assertSame('422 Before approval the receipt needs a supplier.', self::outcome(fn () => ReceiptRules::requireContent(self::receipt(['supplier' => null]))));
 		$this->assertTrue(ReceiptRules::canApprove(false, ['d200' => true], self::receipt()));
 		$this->assertFalse(ReceiptRules::canApprove(false, [], self::receipt()));
 		$this->assertTrue(ReceiptRules::needsNoApproval(self::receipt($general)));
