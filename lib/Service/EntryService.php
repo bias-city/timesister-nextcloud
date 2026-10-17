@@ -253,7 +253,8 @@ final class EntryService {
 	/**
 	 * `PUT /team/settings` (Team Admins): `entries_since` (a change marks
 	 * every source for a full read), since 0.18.0 `invoicing`, since
-	 * 0.19.0 `documents` (the folders are checked with the backup owner).
+	 * 0.19.0 `documents` (the folders are checked with the backup owner),
+	 * since 0.25.1 `catalogs`.
 	 *
 	 * @return array<string,mixed> the settings as in GET /team
 	 */
@@ -282,6 +283,10 @@ final class EntryService {
 		}
 		if (array_key_exists(InvoicingModeRules::FIELD, $settings)) {
 			$t->setInvoicingModeJson(InvoicingModeRules::encode($settings[InvoicingModeRules::FIELD]));
+			$this->tenants->update($t);
+		}
+		if (array_key_exists(CatalogRules::FIELD, $settings)) {
+			$t->setCatalogsJson(CatalogRules::encode($settings[CatalogRules::FIELD]));
 			$this->tenants->update($t);
 		}
 		if (array_key_exists(WebhookRules::FIELD, $settings) && is_array($settings[WebhookRules::FIELD])) {

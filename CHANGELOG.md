@@ -1,5 +1,24 @@
 # Changes
 
+## 0.25.1 – 2026-10-17
+
+Additive, `api: 2` unchanged; capability `templates: 2`; migration
+`Version1019Date20261017180000` (column `ts_tenants.catalogs_json`).
+Contract: `API.md` «Template owner, catalogs and the structured invoice
+plan, 0.25.1». Not published.
+
+- **Template owner `created_by`**: kept by the server in the data of every
+  `template` write (new or on a tombstone: the writer; otherwise the stored
+  `created_by`, for a 0.25.0 record its `modified_by`); a client's value is
+  replaced. A Lead changes and removes the templates they created, also
+  after a Team Admin changed them.
+- **Team setting `catalogs`**: null (the client's default by country) or a
+  list of at most 50 distinct `id@edition`; `[]` means none.
+- **Budget `billing_plan`**: null or at most 200 `{date, share?, amount?,
+  title?}` beside `invoice_dates` (unchanged).
+- **`work_packages[].group`** (trimmed text 1–200, stored trimmed) and
+  **`.role`** (`gesamtleitung`, `fachplanung`, `bauleitung`), also in quotes.
+
 ## 0.25.0 – 2026-10-17
 
 Additive, `api: 2` unchanged; capability `templates: 1`; no migration.

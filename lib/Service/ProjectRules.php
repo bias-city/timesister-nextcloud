@@ -31,6 +31,15 @@ final class ProjectRules {
 	/** 0.25.0: what the budgets are called («Phasen»), from the template the project came from. */
 	public const BUDGET_LABEL = 'budget_label';
 	public const BUDGET_LABEL_MAX = 60;
+	/** 0.25.1: a work package's group (from the template) and its role in the project. */
+	public const WP_GROUP_MAX = 200;
+	public const WP_ROLES = ['gesamtleitung', 'fachplanung', 'bauleitung'];
+	/** 0.25.1: the planned invoices as `{date, share?, amount?, title?}` beside `invoice_dates`. */
+	public const BILLING_PLAN = 'billing_plan';
+	public const BILLING_PLAN_MAX = 200;
+	public const BILLING_PLAN_KEYS = ['date', 'share', 'amount', 'title'];
+	public const BILLING_TITLE_MAX = 200;
+	private const CONTROL = '/[\x00-\x1F\x7F]/';
 
 	/**
 	 * Status, codes, `from_quote`, team, currency and rate – in place:
@@ -202,6 +211,7 @@ final class ProjectRules {
 				throw ApiException::invalid('“invoice_dates” must be a list of at most 200 days (YYYY-MM-DD), each once.');
 			}
 		}
+		self::checkBillingPlan($b->{self::BILLING_PLAN} ?? null);
 		// 0.21.0: the cost positions beside the work packages (module «costs»).
 		CostRules::check($b->{CostRules::FIELD} ?? null);
 		$wps = $b->work_packages ?? null;
@@ -215,6 +225,75 @@ final class ProjectRules {
 			// 0.24.1: a work package added later (addendum), shown and counted as such.
 			if ($wp instanceof \stdClass && ($wp->addendum ?? null) !== null && !is_bool($wp->addendum)) {
 				throw ApiException::invalid('“addendum” must be true, false or null.');
+			}
+			if ($wp instanceof \stdClass) {
+				self::checkGroupAndRole($wp);
+			}
+		}
+	}
+
+	/** 0.25.1: `group` trimmed text of 1–200 characters or null (stored trimmed), `role` one of WP_ROLES or null. */
+	private static function checkGroupAndRole(\stdClass $wp): void {
+		$g = $wp->group ?? null;
+		if ($g !== null) {
+			$t = is_string($g) && mb_check_encoding($g, 'UTF-8') ? trim($g) : '';
+			if ($t === '' || mb_strlen($t) > self::WP_GROUP_MAX || preg_match(self::CONTROL, $t) === 1) {
+				throw ApiException::invalid(Message::of('“group” must be null or text of 1 to {max} characters without control characters.', ['max' => self::WP_GROUP_MAX]));
+			}
+			$wp->group = $t;
+		}
+		$r = $wp->role ?? null;
+		if ($r !== null && !in_array($r, self::WP_ROLES, true)) {
+			throw ApiException::invalid('“role” must be null, “gesamtleitung”, “fachplanung” or “bauleitung”.');
+		}
+	}
+
+	/**
+	 * 0.25.1: null or a list of at most 200 `{date, share?, amount?, title?}`;
+	 * `date` a day, each once; `share` 0–100 or `amount` ≥ 0, not both.
+	 *
+	 * @throws ApiException 422
+	 */
+	public static function checkBillingPlan(mixed $plan): void {
+		if ($plan === null) {
+			return;
+		}
+		if (!is_array($plan) || !array_is_list($plan) || count($plan) > self::BILLING_PLAN_MAX) {
+			throw ApiException::invalid(Message::of('“billing_plan” must be null or a list of at most {max} entries.', ['max' => self::BILLING_PLAN_MAX]));
+		}
+		$days = [];
+		foreach ($plan as $i => $e) {
+			$n = $i + 1;
+			if (!($e instanceof \stdClass)) {
+				throw ApiException::invalid(Message::of('Entry {n} of “billing_plan” must be an object with “date”.', ['n' => $n]));
+			}
+			foreach (array_keys(get_object_vars($e)) as $k) {
+				if (!in_array($k, self::BILLING_PLAN_KEYS, true)) {
+					throw ApiException::invalid(Message::of('Entry {n} of “billing_plan” has an unknown field “{key}”; allowed are date, share, amount and title.', ['n' => $n, 'key' => $k]));
+				}
+			}
+			$date = $e->date ?? null;
+			if (!is_string($date) || !Time::isDay($date)) {
+				throw ApiException::invalid(Message::of('Entry {n} of “billing_plan”: “date” must be a day (YYYY-MM-DD).', ['n' => $n]));
+			}
+			if (isset($days[$date])) {
+				throw ApiException::invalid(Message::of('“billing_plan” has the date {date} twice.', ['date' => $date]));
+			}
+			$days[$date] = true;
+			$share = $e->share ?? null;
+			if ($share !== null && (!self::isRate($share) || $share > 100)) {
+				throw ApiException::invalid(Message::of('Entry {n} of “billing_plan”: “share” must be null or a number from 0 to 100.', ['n' => $n]));
+			}
+			$amount = $e->amount ?? null;
+			if ($amount !== null && !self::isRate($amount)) {
+				throw ApiException::invalid(Message::of('Entry {n} of “billing_plan”: “amount” must be null or a number ≥ 0.', ['n' => $n]));
+			}
+			if ($share !== null && $amount !== null) {
+				throw ApiException::invalid(Message::of('Entry {n} of “billing_plan”: set “share” or “amount”, not both.', ['n' => $n]));
+			}
+			$title = $e->title ?? null;
+			if ($title !== null && (!is_string($title) || !mb_check_encoding($title, 'UTF-8') || mb_strlen($title) > self::BILLING_TITLE_MAX || preg_match(self::CONTROL, $title) === 1)) {
+				throw ApiException::invalid(Message::of('Entry {n} of “billing_plan”: “title” must be null or text of at most {max} characters without control characters.', ['n' => $n, 'max' => self::BILLING_TITLE_MAX]));
 			}
 		}
 	}

@@ -188,6 +188,70 @@ class ProjectRulesTest extends TestCase {
 		$this->assertSame('', self::validate('{"id":"p","status":"draft","budgets":[7,"x",null,{"work_packages":"none"}]}'));
 	}
 
+	/** 0.25.1: a work package's group (trimmed text 1–200) and role. */
+	public function testWorkPackageGroupAndRole(): void {
+		$wp = static fn (string $f): string => self::validate('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":1,' . $f . '}]}]}');
+		foreach (['"group":"Vorprojekt"', '"group":null', '"group":"' . str_repeat('ä', 200) . '"', '"role":"gesamtleitung"', '"role":"fachplanung"', '"role":"bauleitung"', '"role":null', '"group":"A","role":"bauleitung"'] as $ok) {
+			$this->assertSame('', $wp($ok), $ok);
+		}
+		$group = '422 “group” must be null or text of 1 to 200 characters without control characters.';
+		foreach (['""', '"   "', '"' . str_repeat('x', 201) . '"', '"a\u0007b"', '"a\nb"', '7', 'true', '["A"]', '{}'] as $bad) {
+			$this->assertSame($group, $wp('"group":' . $bad), $bad);
+		}
+		$o = self::obj('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":1,"group":"  Vorprojekt  "}]}]}');
+		ProjectRules::validate($o);
+		$this->assertSame('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":1,"group":"Vorprojekt"}]}]}', Json::encode($o), 'stored trimmed');
+		$this->assertSame($group, self::outcome(static fn () => ProjectRules::checkBudget((object)['work_packages' => [(object)['group' => "\xC3\x28"]]])), 'not UTF-8');
+		$role = '422 “role” must be null, “gesamtleitung”, “fachplanung” or “bauleitung”.';
+		foreach (['""', '"Bauleitung"', '"lead"', '1', 'true', '["bauleitung"]'] as $bad) {
+			$this->assertSame($role, $wp('"role":' . $bad), $bad);
+		}
+		// The same in a quote's budget.
+		$this->assertSame($role, self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","work_packages":[{"role":"x"}]}'))));
+	}
+
+	/** 0.25.1: the structured invoice plan beside `invoice_dates`. */
+	public function testBillingPlan(): void {
+		$bp = static fn (string $v): string => self::validate('{"id":"p","status":"draft","budgets":[{"invoice_dates":["2026-12-31"],"billing_plan":' . $v . '}]}');
+		foreach (['null', '[]', '[{"date":"2026-12-31"}]',
+			'[{"date":"2026-06-30","share":30,"title":"Vorprojekt"},{"date":"2026-12-31","share":70.5},{"date":"2027-03-31","amount":1200.5},{"date":"2027-06-30","amount":0,"share":null,"title":null},{"date":"2027-09-30","share":0},{"date":"2027-12-31","share":100,"title":""}]'] as $ok) {
+			$this->assertSame('', $bp($ok), $ok);
+		}
+		$list = '422 “billing_plan” must be null or a list of at most 200 entries.';
+		$many = json_encode(array_map(static fn (int $i) => ['date' => date('Y-m-d', 1767225600 + $i * 86400)], range(0, 200)));
+		$this->assertSame('', $bp((string)json_encode(array_slice((array)json_decode((string)$many), 0, 200))), '200 entries');
+		foreach (['{}', '"2026-12-31"', '7', '{"0":{"date":"2026-12-31"}}', (string)$many] as $bad) {
+			$this->assertSame($list, $bp($bad), substr($bad, 0, 40));
+		}
+		$cases = [
+			'["2026-12-31"]' => 'Entry 1 of “billing_plan” must be an object with “date”.',
+			'[{"date":"2026-12-31"},null]' => 'Entry 2 of “billing_plan” must be an object with “date”.',
+			'[{"date":"2026-12-31","note":"x"}]' => 'Entry 1 of “billing_plan” has an unknown field “note”; allowed are date, share, amount and title.',
+			'[{"share":10}]' => 'Entry 1 of “billing_plan”: “date” must be a day (YYYY-MM-DD).',
+			'[{"date":"2026-02-30"}]' => 'Entry 1 of “billing_plan”: “date” must be a day (YYYY-MM-DD).',
+			'[{"date":"31.12.2026"}]' => 'Entry 1 of “billing_plan”: “date” must be a day (YYYY-MM-DD).',
+			'[{"date":null}]' => 'Entry 1 of “billing_plan”: “date” must be a day (YYYY-MM-DD).',
+			'[{"date":"2026-12-31"},{"date":"2026-12-31"}]' => '“billing_plan” has the date 2026-12-31 twice.',
+			'[{"date":"2026-12-31","share":-1}]' => 'Entry 1 of “billing_plan”: “share” must be null or a number from 0 to 100.',
+			'[{"date":"2026-12-31","share":100.01}]' => 'Entry 1 of “billing_plan”: “share” must be null or a number from 0 to 100.',
+			'[{"date":"2026-12-31","share":"30"}]' => 'Entry 1 of “billing_plan”: “share” must be null or a number from 0 to 100.',
+			'[{"date":"2026-12-31","amount":-0.5}]' => 'Entry 1 of “billing_plan”: “amount” must be null or a number ≥ 0.',
+			'[{"date":"2026-12-31","amount":"1000"}]' => 'Entry 1 of “billing_plan”: “amount” must be null or a number ≥ 0.',
+			'[{"date":"2026-12-31","amount":true}]' => 'Entry 1 of “billing_plan”: “amount” must be null or a number ≥ 0.',
+			'[{"date":"2026-12-31","share":50,"amount":1000}]' => 'Entry 1 of “billing_plan”: set “share” or “amount”, not both.',
+			'[{"date":"2026-12-31","title":7}]' => 'Entry 1 of “billing_plan”: “title” must be null or text of at most 200 characters without control characters.',
+			'[{"date":"2026-12-31","title":"' . str_repeat('x', 201) . '"}]' => 'Entry 1 of “billing_plan”: “title” must be null or text of at most 200 characters without control characters.',
+			'[{"date":"2026-12-31","title":"a\tb"}]' => 'Entry 1 of “billing_plan”: “title” must be null or text of at most 200 characters without control characters.',
+		];
+		foreach ($cases as $bad => $msg) {
+			$this->assertSame('422 ' . $msg, $bp($bad), $bad);
+		}
+		// The same in a quote's budget; `invoice_dates` unchanged beside it.
+		$this->assertSame('422 Entry 1 of “billing_plan”: set “share” or “amount”, not both.',
+			self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","billing_plan":[{"date":"2026-12-31","share":1,"amount":1}]}'))));
+		$this->assertSame('422 “invoice_dates” must be a list of at most 200 days (YYYY-MM-DD), each once.', $bp('null') === '' ? self::validate('{"id":"p","status":"draft","budgets":[{"invoice_dates":"x","billing_plan":[]}]}') : 'no');
+	}
+
 	/** The record validator runs the rules for projects only. */
 	public function testViaRecordValidator(): void {
 		$v = RecordValidator::validate('project', 'q1', self::obj('{"id":"q1","status":"draft","from_quote":true,"team":["ann",{"user":"ann","role":"qa"},{"user":"bob","role":"support","x":1}],"budgets":[{"currency":"chf","work_packages":[{"no":1,"rate":180}]}]}'));

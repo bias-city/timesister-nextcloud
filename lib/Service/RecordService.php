@@ -459,6 +459,8 @@ final class RecordService {
 				} catch (ApiException $e) {
 					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
 				}
+				// 0.25.1: the owner is the server's field; the stamped data is what gets stored.
+				$op['json'] = self::stampTemplate($cur, $op['json'], $m->uid);
 			}
 			if ($op['kind'] === QuoteRules::KIND || $op['kind'] === InvoiceRules::KIND) {
 				// A Lead's invoice or quote against the stored state, under the team lock.
@@ -526,6 +528,19 @@ final class RecordService {
 		}
 		$top = $this->deliverAgain($m->tenantId, $top, $scope);
 		return ['revision' => $top, 'records' => $out];
+	}
+
+	/** A template's data with `created_by` set ({@see TemplateRules::stamp()}); a deletion stays null. */
+	private static function stampTemplate(?Record $cur, ?string $json, string $uid): ?string {
+		if ($json === null) {
+			return null;
+		}
+		$d = Json::decode($json);
+		if (!($d instanceof \stdClass)) {
+			return $json;
+		}
+		TemplateRules::stamp($cur, $d, $uid);
+		return Json::encode($d);
 	}
 
 	/**

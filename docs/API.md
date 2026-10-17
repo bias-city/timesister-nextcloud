@@ -4577,3 +4577,90 @@ project report and the project sheet with it, default «Budgets».
   under the team lock), `ProjectRules::BUDGET_LABEL`; capability
   `templates: 1`; unit tests `TemplateRulesTest`, `ProjectRulesTest`;
   integration part `teil-vorlagen.mjs` (templates next to the invoice template).
+
+## Template owner, catalogs and the structured invoice plan, 0.25.1 (2026-10-17)
+
+Additive, `api: 2` stays; capability **`templates: 2`**; migration
+`Version1019Date20261017180000` adds `ts_tenants.catalogs_json` (TEXT,
+null). Not published.
+
+### Template owner `created_by`
+
+`created_by` in the data of a `template` record is the server's field. On
+every write of a template (single `PUT`, batch, restore of a version) the
+server sets it before storing, whatever the client sent:
+
+| Stored record | `data.created_by` written |
+|---|---|
+| none, or a tombstone | the caller's user id |
+| alive, with `created_by` (non-empty text) | that value |
+| alive, of 0.25.0 without it | the stored `modified_by` |
+
+A deletion (`data: null`) stays a tombstone. The answer and every read show
+the stamped data.
+
+**Rights** (replaces «those they saved last» of 0.25.0): Team Admins write
+every template. A Lead writes new templates (also on a tombstone) and
+changes or removes a live one only when its owner – the stored
+`created_by`, else `modified_by` – is the Lead; also after a Team Admin
+changed it. Otherwise `403` “A Lead changes and removes only their own
+templates.” (in a batch prefixed “Write {n}: ”). `created_by` is no person
+field for the template check; the team ZIP maps it like any user id.
+
+### Team setting `catalogs`
+
+The template catalogs the team uses, in `GET /team` and `GET /me`
+(`settings.catalogs`) and set by Team Admins with `PUT /team/settings`
+(`{"catalogs": […]}`) or in the admin's team settings.
+
+| Value | Meaning |
+|---|---|
+| `null` (default) | the client chooses by country |
+| `[]` | no catalog active |
+| `["sia-102@2020", …]` | these, at most 50, each once, `^[a-z0-9][a-z0-9._-]{0,99}@[A-Za-z0-9._-]{1,100}$` |
+
+Errors, all `422`:
+- not null and not a list, or more than 50: ““catalogs” must be null or a list of at most 50 catalogs.”
+- an entry not matching: “Each catalog in “catalogs” is “id@edition”: the id in lowercase letters, digits, dots, dashes and underscores, the edition in letters, digits, dots, dashes and underscores, each at most 100.”
+- twice: ““catalogs” names “sia-102@2020” twice.”
+
+### Budget: `billing_plan`
+
+Beside `invoice_dates` (unchanged, still checked as before) a budget takes
+`billing_plan`: `null` or a list of at most 200 entries
+`{ "date": "YYYY-MM-DD", "share": 0–100|null, "amount": ≥ 0|null, "title": text ≤ 200|null }`.
+`date` is required and each date at most once; `share` (percent of the
+budget) and `amount` (in the budget's currency, finite) are not both set;
+`title` without control characters. Also in a quote's budget. Errors, all
+`422` ({n} counts from 1):
+
+- ““billing_plan” must be null or a list of at most 200 entries.”
+- “Entry {n} of “billing_plan” must be an object with “date”.”
+- “Entry {n} of “billing_plan” has an unknown field “{key}”; allowed are date, share, amount and title.”
+- “Entry {n} of “billing_plan”: “date” must be a day (YYYY-MM-DD).”
+- ““billing_plan” has the date {date} twice.”
+- “Entry {n} of “billing_plan”: “share” must be null or a number from 0 to 100.”
+- “Entry {n} of “billing_plan”: “amount” must be null or a number ≥ 0.”
+- “Entry {n} of “billing_plan”: set “share” or “amount”, not both.”
+- “Entry {n} of “billing_plan”: “title” must be null or text of at most 200 characters without control characters.”
+
+### Budget: `work_packages[].group` and `.role`
+
+| Field | Content |
+|---|---|
+| `work_packages[].group` | `null` or text, trimmed 1 to 200 characters, valid UTF-8, no control characters; stored trimmed. Otherwise `422` ““group” must be null or text of 1 to 200 characters without control characters.” |
+| `work_packages[].role` | `null`, `"gesamtleitung"`, `"fachplanung"` or `"bauleitung"`. Otherwise `422` ““role” must be null, “gesamtleitung”, “fachplanung” or “bauleitung”.” |
+
+Also in a quote's budget (`ProjectRules::checkBudget`).
+
+### As built, 0.25.1 (2026-10-17)
+
+- `TemplateRules::CREATED_BY`, `owner`, `stamp`, `requireLeadWrite` on the
+  owner; `RecordService::applyWithin` stamps the template's data under the
+  team lock after the rights check.
+- `CatalogRules` (`validate`, `encode`, `decode`), `Tenant::catalogs`,
+  `TeamRules::settings`, `TeamAdminService::applySettings`,
+  `EntryService::setSince`, `TenantService::settingsOf`.
+- `ProjectRules::checkBillingPlan`, `WP_ROLES`, `WP_GROUP_MAX`.
+- Unit tests `TemplateRulesTest`, `CatalogRulesTest`, `ProjectRulesTest`;
+  integration parts `teil-vorlagen.mjs`, `teil-projekte.mjs`.

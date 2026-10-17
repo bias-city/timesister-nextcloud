@@ -7,6 +7,8 @@
 // The team's own project templates (0.25.0): the record kind `template`
 // (format, key, size, no person fields; Leads and Team Admins read, a Lead
 // writes their own), the project's `budget_label` and the team ZIP.
+// 0.25.1: the owner `created_by` kept by the server (a Lead keeps their own
+// after a Team Admin's change) and the team setting `catalogs` (put back).
 import { ADMIN, API, NC, ocs, sql } from './lib.mjs'
 import { A, AA, L, RUN, U1, V, check, expect, head, isObj, ISO, keysOf, sha256 } from './harness.mjs'
 
@@ -175,6 +177,43 @@ function projektvorlage(id, edition, over = {}) {
 		billing_plan: [{ offset_days: 60, budget: '1' }], ...over }
 }
 
+/** 0.25.1: the team setting `catalogs` – set, read, refused; left as found. */
+async function kataloge() {
+	const before = (await ocs(A, 'GET', '/team')).data?.settings
+	const put = (who, catalogs) => ocs(who, 'PUT', '/team/settings', { catalogs })
+	try {
+		head('Template catalogs: the team setting catalogs (0.25.1)')
+		check('/team.settings.catalogs is there (null or a list)', before && 'catalogs' in before && (before.catalogs === null || Array.isArray(before.catalogs)), before)
+		const list = ['sia-102@2020', 'hoai.lp@2021']
+		const r = await put(A, list)
+		expect('Team Admin sets two catalogs', r, 200)
+		check('… answered in the settings', JSON.stringify(r.data?.catalogs) === JSON.stringify(list), r.data)
+		check('… in GET /team', JSON.stringify((await ocs(A, 'GET', '/team')).data?.settings?.catalogs) === JSON.stringify(list))
+		check('… in the Lead’s /me', JSON.stringify((await ocs(L, 'GET', '/me')).data?.settings?.catalogs) === JSON.stringify(list))
+		const none = await put(A, [])
+		check('an empty list: none active', none.status === 200 && JSON.stringify(none.data?.catalogs) === '[]', none.data)
+		const dflt = await put(A, null)
+		check('null: the client’s default', dflt.status === 200 && dflt.data?.catalogs === null, dflt.data)
+		const bad = async (name, value, message) => {
+			const b = await put(A, value)
+			expect(name, b, 422, 'invalid')
+			check(`… “${message}”`, b.data?.message === message, b.data?.message)
+		}
+		await bad('not a list', 'sia-102@2020', '“catalogs” must be null or a list of at most 50 catalogs.')
+		await bad('51 catalogs', Array.from({ length: 51 }, (_, i) => `c${i}@1`), '“catalogs” must be null or a list of at most 50 catalogs.')
+		const item = 'Each catalog in “catalogs” is “id@edition”: the id in lowercase letters, digits, dots, dashes and underscores, the edition in letters, digits, dots, dashes and underscores, each at most 100.'
+		await bad('without edition', ['sia-102'], item)
+		await bad('capital id', ['SIA@2020'], item)
+		await bad('twice', ['sia@2020', 'sia@2020'], '“catalogs” names “sia@2020” twice.')
+		check('a refused value changes nothing', (await ocs(A, 'GET', '/team')).data?.settings?.catalogs === null)
+		expect('a Lead sets them', await put(L, list), 403, 'forbidden')
+	} finally {
+		await put(A, before?.catalogs ?? null)
+		const after = (await ocs(A, 'GET', '/team')).data?.settings
+		check('pb left as found (catalogs)', JSON.stringify(after?.catalogs ?? null) === JSON.stringify(before?.catalogs ?? null), after?.catalogs)
+	}
+}
+
 /** 0.25.0: the record kind `template` and the project's `budget_label`. */
 export async function projektvorlagen() {
 	const id = `buero.t${RUN}`.toLowerCase()
@@ -187,9 +226,10 @@ export async function projektvorlagen() {
 		head('Project templates: capability, write, read')
 		{
 			const cap = await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')
-			check('capability templates: 1', cap.data?.capabilities?.timesister?.templates === 1, cap.data?.capabilities?.timesister)
-			const r = await ocs(A, 'PUT', path(K1), { version: 0, data: projektvorlage(id, '2026-10') })
+			check('capability templates: 2', cap.data?.capabilities?.timesister?.templates === 2, cap.data?.capabilities?.timesister)
+			const r = await ocs(A, 'PUT', path(K1), { version: 0, data: projektvorlage(id, '2026-10', { created_by: 'pblead' }) })
 			expect('Team Admin writes a template', r, 200)
+			check('… created_by set by the server, the client’s value replaced (0.25.1)', r.data?.data?.created_by === 'pbadmin', r.data?.data?.created_by)
 			check('… stored as sent', r.data?.data?.budget_label === 'Phasen' && r.data?.data?.items?.[0]?.children?.[1]?.kind === 'meilenstein', r.data)
 			expect('Lead reads it', await ocs(L, 'GET', path(K1)), 200)
 			expect('Member reads it', await ocs(U1, 'GET', path(K1)), 403, 'forbidden')
@@ -223,16 +263,30 @@ export async function projektvorlagen() {
 
 		head('Project templates: a Lead writes their own')
 		{
-			expect('Lead writes a new one', await ocs(L, 'PUT', path(K2), { version: 0, data: projektvorlage(`${id}-lead`, '2026-10') }), 200)
+			const neu = await ocs(L, 'PUT', path(K2), { version: 0, data: projektvorlage(`${id}-lead`, '2026-10', { created_by: 'pbadmin' }) })
+			expect('Lead writes a new one', neu, 200)
+			check('… created_by is the Lead', neu.data?.data?.created_by === 'pblead', neu.data?.data?.created_by)
 			expect('… and changes it', await ocs(L, 'PUT', path(K2), { version: 1, data: projektvorlage(`${id}-lead`, '2026-10', { title: 'Mine' }) }), 200)
 			const fremd = await ocs(L, 'PUT', path(K1), { version: await version(K1), data: projektvorlage(id, '2026-10', { title: 'Taken' }) })
 			expect('Lead changes the Team Admin’s', fremd, 403, 'forbidden')
 			check('… “A Lead changes and removes only their own templates.”', fremd.data?.message === 'A Lead changes and removes only their own templates.', fremd.data)
 			expect('Lead removes the Team Admin’s', await ocs(L, 'DELETE', `${path(K1)}?version=${await version(K1)}`), 403, 'forbidden')
-			expect('Team Admin changes the Lead’s', await ocs(A, 'PUT', path(K2), { version: 2, data: projektvorlage(`${id}-lead`, '2026-10', { title: 'Checked' }) }), 200)
-			expect('… then it is no longer the Lead’s', await ocs(L, 'PUT', path(K2), { version: 3, data: projektvorlage(`${id}-lead`, '2026-10') }), 403, 'forbidden')
-			const batch = await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'template', key: `${id}-b@1`, version: 0, data: projektvorlage(`${id}-b`, '1') }] })
+			const admin = await ocs(A, 'PUT', path(K2), { version: 2, data: projektvorlage(`${id}-lead`, '2026-10', { title: 'Checked', created_by: 'pbadmin' }) })
+			expect('Team Admin changes the Lead’s', admin, 200)
+			check('… created_by stays the Lead (0.25.1)', admin.data?.data?.created_by === 'pblead' && admin.data?.modified_by === 'pbadmin', [admin.data?.data?.created_by, admin.data?.modified_by])
+			const again = await ocs(L, 'PUT', path(K2), { version: 3, data: projektvorlage(`${id}-lead`, '2026-10') })
+			expect('… the Lead still changes their own (0.25.1)', again, 200)
+			check('… created_by still the Lead', again.data?.data?.created_by === 'pblead', again.data?.data?.created_by)
+			expect('Team Admin changes it once more', await ocs(A, 'PUT', path(K2), { version: 4, data: projektvorlage(`${id}-lead`, '2026-10', { title: 'Checked again' }) }), 200)
+			expect('… the Lead removes their own after it', await ocs(L, 'DELETE', `${path(K2)}?version=5`), 200)
+			const fremd2 = await ocs(L, 'PUT', path(K1), { version: await version(K1), data: projektvorlage(id, '2026-10', { title: 'Taken', created_by: 'pblead' }) })
+			expect('a Lead claiming created_by of another’s', fremd2, 403, 'forbidden')
+			const batch = await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'template', key: `${id}-b@1`, version: 0, data: projektvorlage(`${id}-b`, '1', { created_by: 'pbadmin' }) }] })
 			expect('a Lead’s batch with a template', batch, 200)
+			check('… created_by from the server in a batch', batch.data?.records?.[0]?.data?.created_by === 'pblead', batch.data?.records?.[0]?.data)
+			const fb = await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'template', key: K1, version: await version(K1), data: projektvorlage(id, '2026-10') }] })
+			expect('a Lead’s batch changing another’s', fb, 403, 'forbidden')
+			check('… “Write 1: A Lead changes and removes only their own templates.”', fb.data?.message === 'Write 1: A Lead changes and removes only their own templates.', fb.data?.message)
 			expect('… and removes it', await ocs(L, 'DELETE', `${path(`${id}-b@1`)}?version=1`), 200)
 		}
 
@@ -382,4 +436,5 @@ export async function vorlagen() {
 		}
 	}
 	await projektvorlagen()
+	await kataloge()
 }
