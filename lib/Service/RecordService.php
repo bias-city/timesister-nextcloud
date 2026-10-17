@@ -472,6 +472,15 @@ final class RecordService {
 					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
 				}
 			}
+			if ($op['kind'] === InvoiceRules::KIND && !$system) {
+				// 0.24.0: a handed-over invoice is frozen until revoked; only the server sets the status external.
+				try {
+					HandoverRules::checkClientWrite($cur === null || $cur->isTombstone() ? null : InvoiceRules::decode($cur->getData()),
+						$op['json'] === null ? null : InvoiceRules::decode($op['json']));
+				} catch (ApiException $e) {
+					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+				}
+			}
 			if ($op['kind'] === InvoiceRules::KIND && !$system && $this->invoices->findByKey($m->tenantId, $op['key']) !== null) {
 				// Issued on the server (0.18.0): frozen; only a reversal changes it.
 				$e = ApiException::issued();

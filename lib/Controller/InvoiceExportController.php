@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Controller;
 
 use OCA\TimeSister\Service\ExportService;
+use OCA\TimeSister\Service\HandoverService;
 use OCA\TimeSister\Service\Json;
 use OCA\TimeSister\Service\TenantService;
 use OCA\TimeSister\Service\WebhookService;
@@ -24,7 +25,8 @@ use OCP\IRequest;
  * Exports and hand-overs (0.20.0): the invoices of a period as CSV, DATEV
  * Buchungsstapel or the ledger, the hand-over to an accounting system and
  * the webhook status. Team Admins; 404 when the team setting `invoicing`
- * is off.
+ * is off. The hand-over to an accounting system that issues the invoice
+ * (0.24.0, team setting `invoicing_mode` external) does not need it.
  */
 final class InvoiceExportController extends BaseController {
 	private const MAX_BODY = 16 * 1024;
@@ -35,6 +37,7 @@ final class InvoiceExportController extends BaseController {
 		IL10N $l,
 		private ExportService $exports,
 		private WebhookService $webhooks,
+		private HandoverService $handovers,
 	) {
 		parent::__construct($request, $tenants, $l);
 	}
@@ -58,6 +61,25 @@ final class InvoiceExportController extends BaseController {
 	public function external(string $key): DataResponse {
 		// `id` here is the accounting system's id, not a record id: the body is read without the path-field check.
 		return $this->run(fn () => $this->exports->external($this->tenants->current(), $key, Json::body(Json::readInput(self::MAX_BODY), self::MAX_BODY)));
+	}
+
+	/** POST /invoices/{key}/handover {"system", "id", "number", "url"?, "issued_on"?} – the accounting system issued the draft (0.24.0). */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/invoices/{key}/handover')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function handover(string $key): DataResponse {
+		// `id` is the accounting system's id: the body is read without the path-field check.
+		return $this->run(fn () => $this->handovers->handover($this->tenants->current(), $key, Json::body(Json::readInput(self::MAX_BODY), self::MAX_BODY)));
+	}
+
+	/** POST /invoices/{key}/handover/revoke {"reason"?} – the invoice is a draft again (0.24.0). */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/invoices/{key}/handover/revoke')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function revokeHandover(string $key): DataResponse {
+		return $this->run(fn () => $this->handovers->revoke($this->tenants->current(), $key, $this->body(self::MAX_BODY)));
 	}
 
 	/** GET /invoices/webhooks/status – per hook: waiting, delivered, failed, the last error. */

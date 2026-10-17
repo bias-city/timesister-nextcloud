@@ -11,7 +11,8 @@
 // e-invoices and exports (tax case, ZUGFeRD, XRechnung, QRR, exports, webhooks),
 // VAT per invoice line and the cost positions of a budget (0.21.0), receipts,
 // expense reports and the document tree (0.22.0), approval by assignment and
-// fixed expense reports with ledger (0.23.0).
+// fixed expense reports with ledger (0.23.0), the invoicing mode and the
+// hand-over to an accounting system that issues the invoice (0.24.0).
 //
 //   NC_URL=http://localhost:8081 node tests/integration/integration.mjs
 //
@@ -34,6 +35,7 @@ import { dokumente } from './teil-dokumente.mjs'
 import { erechnung } from './teil-erechnung.mjs'
 import { kosten } from './teil-kosten.mjs'
 import { belege } from './teil-belege.mjs'
+import { uebergabe } from './teil-uebergabe.mjs'
 import { summary } from './harness.mjs'
 
 await teams()
@@ -52,6 +54,7 @@ await dokumente()
 await erechnung()
 await kosten()
 await belege()
+await uebergabe()
 await rest()
 await sicherungen()
 process.exit(summary())

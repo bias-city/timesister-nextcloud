@@ -3000,6 +3000,8 @@ missing customer country counts as domestic. The draft may override with
 | GET | `/invoices/export?kind=datev&from&to` | Team Admins | DATEV **Buchungsstapel** (EXTF, format version 700, UTF-8 with BOM, `;`): header lines per DATEV spec, then one row per invoice: Umsatz (gross), Soll/Haben (`S` for invoices, `H` for reversals and credits), Konto = debtor account (`customer.datev_account`, else team setting `datev.debtor_account`), Gegenkonto = revenue account by tax case (`datev.revenue_domestic`, `datev.revenue_eu`, `datev.revenue_export`), BU-Schlüssel from the tax case, Belegdatum (DDMM), Belegfeld 1 = number, Buchungstext = customer name + project; `422` when the team's `datev` setting lacks the accounts |
 | GET | `/invoices/export?kind=ledger&from&to` | Team Admins | the ledger as CSV (seq, at, actor, action, number, payload_hash, prev_hash, hash) |
 | POST | `/invoices/{key}/external` | Team Admins | `{ "system": name, "id": ≤128, "url"?: https }` – records a hand-over to an accounting system: ledger `exported`, `fixed.external`, since 0.23.1 also `external` on the invoice record; `system` since 0.23.1 any name `^[a-z0-9][a-z0-9._-]{0,63}$` (before: `bexio`\|`lexware`\|`other`) |
+| POST | `/invoices/{key}/handover` | Team Admins | since 0.24.0, mode external: the accounting system issued the draft – marks, receipts, record `status: external`, ledger `external_issued` (see «Invoicing mode and hand-over, 0.24.0») |
+| POST | `/invoices/{key}/handover/revoke` | Team Admins | since 0.24.0: the draft again, ledger `external_revoked` |
 
 Team setting `datev` (`PUT /team/settings`, `/admin/teams`):
 `{ "consultant": digits ≤ 7, "client": digits ≤ 5, "fiscal_year_start": "MM-DD", "account_length": 4–8, "debtor_account": digits, "revenue_domestic": digits, "revenue_eu": digits, "revenue_export": digits }`.
@@ -4263,3 +4265,176 @@ says where it went.
   `EXTERNAL_KEYS`; `SYSTEMS` is gone), `InvoiceRules` (the field),
   `ExportService` (the record write through `RecordService::applyWithin`,
   `Transaction`).
+
+## Invoicing mode and hand-over, 0.24.0 (2026-10-17)
+
+Additive, `api: 2` stays; capability **`invoice_handover: 1`**; schema:
+one new column. A team chooses how invoices come about (decision of
+2026-10-17):
+
+1. **TimeSister** issues them, tamper-evident (invoicing 0.18–0.23: issue,
+   ledger chain, PDF/ZUGFeRD), without a copy – the default.
+2. **TimeSister with a copy** to an accounting system (bexio, lexware,
+   sevdesk): every issued invoice also goes there as a document. The Mac
+   app does that through its plugins; the server learns it as before through
+   `POST /invoices/{key}/external` (ledger `exported`).
+3. **Hand-over** (external): TimeSister issues nothing; the Mac app hands
+   the draft to the accounting system, which creates and numbers the
+   invoice. The server records that the invoice was issued elsewhere and
+   marks hours and receipts as billed in one transaction.
+
+### Team setting `invoicing_mode`
+
+`PUT /team/settings` (Team Admins) and `POST/PUT /admin/teams`
+(`settings.invoicing_mode`): `null` (case 1, the default) or
+`{ "mode": "timesister"|"external", "system": null|name, "copy": "off"|"auto"|"manual" }`.
+`invoicing` stays the switch of issuing on the server.
+
+- `mode` is required. `system` after `^[a-z0-9][a-z0-9._-]{0,63}$`.
+- `external` needs `system`; `copy` is then `off` or missing.
+- `timesister` with `system` and `copy` `auto`|`manual` is case 2; without
+  `system`, `copy` must be `off` or missing.
+- Missing `system`/`copy` are stored as `null`/`"off"`. Otherwise `422
+  invalid` naming the field path.
+- Shown in `settings` of `/me`, `/team`, `/admin/teams` and in the team ZIP
+  (`team.json`, as `datev`).
+
+### Issuing in the mode external
+
+`POST /invoices/{key}/issue`: `409 conflict` “This team hands its invoices
+over to <system>; TimeSister does not issue them.” `POST
+/invoices/{key}/reverse` of a handed-over invoice: `409`.
+
+### `POST /invoices/{key}/handover` (Team Admins)
+
+Only in the mode external (otherwise `409` “Handing over needs the team
+setting invoicing_mode external.”), regardless of `invoicing`. Body:
+
+```json
+{ "system": "bexio", "id": "4711", "number": "RE-2026-0017",
+  "url": "https://office.bexio.com/…", "issued_on": "2026-10-17" }
+```
+
+`system` must be the team's (`409`), `id` text 1–128 (a number is taken
+as text), `number` text 1–64 without control characters, `url` optional
+https ≤ 512, `issued_on` optional (today). Otherwise `422` with the field.
+
+The record `invoice` must exist (`404`) and be a draft without a number
+(`409`); budget and customer as for issuing (`422` naming what is missing);
+the bookings in the book (`422` “Booking n is not in the book.”) and not
+billed by another invoice (`409` “Booking n is billed by invoice …”); the
+receipts of its lines not billed by another invoice (`409`, as issuing
+0.22).
+
+One transaction (retried on a deadlock): a billing mark per booking
+(`document` = the accounting system's number, `source` = system, `by`,
+`billed_on` = `issued_on`); every receipt of its lines `status: billed`,
+`invoice: <key>`; the record as the server's write (new `version`, history,
+team revision + 1, so `/delta` delivers it) with `status: "external"`,
+`issued_on`, `external: { system, id, number, url, at, by }`, `number`
+stays `null` (the number belongs to the accounting system, no counter is
+taken); ledger **`external_issued`**, `number` = the external number,
+payload `{ key, system, id, number, url, issued_on, project, budget,
+customer_key, currency, bookings: [ {uid, event_uid, start} ], receipts:
+[keys] }`. No frozen row, no PDF.
+
+Answer: `{ "record": …, "ledger": { seq, prev_hash, hash }, "billed": {
+"bookings": n, "receipts": n } }`.
+
+### `POST /invoices/{key}/handover/revoke` (Team Admins)
+
+Body `{ "reason"?: ≤ 500 }`. Only `status: "external"` (`409` otherwise).
+One transaction: the billing marks of this invoice go (only those with its
+number, a series per UID kept while another invoice bills an occurrence),
+its receipts back to `approved` without invoice (as a reversal 0.22), the
+record back to `status: "draft"`, `external: null`, `issued_on: null`;
+ledger **`external_revoked`** with `{ key, system, id, number, reason }`.
+Answer as above with `released` instead of `billed`. Whether the
+accounting system has closed the invoice is the client's check, not the
+server's.
+
+### Record, webhooks, exports
+
+- The record `invoice` takes the status `external`. A client may not set it
+  (`422`); a handed-over invoice refuses every client write and delete with
+  `409` “This invoice was handed over to <system>; revoke the hand-over
+  first.”, like `409 issued`.
+- `external` on the record takes the optional key `number` (≤ 64).
+- Webhooks: `external_issued` and `external_revoked` fire `exported`.
+- CSV and DATEV unchanged (handed-over invoices are not the team's own);
+  the ledger CSV has the new entries by itself.
+
+### As built, 0.24.0 (2026-10-17)
+
+- **Reversal and credit note no longer inherit `external`:** the new
+  record was a copy of the original and carried its hand-over
+  (`external`), so a plugin took the new document for one already sent.
+  `reverse` now drops `external` from the new record (the original keeps
+  its own).
+
+- **Migration** `Version1017Date20261017120000`: `ts_tenants.invoicing_mode_json`
+  (TEXT, null). Additive only; null is case 1.
+- **Setting** (`InvoicingModeRules`, through `TeamRules::settings`):
+  `null` clears it; an object (or, from `/admin/teams`, an array) is checked
+  and stored complete – `{"mode":"external","system":"bexio"}` is stored as
+  `{"mode":"external","system":"bexio","copy":"off"}`. **`timesister` with
+  `system` and `copy` `off` is allowed** (a system remembered, no copies;
+  the contract did not forbid it). 422 messages: ““invoicing_mode” must be
+  null or an object with “mode”.”, “Unknown team setting
+  “invoicing_mode.note”.”, ““invoicing_mode.mode” must be “timesister” or
+  “external”.”, ““invoicing_mode.copy” must be “off”, “auto” or
+  “manual”.”, the system message of 0.23.1 with the path
+  “invoicing_mode.system”, ““invoicing_mode.system” is required for the
+  mode “external”: name the accounting system that issues the invoices.”,
+  ““invoicing_mode.copy” must be “off” for the mode “external”: the
+  accounting system issues the invoices itself.”, ““invoicing_mode.copy”
+  needs “invoicing_mode.system”: name the accounting system that gets the
+  copies.” A stored value that no longer reads counts as `null`.
+- **Team ZIP:** like `datev`, the setting goes out in `team.json`
+  (`settings.invoicing_mode`) and is not restored by an import (the import
+  takes only `entries_since`).
+- **Issue:** after the 404 (invoicing off) and 403 (not a Team Admin), the
+  mode external answers 409 before the draft is read. **Reverse:** 409 for
+  a handed-over record right after the body's checks. `paid` of a handed-over
+  invoice stays `422` “Only an issued invoice can be marked paid.”
+- **Handover:** the order of the checks is 403 (Lead, member) → 409 mode not
+  external → 422 body (`system`, `id`, `number`, `url`, `issued_on`, in that
+  order; `number` ““number” must be text of 1 to 64 characters.”, an
+  integer taken as text, trimmed) → 409 other system (“This team hands its
+  invoices over to bexio, not to sevdesk.”) → 404 record → 409 handed over
+  already (message above) → 409 “Only a draft without a number can be
+  handed over.” (not a draft, a number, or a frozen row) → the checks of
+  issuing (`DraftResolver::head` and `billables`, shared with the issue;
+  **no issuer needed**, the accounting system issues). Two bookings of the
+  same event give one mark. The mark also carries `external_id` = the
+  accounting system's id (a field billing marks had since 0.7.6). The
+  ledger entry's `invoice` is 0 (as for expense reports); `GET
+  /invoices/ledger` and `/chain/verify` still need `invoicing` on.
+- **Per occurrence:** a handed-over invoice has no frozen hours, so its
+  bookings count through its record: issuing or handing over another
+  occurrence of the same series is allowed, the same occurrence is `409`
+  naming the external number; a reversal keeps the mark while a
+  handed-over invoice bills an occurrence of the event, and a revocation
+  keeps it while another invoice (issued, paid or handed over) does.
+- **Revoke:** marks are released only when their `document` is this
+  invoice's external number. The answer's `released` counts what went.
+- **Client writes** (`RecordService::applyWithin`, not for the server's own
+  writes): the stored record handed over → 409 (also when the write
+  changes nothing, and for a delete); a new or changed record with status
+  `external` → 422 “Only the server sets the status “external”, when an
+  invoice is handed over.” The message of an unknown status now lists
+  `external`: ““status” of an invoice is one of draft, issued, paid,
+  cancelled, external.”
+- **`external` block:** `ExportRules::externalBlock` takes `number` (null or
+  text 1–64, trimmed, an integer as text) and keeps it only when given, so
+  records of 0.23.1 stay as they were; the unknown-field message now reads
+  ““external” has an unknown field “note”; allowed are system, id, number,
+  url, at and by.”
+- **Webhooks:** the body of a hand-over has no frozen row: `invoice.key`
+  and `currency` come from the payload, `status` is `external` (issued) or
+  `draft` (revoked), `gross`/`total` 0.
+- **Classes.** `InvoicingModeRules` (setting), `HandoverRules` (bodies,
+  refusals, block, payloads), `HandoverService` (the two transactions),
+  `DraftResolver` (`head`, `billables`, `handedOver`), routes in
+  `InvoiceExportController`; `IssueService` (refusals, reversal per
+  occurrence), `RecordService` (client writes), `WebhookService`.

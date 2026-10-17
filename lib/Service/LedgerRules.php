@@ -28,6 +28,9 @@ final class LedgerRules {
 	public const EXPENSE_DOCUMENT = 'expense_document';
 	public const EXPENSE_PAID = 'expense_paid';
 	public const EXPENSE_REVERSED = 'expense_reversed';
+	/** Hand-over to an accounting system that issues the invoice (0.24.0) and its revocation; `invoice` is 0. */
+	public const EXTERNAL_ISSUED = 'external_issued';
+	public const EXTERNAL_REVOKED = 'external_revoked';
 	public const HASH_PATTERN = '/^[0-9a-f]{64}$/';
 
 	/** `at` of an entry: UTC, `YYYY-MM-DDTHH:MM:SSZ`. */

@@ -104,8 +104,8 @@ class InvoiceRulesTest extends TestCase {
 		$this->assertSame('422 “from” must be a day in the format YYYY-MM-DD.', self::check(['from' => '2026-02-30']));
 		$this->assertSame('422 “to” must be a day in the format YYYY-MM-DD.', self::check([], ['to']));
 		$this->assertSame('422 “from” must not be after “to”.', self::check(['from' => '2026-10-01']));
-		$this->assertSame('422 “status” of an invoice is one of draft, issued, paid, cancelled.', self::check(['status' => 'open']));
-		$this->assertSame('422 “status” of an invoice is one of draft, issued, paid, cancelled.', self::check([], ['status']));
+		$this->assertSame('422 “status” of an invoice is one of draft, issued, paid, cancelled, external.', self::check(['status' => 'open']));
+		$this->assertSame('422 “status” of an invoice is one of draft, issued, paid, cancelled, external.', self::check([], ['status']));
 		foreach (['', str_repeat('x', 65), 12, "RE\n1"] as $n) {
 			$this->assertSame('422 “number” must be null or text of 1 to 64 characters.', self::check(['number' => $n]), var_export($n, true));
 		}
@@ -130,7 +130,7 @@ class InvoiceRulesTest extends TestCase {
 		foreach (['bexio', 'lexware', 'other', 'datev'] as $name) {
 			$this->assertSame('ok', self::check(['external' => ['system' => $name, 'id' => '1']]), $name);
 		}
-		$this->assertSame('422 “external” has an unknown field “note”; allowed are system, id, url, at and by.', self::check(['external' => ['system' => 'bexio', 'id' => '1', 'note' => 'x']]));
+		$this->assertSame('422 “external” has an unknown field “note”; allowed are system, id, number, url, at and by.', self::check(['external' => ['system' => 'bexio', 'id' => '1', 'note' => 'x']]));
 		$this->assertSame('422 “external” must be null or an object with “system” and “id”.', self::check(['external' => 'bexio']));
 		$this->assertSame('422 “external.system” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).', self::check(['external' => ['system' => 'SevDesk', 'id' => '1']]));
 		$this->assertSame('422 “external.system” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).', self::check(['external' => ['id' => '1']]));

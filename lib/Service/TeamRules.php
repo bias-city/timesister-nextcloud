@@ -73,7 +73,8 @@ final class TeamRules {
 	 * value stays. Unknown keys, a non-boolean value or a malformed date:
 	 * 422. `documents` (0.19.0) is an object, checked by DocumentRules and
 	 * merged over the stored one; `datev` and `webhooks` (0.20.0) likewise
-	 * by ExportRules and WebhookRules.
+	 * by ExportRules and WebhookRules; `invoicing_mode` (0.24.0) is null or
+	 * an object checked by InvoicingModeRules.
 	 *
 	 * @param array<string,mixed> $in
 	 * @return array<string,mixed>
@@ -99,6 +100,11 @@ final class TeamRules {
 			// 0.20.0: the DATEV accounts (the object replaces the stored one) and the webhooks (the list replaces it, secrets kept per address).
 			if ($key === ExportRules::FIELD) {
 				$out[$key] = ExportRules::validateDatev($value);
+				continue;
+			}
+			// 0.24.0: how invoices come about; null is the default (TimeSister, no copy).
+			if ($key === InvoicingModeRules::FIELD) {
+				$out[$key] = InvoicingModeRules::validate($value);
 				continue;
 			}
 			if ($key === WebhookRules::FIELD) {

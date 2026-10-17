@@ -270,6 +270,11 @@ export async function erechnung() {
 			const rec = (await ocs(A, 'GET', path(keys.chch))).data
 			check('the invoice record carries external, the rest unchanged', rec?.data?.external?.system === 'sevdesk' && rec?.data?.external?.id === 'SD-17' && rec?.data?.status === before?.data?.status && rec?.data?.number === before?.data?.number, rec?.data?.external)
 			expect('a client still may not write the issued invoice (external included)', await ocs(A, 'PUT', path(keys.chch), { version: rec?.version, data: { ...rec?.data, external: { system: 'datev', id: '1' } } }), 409, 'issued')
+			// 0.24.0: a credit note is a document of its own – it does not inherit the original's hand-over.
+			const cr = await ocs(A, 'POST', `${ipath(keys.chch)}/reverse`, { kind: 'credit', reason: 'Copy check' })
+			expect('a credit note of the handed-over invoice', cr, 200)
+			check('… without the original’s external; the original keeps it', (cr.data?.record?.data?.external ?? null) === null
+				&& (await ocs(A, 'GET', path(keys.chch))).data?.data?.external?.id === 'SD-17', [cr.data?.record?.data?.external])
 		}
 
 		head('E-invoices: webhooks')
