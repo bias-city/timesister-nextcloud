@@ -4524,3 +4524,56 @@ Answer: `{ "record": …, "noted": true|false, "ledger": …|null }`.
   `::cancelled`; `DraftResolver::customerName` (empty when the customer
   cannot be told; the part is then left out of the name); routes in
   `InvoiceExportController`.
+
+## Project templates, 0.25.0 (2026-10-17)
+
+Additive, `api: 2` stays; capability **`templates: 1`**; no migration (a
+new record kind, the table stays). Not published.
+
+### Record kind `template`
+
+A team's own project template: the content is a template in the format
+`timesister-template`, version 3 (schema `vorlagen/schema/timesister-template.v3.schema.json`
+of the Mac app), stored as sent. The bundled catalogs (SIA, HOAI) stay in
+the Mac app and never come here.
+
+| Check | Answer |
+|---|---|
+| key | `<id>@<edition>` – otherwise `422` “The key of a template is its “id”, “@” and its “edition”.” (the general key pattern first: `400`) |
+| `format` | `"timesister-template"` – `422` ““format” of a template must be “timesister-template”.” |
+| `format_version` | `3` – `422` ““format_version” of a template must be 3.” |
+| `id` | `^[a-z0-9][a-z0-9._-]{0,99}$` |
+| `edition` | `^[A-Za-z0-9._-]{1,100}$` |
+| `status` | `normative`, `draft` or `custom` |
+| `title` | text of 1 to 200 characters |
+| `items` | a list (the client checks the tree) |
+| person and customer fields | none anywhere, any case (`customer`, `client`, `person`, `lead`, `leads`, `owner`, `members`, `team`, `user`, `uid`, `email`, `mail`, `phone`, `address`, `contact`, `entries`, `invoices`, `bookings`, `employee` …) – `422` “A template carries no person or customer data: “items[0].children[0].lead”.” |
+| size | at most 256 KB – `413` “A template may be at most 256 KB.” |
+
+**Rights.** Leads and Team Admins read every template (list, delta,
+single, history); Members see none. Team Admins write every template. A
+Lead writes new templates (also on a tombstone) and changes or removes
+only those they saved last (`modified_by` of the stored record) –
+otherwise `403` “A Lead changes and removes only their own templates.”;
+a Member gets `403` “Only Team Admins and Leads write templates.”. The
+kind is per record: a Lead's batch may hold templates.
+
+**Team ZIP.** Templates go along as `records/template/<id>@<edition>.json`
+with their history, and a restore checks them like any write.
+
+### Project: `budget_label`
+
+The project record takes `budget_label`: what its budgets are called
+(«Phasen», «Etappen»), set when a project is created from a template;
+text of 1 to 60 characters or `null` – otherwise `422` ““budget_label”
+must be text of 1 to 60 characters.”. The client titles the budgets of the
+project report and the project sheet with it, default «Budgets».
+
+### As built, 0.25.0 (2026-10-17)
+
+- `TemplateRules` (`validate`, `personField`, `requireLeadWrite`),
+  `RecordValidator::KINDS` and size, `RecordRights::PER_RECORD`,
+  `requireWrite` and `requireTemplateWrite` (in `RecordService::applyWithin`
+  under the team lock), `ProjectRules::BUDGET_LABEL`; capability
+  `templates: 1`; unit tests `TemplateRulesTest`, `ProjectRulesTest`;
+  integration part `teil-vorlagen.mjs` (templates next to the invoice template).

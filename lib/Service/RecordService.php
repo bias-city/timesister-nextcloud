@@ -452,6 +452,14 @@ final class RecordService {
 				$problems[] = ['op' => $op, 'outcome' => $outcome, 'current' => $cur === null ? null : $this->present($cur)];
 				continue;
 			}
+			if ($op['kind'] === TemplateRules::KIND) {
+				// 0.25.0: a Lead's template against the stored one, under the team lock.
+				try {
+					$this->rights->requireTemplateWrite($m, $cur);
+				} catch (ApiException $e) {
+					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+				}
+			}
 			if ($op['kind'] === QuoteRules::KIND || $op['kind'] === InvoiceRules::KIND) {
 				// A Lead's invoice or quote against the stored state, under the team lock.
 				try {

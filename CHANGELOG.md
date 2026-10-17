@@ -1,5 +1,18 @@
 # Changes
 
+## 0.25.0 – 2026-10-17
+
+Additive, `api: 2` unchanged; capability `templates: 1`; no migration.
+Contract: `API.md` «Project templates, 0.25.0». Not published.
+
+- **Record kind `template`**: a team's own project template (format
+  `timesister-template` version 3, key `<id>@<edition>`, at most 256 KB, no
+  person or customer fields anywhere). Leads and Team Admins read; Team
+  Admins write, a Lead new ones and those they saved last. Team ZIP takes
+  them along.
+- **Project `budget_label`** (text ≤ 60 or null): what the project's
+  budgets are called, from the template.
+
 ## 0.24.1 – 2026-10-17
 
 Additive, `api: 2` unchanged; capability `invoice_handover: 2`; migration
