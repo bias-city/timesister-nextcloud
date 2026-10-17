@@ -4,8 +4,11 @@
 // only – info, download, upload and delete –, the Word check, the 10 MB
 // limit and the template in the team ZIP. Leaves pb as it found it: a
 // template that was there is put back (with a new modified_at).
+// The team's own project templates (0.25.0): the record kind `template`
+// (format, key, size, no person fields; Leads and Team Admins read, a Lead
+// writes their own), the project's `budget_label` and the team ZIP.
 import { ADMIN, API, NC, ocs, sql } from './lib.mjs'
-import { A, AA, L, RUN, U1, V, check, expect, head, isObj, ISO, sha256 } from './harness.mjs'
+import { A, AA, L, RUN, U1, V, check, expect, head, isObj, ISO, keysOf, sha256 } from './harness.mjs'
 
 const BASE = '/templates/invoice'
 const MB10 = 10 * 1024 * 1024
@@ -162,6 +165,107 @@ async function teamZip() {
 	}
 }
 
+/** A project template (format 3) under `id@edition`. */
+function projektvorlage(id, edition, over = {}) {
+	return { format: 'timesister-template', format_version: 3, id, edition, status: 'custom', title: `Housing ${RUN}`,
+		budget_label: 'Phasen', currency: 'CHF',
+		items: [{ nr: '1', title: 'Preliminary', kind: 'budget', children: [
+			{ nr: '1.1', title: 'Survey', kind: 'arbeitspaket', rate: 160, hours: 20 },
+			{ nr: 'M1', title: 'Hand-in', kind: 'meilenstein', offset_days: 30 }] }],
+		billing_plan: [{ offset_days: 60, budget: '1' }], ...over }
+}
+
+/** 0.25.0: the record kind `template` and the project's `budget_label`. */
+export async function projektvorlagen() {
+	const id = `buero.t${RUN}`.toLowerCase()
+	const K1 = `${id}@2026-10`
+	const K2 = `${id}-lead@2026-10`
+	const PJ = `tv${RUN}`.toLowerCase()
+	const path = (k) => `/records/template/${k}`
+	const version = async (k) => (await ocs(A, 'GET', path(k))).data?.version
+	try {
+		head('Project templates: capability, write, read')
+		{
+			const cap = await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')
+			check('capability templates: 1', cap.data?.capabilities?.timesister?.templates === 1, cap.data?.capabilities?.timesister)
+			const r = await ocs(A, 'PUT', path(K1), { version: 0, data: projektvorlage(id, '2026-10') })
+			expect('Team Admin writes a template', r, 200)
+			check('… stored as sent', r.data?.data?.budget_label === 'Phasen' && r.data?.data?.items?.[0]?.children?.[1]?.kind === 'meilenstein', r.data)
+			expect('Lead reads it', await ocs(L, 'GET', path(K1)), 200)
+			expect('Member reads it', await ocs(U1, 'GET', path(K1)), 403, 'forbidden')
+			check('in the Lead’s delta', keysOf(await ocs(L, 'GET', '/records')).has(`template/${K1}`))
+			check('not in the Member’s', !keysOf(await ocs(U1, 'GET', '/records')).has(`template/${K1}`))
+			expect('another team does not see it', await ocs(AA, 'GET', path(K1)), 404, 'not_found')
+		}
+
+		head('Project templates: refused')
+		{
+			const bad = async (name, r, status, error, message) => {
+				expect(name, r, status, error)
+				check(`… “${message}”`, r.data?.message === message, r.data?.message)
+			}
+			await bad('a customer field', await ocs(A, 'PUT', path(`${id}-x@1`), { version: 0, data: projektvorlage(`${id}-x`, '1', { customer: 'kanton' }) }), 422, 'invalid',
+				'A template carries no person or customer data: “customer”.')
+			const items = projektvorlage(id, '1').items
+			items[0].children[0].lead = 'pblead'
+			await bad('a lead deep in the tree', await ocs(A, 'PUT', path(`${id}-x@1`), { version: 0, data: projektvorlage(`${id}-x`, '1', { items }) }), 422, 'invalid',
+				'A template carries no person or customer data: “items[0].children[0].lead”.')
+			await bad('key and id@edition differ', await ocs(A, 'PUT', path(`${id}-x@2`), { version: 0, data: projektvorlage(`${id}-x`, '1') }), 422, 'invalid',
+				'The key of a template is its “id”, “@” and its “edition”.')
+			await bad('format_version 2', await ocs(A, 'PUT', path(`${id}-x@1`), { version: 0, data: projektvorlage(`${id}-x`, '1', { format_version: 2 }) }), 422, 'invalid',
+				'“format_version” of a template must be 3.')
+			const many = Array.from({ length: 1800 }, (_, i) => ({ nr: String(i), title: 't'.repeat(150), kind: 'arbeitspaket' }))
+			await bad('more than 256 KB', await ocs(A, 'PUT', path(`${id}-x@1`), { version: 0, data: projektvorlage(`${id}-x`, '1', { items: many }) }), 413, 'too_large',
+				'A template may be at most 256 KB.')
+			await bad('a Member writes one', await ocs(U1, 'PUT', path(`${id}-u@1`), { version: 0, data: projektvorlage(`${id}-u`, '1') }), 403, 'forbidden',
+				'Only Team Admins and Leads write templates.')
+		}
+
+		head('Project templates: a Lead writes their own')
+		{
+			expect('Lead writes a new one', await ocs(L, 'PUT', path(K2), { version: 0, data: projektvorlage(`${id}-lead`, '2026-10') }), 200)
+			expect('… and changes it', await ocs(L, 'PUT', path(K2), { version: 1, data: projektvorlage(`${id}-lead`, '2026-10', { title: 'Mine' }) }), 200)
+			const fremd = await ocs(L, 'PUT', path(K1), { version: await version(K1), data: projektvorlage(id, '2026-10', { title: 'Taken' }) })
+			expect('Lead changes the Team Admin’s', fremd, 403, 'forbidden')
+			check('… “A Lead changes and removes only their own templates.”', fremd.data?.message === 'A Lead changes and removes only their own templates.', fremd.data)
+			expect('Lead removes the Team Admin’s', await ocs(L, 'DELETE', `${path(K1)}?version=${await version(K1)}`), 403, 'forbidden')
+			expect('Team Admin changes the Lead’s', await ocs(A, 'PUT', path(K2), { version: 2, data: projektvorlage(`${id}-lead`, '2026-10', { title: 'Checked' }) }), 200)
+			expect('… then it is no longer the Lead’s', await ocs(L, 'PUT', path(K2), { version: 3, data: projektvorlage(`${id}-lead`, '2026-10') }), 403, 'forbidden')
+			const batch = await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'template', key: `${id}-b@1`, version: 0, data: projektvorlage(`${id}-b`, '1') }] })
+			expect('a Lead’s batch with a template', batch, 200)
+			expect('… and removes it', await ocs(L, 'DELETE', `${path(`${id}-b@1`)}?version=1`), 200)
+		}
+
+		head('Project templates: budget_label on the project, team ZIP')
+		{
+			const project = (label) => ({ id: PJ, name: `Templates ${RUN}`, codes: [PJ.toUpperCase()], status: 'active', budget_label: label })
+			const p = await ocs(A, 'PUT', `/records/project/${PJ}`, { version: 0, data: project('Phasen') })
+			expect('a project with budget_label', p, 200)
+			check('… kept', p.data?.data?.budget_label === 'Phasen', p.data)
+			const lang = await ocs(A, 'PUT', `/records/project/${PJ}`, { version: 1, data: project('x'.repeat(61)) })
+			expect('61 characters', lang, 422, 'invalid')
+			check('… “budget_label” must be text of 1 to 60 characters.', lang.data?.message === '“budget_label” must be text of 1 to 60 characters.', lang.data)
+			const teams = await ocs(ADMIN, 'GET', '/admin/teams')
+			const pb = (teams.data?.teams || teams.data || []).find?.((x) => x.slug === 'pb' || x.groups?.team === 'pb-team')
+			if (!pb) {
+				console.log('    (team pb not found in /admin/teams – the ZIP is not looked at)')
+			} else {
+				const res = await fetch(`${NC}${API}/admin/teams/${pb.id}/export`, { headers: { 'OCS-APIRequest': 'true', Authorization: 'Basic ' + Buffer.from(`${ADMIN.user}:${ADMIN.pass}`).toString('base64') } })
+				const zip = Buffer.from(await res.arrayBuffer())
+				check('the team ZIP holds the template', res.status === 200 && zip.includes(`records/template/${K1}.json`), res.status)
+			}
+		}
+	} finally {
+		head('Project templates: cleaning up')
+		for (const k of [K1, K2]) {
+			const v = await version(k)
+			if (v) expect(`${k} removed`, await ocs(A, 'DELETE', `${path(k)}?version=${v}`), 200)
+		}
+		const pv = (await ocs(A, 'GET', `/records/project/${PJ}`)).data?.version
+		if (pv) expect('the project removed', await ocs(A, 'DELETE', `/records/project/${PJ}?version=${pv}`), 200)
+	}
+}
+
 export async function vorlagen() {
 	const before = await ocs(A, 'GET', BASE)
 	const first = docx('Rechnung {number}')
@@ -277,4 +381,5 @@ export async function vorlagen() {
 			expect('no template left', await ocs(A, 'DELETE', BASE), 200)
 		}
 	}
+	await projektvorlagen()
 }

@@ -68,6 +68,9 @@ use OCP\Capabilities\ICapability;
  * since 0.24.1: the accounting system's PDF stored (PUT
  * /invoices/{key}/external-document, setting `invoicing_mode.archive_pdf`),
  * its cancellation noted (POST …/external-cancelled).
+ * `templates: 1` since 0.25.0: the team's own project templates as the
+ * record kind `template` (Leads and Team Admins read, Team Admins write,
+ * a Lead their own).
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -75,7 +78,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int}} */
+	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -105,6 +108,7 @@ final class Capabilities implements ICapability {
 				'document_tree' => 1,
 				'expense_fixing' => 1,
 				'invoice_handover' => 2,
+				'templates' => 1,
 			],
 		];
 	}

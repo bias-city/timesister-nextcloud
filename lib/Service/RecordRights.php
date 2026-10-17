@@ -19,7 +19,7 @@ use OCA\TimeSister\Db\RecordMapper;
 final class RecordRights {
 	/** Kinds with rights per record: a non-admin batch may hold only these. */
 	public const PER_RECORD = [RecordValidator::BILLING, BookingRules::REPORT, BookingRules::MARK, InvoiceRules::KIND, QuoteRules::KIND,
-		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND];
+		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND, TemplateRules::KIND];
 	/** Kinds whose Lead write is checked against the stored record, and whose tombstone keeps its last data for that. */
 	public const AGAINST_STORED = [InvoiceRules::KIND, QuoteRules::KIND, ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND];
 	/** 0.22.0: every member writes these; CostWrites checks each write against the stored record. */
@@ -140,6 +140,13 @@ final class RecordRights {
 			// Every member: CostWrites checks the write against the stored record.
 			return;
 		}
+		if ($kind === TemplateRules::KIND) {
+			// 0.25.0: Team Admins and Leads; a Lead's write is checked against the stored template.
+			if (!$m->manages() && $m->role !== Role::LEAD) {
+				throw ApiException::forbidden('Only Team Admins and Leads write templates.');
+			}
+			return;
+		}
 		if ($kind === QuoteRules::KIND) {
 			// Likewise for a quote: requireQuoteWrite(). A Member has none to write.
 			if (!$m->manages() && $this->ledProjects($m) === []) {
@@ -176,6 +183,14 @@ final class RecordRights {
 			return;
 		}
 		QuoteRules::requireLeadWrite(InvoiceRules::decode($cur?->getData()), InvoiceRules::decode($json), $ownKeys, $this->ledProjects($m));
+	}
+
+	/** A template write against the stored record: Team Admins anything, a Lead their own ({@see TemplateRules::requireLeadWrite()}). */
+	public function requireTemplateWrite(Membership $m, ?Record $cur): void {
+		if ($m->manages()) {
+			return;
+		}
+		TemplateRules::requireLeadWrite($cur, $m->uid);
 	}
 
 	/** Is the caller's batch limited to per-record kinds (then it is checked write by write)? */

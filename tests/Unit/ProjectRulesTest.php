@@ -177,6 +177,12 @@ class ProjectRulesTest extends TestCase {
 		foreach (['1', '"yes"', '[]', '{}'] as $bad) {
 			$this->assertSame('422 “addendum” must be true, false or null.', self::validate('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":1,"addendum":' . $bad . '}]}]}'), $bad);
 		}
+		// 0.25.0: budget_label text of 1 to 60 or null.
+		$this->assertSame('', self::validate('{"id":"p","status":"draft","budget_label":"Phasen"}'));
+		$this->assertSame('', self::validate('{"id":"p","status":"draft","budget_label":null}'));
+		foreach (['""', '" "', '7', '"' . str_repeat('x', 61) . '"', '["Phasen"]'] as $bad) {
+			$this->assertSame('422 “budget_label” must be text of 1 to 60 characters.', self::validate('{"id":"p","status":"draft","budget_label":' . $bad . '}'), $bad);
+		}
 		// Things the app does not compute with pass: budgets that are no objects.
 		$this->assertSame('', self::validate('{"id":"p","status":"draft","budgets":"old","work_packages":7}'));
 		$this->assertSame('', self::validate('{"id":"p","status":"draft","budgets":[7,"x",null,{"work_packages":"none"}]}'));

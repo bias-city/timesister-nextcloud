@@ -28,6 +28,9 @@ final class ProjectRules {
 	public const TEAM_ROLES = ['member', 'sparring', 'support', 'qa'];
 	public const MAX_TEAM = 100;
 	public const CURRENCY_PATTERN = '/^[A-Za-z]{3}$/';
+	/** 0.25.0: what the budgets are called («Phasen»), from the template the project came from. */
+	public const BUDGET_LABEL = 'budget_label';
+	public const BUDGET_LABEL_MAX = 60;
 
 	/**
 	 * Status, codes, `from_quote`, team, currency and rate – in place:
@@ -43,6 +46,11 @@ final class ProjectRules {
 		}
 		if (property_exists($data, self::TEAM) && $data->{self::TEAM} !== null) {
 			$data->{self::TEAM} = self::team($data->{self::TEAM});
+		}
+		$label = $data->{self::BUDGET_LABEL} ?? null;
+		if ($label !== null && (!is_string($label) || trim($label) === '' || mb_strlen($label) > self::BUDGET_LABEL_MAX
+				|| preg_match('/[\x00-\x1F\x7F]/', $label) === 1 || !mb_check_encoding($label, 'UTF-8'))) {
+			throw ApiException::invalid(Message::of('“{field}” must be text of 1 to {max} characters.', ['field' => self::BUDGET_LABEL, 'max' => self::BUDGET_LABEL_MAX]));
 		}
 		$budgets = $data->budgets ?? null;
 		if (!is_array($budgets)) {
