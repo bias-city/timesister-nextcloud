@@ -158,7 +158,7 @@ class ExportRulesTest extends TestCase {
 		foreach ([
 			'"bexio"' => '“external” must be null or an object with “system” and “id”.',
 			'[]' => '“external” must be null or an object with “system” and “id”.',
-			'{"system":"bexio","id":"1","note":"x"}' => '“external” has an unknown field “note”; allowed are system, id, number, url, at and by.',
+			'{"system":"bexio","id":"1","note":"x"}' => '“external” has an unknown field “note”; allowed are system, id, number, url, at, by, document and cancelled_at.',
 			'{"system":"Bexio","id":"1"}' => '“external.system” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).',
 			'{"system":"bexio"}' => '“external.id” must be text of at most 128 characters.',
 			'{"system":"bexio","id":"' . str_repeat('1', 129) . '"}' => '“external.id” must be text of at most 128 characters.',

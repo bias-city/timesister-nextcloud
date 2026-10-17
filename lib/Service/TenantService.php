@@ -196,7 +196,7 @@ final class TenantService {
 		return $out;
 	}
 
-	/** @return array{id:int,name:string,slug:string,groups:array{team:?string},backup_owner:?string,settings:array{backup_required:bool,entries_since:?string,invoicing:bool,documents:array{root:?string,chain_mail:?string},datev:array<string,string|int|null>,webhooks:list<array{url:string,events:list<string>,secret_set:bool}>,invoicing_mode:?array{mode:string,system:?string,copy:string}}} */
+	/** @return array{id:int,name:string,slug:string,groups:array{team:?string},backup_owner:?string,settings:array{backup_required:bool,entries_since:?string,invoicing:bool,documents:array{root:?string,chain_mail:?string},datev:array<string,string|int|null>,webhooks:list<array{url:string,events:list<string>,secret_set:bool}>,invoicing_mode:?array{mode:string,system:?string,copy:string,archive_pdf?:bool}}} */
 	public function presentTeam(Tenant $t): array {
 		return [
 			'id' => $t->getId(),
@@ -208,7 +208,7 @@ final class TenantService {
 		];
 	}
 
-	/** @return array{backup_required:bool,entries_since:?string,invoicing:bool,documents:array{root:?string,chain_mail:?string},datev:array<string,string|int|null>,webhooks:list<array{url:string,events:list<string>,secret_set:bool}>,invoicing_mode:?array{mode:string,system:?string,copy:string}} */
+	/** @return array{backup_required:bool,entries_since:?string,invoicing:bool,documents:array{root:?string,chain_mail:?string},datev:array<string,string|int|null>,webhooks:list<array{url:string,events:list<string>,secret_set:bool}>,invoicing_mode:?array{mode:string,system:?string,copy:string,archive_pdf?:bool}} */
 	public static function settingsOf(Tenant $t): array {
 		return [
 			'backup_required' => $t->getBackupRequired() === 1,

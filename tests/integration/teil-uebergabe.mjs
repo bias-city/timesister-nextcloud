@@ -10,7 +10,7 @@
 // TS_OCC); without it the hand-over checks are skipped.
 // Leaves pb as it found it; approved receipts, the invoice records and
 // counters go only with TS_SQL, the ledger stays (append-only).
-import { ADMIN, ensureTimeCalendar, deleteEvent, ocs, putEvent, runJob, sql } from './lib.mjs'
+import { ADMIN, API, NC, dav, ensureTimeCalendar, deleteEvent, ocs, putEvent, runJob, sql } from './lib.mjs'
 import { A, L, RUN, U1, check, expect, head, isObj, me, sha256 } from './harness.mjs'
 
 const rec = (kind, key) => `/records/${kind}/${encodeURIComponent(key)}`
@@ -18,6 +18,17 @@ const ipath = (key) => `/invoices/${encodeURIComponent(key)}`
 const billingKey = (person, uid) => `${person}+${sha256(uid).slice(0, 32)}`
 const HEX64 = /^[0-9a-f]{64}$/
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+/** A raw body to the app API (0.24.1: the accounting system's PDF). */
+async function raw(who, method, p, body, type) {
+	const res = await fetch(`${NC}${API}${p}`, { method, body, headers: { 'OCS-APIRequest': 'true', 'Accept-Language': 'en', Accept: 'application/json', 'Content-Type': type,
+		Authorization: 'Basic ' + Buffer.from(`${who.user}:${who.pass}`).toString('base64') } })
+	const text = await res.text()
+	let data = null
+	try { data = JSON.parse(text)?.ocs?.data ?? null } catch { data = null }
+	return { status: res.status, data, text }
+}
+/** A small PDF of the accounting system, with a binary line as real ones have. */
+const systemPdf = (n) => Buffer.concat([Buffer.from('%PDF-1.4\n%'), Buffer.from([0xe2, 0xe3, 0xcf, 0xd3]), Buffer.from(`\n1 0 obj << /Title (Invoice ${n}) >> endobj\n%%EOF\n`)])
 
 /** Is the event in the book visible to `who`? */
 async function inBook(who, uid) {
@@ -66,7 +77,7 @@ export async function uebergabe() {
 		head('Hand-over: setup')
 		{
 			const cap = (await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')).data?.capabilities?.timesister
-			check('capability invoice_handover: 1', cap?.invoice_handover === 1, cap)
+			check('capability invoice_handover: 2 (0.24.1)', cap?.invoice_handover === 2, cap)
 			check('/team.settings.invoicing_mode is there (null by default)', teamBefore?.settings && 'invoicing_mode' in teamBefore.settings, teamBefore?.settings)
 			expect('invoicing on (issue answers, not 404)', await ocs(A, 'PUT', '/team/settings', { invoicing: true }), 200)
 			const s = await ocs(A, 'PUT', rec('setting', 'settings'), { version: settings.status === 200 ? settings.data.version : 0, data: { ...base, modules: { ...(base.modules || {}), costs: true } } })
@@ -100,6 +111,7 @@ export async function uebergabe() {
 			await bad('an unknown mode', { mode: 'mac' }, '“invoicing_mode.mode” must be “timesister” or “external”.')
 			await bad('a system name in capitals', { mode: 'timesister', system: 'Bexio', copy: 'auto' }, '“invoicing_mode.system” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).')
 			await bad('an unknown key', { mode: 'timesister', extra: 1 }, 'Unknown team setting “invoicing_mode.extra”.')
+			await bad('archive_pdf not a bool (0.24.1)', { mode: 'external', system: 'bexio', archive_pdf: 'yes' }, '“invoicing_mode.archive_pdf” must be true, false or null.')
 			expect('a Lead sets it', await ocs(L, 'PUT', '/team/settings', { invoicing_mode: null }), 403, 'forbidden')
 			// The Nextcloud admin through /admin/teams, as the other settings.
 			const pb = ((await ocs(ADMIN, 'GET', '/admin/teams')).data || []).find((t) => t.slug === 'pb')
@@ -117,8 +129,8 @@ export async function uebergabe() {
 			check('case 2: TimeSister with a copy to bexio', copy.status === 200 && JSON.stringify(copy.data?.invoicing_mode) === '{"mode":"timesister","system":"bexio","copy":"auto"}', copy.data)
 			check('… in /me', JSON.stringify((await me(A)).settings?.invoicing_mode) === '{"mode":"timesister","system":"bexio","copy":"auto"}')
 			const ext = await put({ mode: 'external', system: 'bexio' })
-			check('case 3: handed over to bexio, copy stored as off', ext.status === 200 && JSON.stringify(ext.data?.invoicing_mode) === '{"mode":"external","system":"bexio","copy":"off"}', ext.data)
-			check('… in /team', JSON.stringify((await ocs(A, 'GET', '/team')).data?.settings?.invoicing_mode) === '{"mode":"external","system":"bexio","copy":"off"}')
+			check('case 3: handed over to bexio, copy stored as off, archive_pdf true by default', ext.status === 200 && JSON.stringify(ext.data?.invoicing_mode) === '{"mode":"external","system":"bexio","copy":"off","archive_pdf":true}', ext.data)
+			check('… in /team', JSON.stringify((await ocs(A, 'GET', '/team')).data?.settings?.invoicing_mode) === '{"mode":"external","system":"bexio","copy":"off","archive_pdf":true}')
 			const iss = await ocs(A, 'POST', `${ipath(K1)}/issue`, { issued_on: ISSUED_ON })
 			check('issue in the mode external → 409', iss.status === 409 && iss.data?.message === 'This team hands its invoices over to bexio; TimeSister does not issue them.', [iss.status, iss.data])
 		}
@@ -186,6 +198,57 @@ export async function uebergabe() {
 			expect('a Lead revokes', await ocs(L, 'POST', `${ipath(K1)}/handover/revoke`, {}), 403, 'forbidden')
 			const r2 = await ocs(A, 'POST', `${ipath(K2)}/handover/revoke`, {})
 			check('revoking a draft → 409', r2.status === 409 && r2.data?.message === 'Only a handed-over invoice can be revoked.', [r2.status, r2.data])
+		}
+
+		head('Hand-over: the accounting system’s PDF (0.24.1)')
+		{
+			const pdf = systemPdf(NUMBER)
+			const put = (who, key, body, type = 'application/pdf') => raw(who, 'PUT', `${ipath(key)}/external-document`, body, type)
+			expect('a Lead stores it', await put(L, K1, pdf), 403, 'forbidden')
+			const notPdf = await put(A, K1, Buffer.from('hello'), 'text/plain')
+			check('not a PDF → 422', notPdf.status === 422 && notPdf.data?.message === 'The document must be a PDF.', [notPdf.status, notPdf.data])
+			const draftDoc = await put(A, K2, pdf)
+			check('a draft → 409', draftDoc.status === 409 && draftDoc.data?.message === 'Only a handed-over invoice gets the accounting system’s PDF.', [draftDoc.status, draftDoc.data])
+			const r = await put(A, K1, pdf)
+			const doc = r.data?.document
+			const owner = (await ocs(A, 'GET', '/team')).data?.backup_owner
+			if (r.status === 422 && !owner) {
+				console.log('    info  the team has no backup owner – the PDF checks are skipped')
+			} else {
+				expect('Team Admin stores bexio’s PDF of K1', r, 200)
+				check('document: <root>/Buchhaltung/<year>/Rechnungen/<issued_on>_bexio-<number>_<customer>.pdf, sha256, size', r.data?.stored === true
+					&& new RegExp(`/Buchhaltung/${Y}/Rechnungen/${ISSUED_ON}_bexio-BX-${RUN}-1_Kunde-Uebergabe-${RUN}\\.pdf$`).test(doc?.path ?? '') && doc?.sha256 === sha256(pdf) && doc?.size === pdf.length, doc)
+				check('record: external.document, still external', r.data?.record?.data?.status === 'external' && r.data?.record?.data?.external?.document?.path === doc?.path && r.data?.record?.data?.external?.number === NUMBER, r.data?.record?.data?.external)
+				const led = await ocs(A, 'GET', `/invoices/ledger?since=${(r.data?.ledger?.seq ?? 1) - 1}&limit=5`)
+				const e = led.data?.entries?.find((x) => x.seq === r.data?.ledger?.seq)
+				const p = JSON.parse(e?.payload || '{}')
+				check('ledger entry external_document { key, system, id, number, path, size, sha256 }', e?.action === 'external_document' && e?.number === NUMBER && p.key === K1 && p.system === 'bexio'
+					&& p.id === '4711' && p.path === doc?.path && p.sha256 === sha256(pdf) && p.size === pdf.length, e)
+				const dv = await dav({ user: owner, pass: `Test-2026-${owner}!` }, 'GET', `files/${encodeURIComponent(owner)}/${String(doc?.path || 'none').split('/').map(encodeURIComponent).join('/')}`)
+				check('the file lies in the owner’s files (WebDAV)', dv.status === 200 && dv.text.startsWith('%PDF-'), dv.status)
+				const again = await put(A, K1, pdf)
+				check('the same PDF again: no change, no ledger entry', again.status === 200 && again.data?.stored === false && again.data?.ledger === null && again.data?.document?.path === doc?.path, again.data)
+				const other = await put(A, K1, systemPdf(`${NUMBER}x`))
+				check('another PDF → 409, the first stays', other.status === 409 && other.data?.message === 'The PDF of this invoice is already stored; it stays as it is.', [other.status, other.data])
+				expect('archive_pdf false', await ocs(A, 'PUT', '/team/settings', { invoicing_mode: { mode: 'external', system: 'bexio', archive_pdf: false } }), 200)
+				const off = await put(A, K1, pdf)
+				check('… storing → 409', off.status === 409 && off.data?.message === 'This team does not store the accounting system’s PDFs (invoicing_mode.archive_pdf).', [off.status, off.data])
+				expect('archive_pdf back on', await ocs(A, 'PUT', '/team/settings', { invoicing_mode: { mode: 'external', system: 'bexio' } }), 200)
+				// Cancelled in bexio: noted once, PDF and status stay.
+				expect('a Lead notes the cancellation', await ocs(L, 'POST', `${ipath(K1)}/external-cancelled`), 403, 'forbidden')
+				const c2 = await ocs(A, 'POST', `${ipath(K2)}/external-cancelled`)
+				check('a draft → 409', c2.status === 409 && c2.data?.message === 'Only a handed-over invoice can be noted as cancelled in the accounting system.', [c2.status, c2.data])
+				const c = await ocs(A, 'POST', `${ipath(K1)}/external-cancelled`)
+				check('cancelled in bexio: noted, cancelled_at, status external, PDF stays', c.status === 200 && c.data?.noted === true && /^\d{4}-\d{2}-\d{2}T/.test(c.data?.record?.data?.external?.cancelled_at ?? '')
+					&& c.data?.record?.data?.status === 'external' && c.data?.record?.data?.external?.document?.path === doc?.path, c.data)
+				const cl = await ocs(A, 'GET', `/invoices/ledger?since=${(c.data?.ledger?.seq ?? 1) - 1}&limit=5`)
+				const ce = cl.data?.entries?.find((x) => x.seq === c.data?.ledger?.seq)
+				check('ledger entry external_cancelled with the document', ce?.action === 'external_cancelled' && JSON.parse(ce?.payload || '{}').document === doc?.path, ce)
+				const c3 = await ocs(A, 'POST', `${ipath(K1)}/external-cancelled`)
+				check('… a second time: no change', c3.status === 200 && c3.data?.noted === false && c3.data?.ledger === null, c3.data)
+				check('the chain verifies', (await ocs(A, 'GET', '/invoices/chain/verify')).data?.ok === true)
+				await dav({ user: owner, pass: `Test-2026-${owner}!` }, 'DELETE', `files/${encodeURIComponent(owner)}/${String(doc?.path || 'none').split('/').map(encodeURIComponent).join('/')}`)
+			}
 		}
 
 		head('Hand-over: revoke')

@@ -30,7 +30,10 @@ final class ExportRules {
 	public const EXTERNAL_URL_MAX = 512;
 	/** 0.23.1: the field `external` of the invoice record. */
 	public const EXTERNAL_FIELD = 'external';
-	public const EXTERNAL_KEYS = ['system', 'id', 'number', 'url', 'at', 'by'];
+	public const EXTERNAL_KEYS = ['system', 'id', 'number', 'url', 'at', 'by', 'document', 'cancelled_at'];
+	/** 0.24.1: the stored PDF of the accounting system – {path, sha256, size}. */
+	public const EXTERNAL_DOCUMENT_KEYS = ['path', 'sha256', 'size'];
+	public const EXTERNAL_PATH_MAX = 1024;
 	/** 0.24.0: the accounting system's invoice number of a hand-over (kept only when given). */
 	public const EXTERNAL_NUMBER_MAX = 64;
 	public const EXTERNAL_AT_MAX = 32;
@@ -364,7 +367,7 @@ final class ExportRules {
 		}
 		foreach (array_keys(get_object_vars($v)) as $k) {
 			if (!in_array($k, self::EXTERNAL_KEYS, true)) {
-				throw ApiException::invalid(Message::of('“external” has an unknown field “{field}”; allowed are system, id, number, url, at and by.', ['field' => $k]));
+				throw ApiException::invalid(Message::of('“external” has an unknown field “{field}”; allowed are system, id, number, url, at, by, document and cancelled_at.', ['field' => $k]));
 			}
 		}
 		$out = new \stdClass();
@@ -376,6 +379,34 @@ final class ExportRules {
 		$out->url = self::externalUrl($v->url ?? null, 'external.url');
 		$out->at = self::optionalText($v->at ?? null, 'external.at', self::EXTERNAL_AT_MAX);
 		$out->by = self::optionalText($v->by ?? null, 'external.by', self::EXTERNAL_BY_MAX);
+		// 0.24.1: set by the server only, kept when given.
+		if (property_exists($v, 'document')) {
+			$out->document = self::externalDocument($v->document);
+		}
+		if (property_exists($v, 'cancelled_at')) {
+			$out->cancelled_at = self::optionalText($v->cancelled_at, 'external.cancelled_at', self::EXTERNAL_AT_MAX);
+		}
+		return $out;
+	}
+
+	/** `external.document`: null or exactly {path, sha256, size}. */
+	private static function externalDocument(mixed $v): ?\stdClass {
+		if ($v === null) {
+			return null;
+		}
+		$keys = $v instanceof \stdClass ? array_keys(get_object_vars($v)) : [];
+		sort($keys);
+		$ok = $v instanceof \stdClass && $keys === ['path', 'sha256', 'size']
+			&& is_string($v->path) && $v->path !== '' && mb_strlen($v->path) <= self::EXTERNAL_PATH_MAX && preg_match('/[\x00-\x1F\x7F]/', $v->path) !== 1
+			&& is_string($v->sha256) && preg_match(LedgerRules::HASH_PATTERN, $v->sha256) === 1
+			&& is_int($v->size) && $v->size >= 0;
+		if (!$ok) {
+			throw ApiException::invalid('“external.document” must be null or an object with “path”, “sha256” and “size”.');
+		}
+		$out = new \stdClass();
+		$out->path = $v->path;
+		$out->sha256 = $v->sha256;
+		$out->size = $v->size;
 		return $out;
 	}
 

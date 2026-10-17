@@ -1772,6 +1772,8 @@ Admins).
 | `budgets[].work_packages[].rate` | Optional number ≥ 0; `422` otherwise. |
 | `budgets[].cap` | Optional cost cap in the budget's currency, a number ≥ 0; `null` or missing: the sum of hours × rate counts. `422` ““cap” must be null or a number ≥ 0.” otherwise. |
 | `budgets[].invoice_dates` | Optional list of at most 200 days `YYYY-MM-DD`, each once: the planned invoice dates (forecast invoices – the client computes the ideal line of the burndown between them). `null` or `[]` mean none; otherwise `422` ““invoice_dates” must be a list of at most 200 days (YYYY-MM-DD), each once.” |
+| `budgets[].progress` | Since 0.24.1, optional whole percent `0`–`100` set by a Lead or Team Admin (`null`: not set); `422` ““progress” must be null or a whole number from 0 to 100.” otherwise. |
+| `budgets[].work_packages[].addendum` | Since 0.24.1, optional `true`/`false`/`null`: the work package is an addendum; `422` ““addendum” must be true, false or null.” otherwise. |
 | `budgets[].rates` | **Not part of the record.** Rates per person are the person's `cost_rates` (see below). With content it is refused: `422` (““rates” is no longer part of a budget; cost rates live on the person.”) `null` or `{}` (a client's empty default) passes. |
 
 Everything is nullable; what is missing means nothing. The server does
@@ -3002,6 +3004,8 @@ missing customer country counts as domestic. The draft may override with
 | POST | `/invoices/{key}/external` | Team Admins | `{ "system": name, "id": ≤128, "url"?: https }` – records a hand-over to an accounting system: ledger `exported`, `fixed.external`, since 0.23.1 also `external` on the invoice record; `system` since 0.23.1 any name `^[a-z0-9][a-z0-9._-]{0,63}$` (before: `bexio`\|`lexware`\|`other`) |
 | POST | `/invoices/{key}/handover` | Team Admins | since 0.24.0, mode external: the accounting system issued the draft – marks, receipts, record `status: external`, ledger `external_issued` (see «Invoicing mode and hand-over, 0.24.0») |
 | POST | `/invoices/{key}/handover/revoke` | Team Admins | since 0.24.0: the draft again, ledger `external_revoked` |
+| PUT | `/invoices/{key}/external-document` | Team Admins | since 0.24.1, mode external with `archive_pdf`: the accounting system's PDF (raw, ≤ 20 MB) to the document tree, ledger `external_document` |
+| POST | `/invoices/{key}/external-cancelled` | Team Admins | since 0.24.1: the accounting system cancelled it – ledger `external_cancelled` once, PDF stays |
 
 Team setting `datev` (`PUT /team/settings`, `/admin/teams`):
 `{ "consultant": digits ≤ 7, "client": digits ≤ 5, "fiscal_year_start": "MM-DD", "account_length": 4–8, "debtor_account": digits, "revenue_domestic": digits, "revenue_eu": digits, "revenue_export": digits }`.
@@ -4438,3 +4442,85 @@ server's.
   `DraftResolver` (`head`, `billables`, `handedOver`), routes in
   `InvoiceExportController`; `IssueService` (refusals, reversal per
   occurrence), `RecordService` (client writes), `WebhookService`.
+
+## Budget progress, addenda and the accounting system's PDF, 0.24.1 (2026-10-17)
+
+Additive, `api: 2` stays; capability **`invoice_handover: 2`**; migration
+`Version1018Date20261017150000` widens `ts_inv_ledger.action` from 16 to 32
+characters (the new actions are longer). Not published.
+
+### Budget: `progress` and `work_packages[].addendum`
+
+| Field | Content |
+|---|---|
+| `budgets[].progress` | Optional: how far the work is, a whole percent `0`–`100` set by a Lead or Team Admin; `null` or missing: not set. The client compares the consumption (actual / volume) with it instead of with the time. Otherwise `422` ““progress” must be null or a whole number from 0 to 100.” |
+| `budgets[].work_packages[].addendum` | Optional: the work package was added later (an addendum, *Nachtrag*); counted in the budget overview and marked «(addendum)» on invoices. `true`, `false` or `null`; otherwise `422` ““addendum” must be true, false or null.” |
+
+Also in the budget of a quote (`ProjectRules::checkBudget`).
+
+### Team setting `invoicing_mode.archive_pdf`
+
+In the mode external the object takes `archive_pdf` (`true`|`false`|`null`,
+missing or `null` stored as `true`): store the PDF the accounting system
+renders for a handed-over invoice in the team's document tree. In the mode
+`timesister` it is dropped. Otherwise `422` ““invoicing_mode.archive_pdf”
+must be true, false or null.” A stored setting of 0.24.0 reads as
+`archive_pdf: true`. `{"mode":"external","system":"bexio"}` is stored as
+`{"mode":"external","system":"bexio","copy":"off","archive_pdf":true}`.
+
+### `PUT /invoices/{key}/external-document` (Team Admins)
+
+The body is the PDF (raw, at most 20 MB). Once the accounting system has
+**issued** the handed-over invoice (not a draft there – the client's
+plugin reads that), the client fetches its PDF and sends it here.
+
+Checks in this order: `403` (not a Team Admin) → `409` “This team does not
+store the accounting system’s PDFs (invoicing_mode.archive_pdf).” (mode not
+external, or `archive_pdf: false`) → `413` “The PDF may be at most 20 MB.”
+→ `422` “The document must be a PDF.” (not starting with `%PDF-`) → `404`
+record → `409` “Only a handed-over invoice gets the accounting system’s
+PDF.” → the same file again (same SHA-256): no change, `stored: false` →
+another file when one is stored: `409` “The PDF of this invoice is already
+stored; it stays as it is.”
+
+The file goes to `Buchhaltung/<YYYY of issued_on>/Rechnungen/<issued_on>_<system>-<number>_<customer>.pdf`
+(name parts as in the document tree; a taken name gets `_2` …). Then one
+transaction: ledger **`external_document`** (`invoice` 0, `number` = the
+external number, payload `{ key, system, id, number, path, size, sha256 }`)
+and the record (the server's write, new `version`) with
+`external.document: { path, sha256, size }`.
+
+Answer: `{ "record": …, "document": { path, sha256, size }, "stored": true|false, "ledger": { seq, prev_hash, hash }|null }`.
+
+### `POST /invoices/{key}/external-cancelled` (Team Admins)
+
+No body. The accounting system cancelled the handed-over invoice (its
+plugin's status read says so). `409` “Only a handed-over invoice can be
+noted as cancelled in the accounting system.” otherwise. Noted once:
+ledger **`external_cancelled`** (payload `{ key, system, id, number,
+document }`), the record keeps `status: "external"` and its PDF and gets
+`external.cancelled_at` (the entry's `at`); a second call changes nothing
+(`noted: false`). Hours and receipts stay billed – taking them back is the
+revocation, which the plugin offers only while the system has not issued.
+
+Answer: `{ "record": …, "noted": true|false, "ledger": …|null }`.
+
+### Record and webhooks
+
+- `external` on the invoice record takes `document` (`null` or exactly
+  `{ path, sha256, size }`) and `cancelled_at` (text ≤ 32), both set by the
+  server and kept only when given. The unknown-field message now reads
+  ““external” has an unknown field “note”; allowed are system, id, number,
+  url, at, by, document and cancelled_at.”
+- Webhooks: `external_document` fires `document`, `external_cancelled`
+  fires `reversed`, both with `status: "external"`.
+
+### As built, 0.24.1 (2026-10-17)
+
+- `InvoicingModeRules::archivesPdf`, `HandoverRules::requireDocument`,
+  `requireArchive`, `documentAgain`, `documentName`, `documentPayload`,
+  `cancelPayload`; `HandoverService::document` (file first, then record
+  and ledger in one transaction, as for TimeSister's own documents) and
+  `::cancelled`; `DraftResolver::customerName` (empty when the customer
+  cannot be told; the part is then left out of the name); routes in
+  `InvoiceExportController`.

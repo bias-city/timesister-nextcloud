@@ -168,6 +168,15 @@ class ProjectRulesTest extends TestCase {
 		foreach (['"2026-12-31"', '["2026-02-30"]', '["2026-12-31","2026-12-31"]', '[20261231]', '{"a":"2026-12-31"}'] as $bad) {
 			$this->assertSame('422 “invoice_dates” must be a list of at most 200 days (YYYY-MM-DD), each once.', self::validate('{"id":"p","status":"draft","budgets":[{"invoice_dates":' . $bad . '}]}'), $bad);
 		}
+		// 0.24.1: progress a whole percent or null; addendum a bool or null.
+		$this->assertSame('', self::validate('{"id":"p","status":"draft","budgets":[{"progress":0},{"progress":100},{"progress":45},{"progress":null},{}]}'));
+		foreach (['-1', '101', '50.5', '"50"', 'true', '[50]'] as $bad) {
+			$this->assertSame('422 “progress” must be null or a whole number from 0 to 100.', self::validate('{"id":"p","status":"draft","budgets":[{"progress":' . $bad . '}]}'), $bad);
+		}
+		$this->assertSame('', self::validate('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":1,"addendum":true},{"no":2,"addendum":false},{"no":3,"addendum":null},{"no":4}]}]}'));
+		foreach (['1', '"yes"', '[]', '{}'] as $bad) {
+			$this->assertSame('422 “addendum” must be true, false or null.', self::validate('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":1,"addendum":' . $bad . '}]}]}'), $bad);
+		}
 		// Things the app does not compute with pass: budgets that are no objects.
 		$this->assertSame('', self::validate('{"id":"p","status":"draft","budgets":"old","work_packages":7}'));
 		$this->assertSame('', self::validate('{"id":"p","status":"draft","budgets":[7,"x",null,{"work_packages":"none"}]}'));

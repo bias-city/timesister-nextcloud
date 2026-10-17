@@ -45,8 +45,16 @@ class HandoverRulesTest extends TestCase {
 		$this->assertSame(['mode' => 'timesister', 'system' => 'bexio', 'copy' => 'auto'], InvoicingModeRules::validate(json_decode('{"mode":"timesister","system":"bexio","copy":"auto"}')), 'case 2');
 		$this->assertSame(['mode' => 'timesister', 'system' => 'sevdesk', 'copy' => 'manual'], InvoicingModeRules::validate(['mode' => 'timesister', 'system' => 'sevdesk', 'copy' => 'manual']), 'an array as from /admin/teams');
 		$this->assertSame(['mode' => 'timesister', 'system' => 'lexware', 'copy' => 'off'], InvoicingModeRules::validate(['mode' => 'timesister', 'system' => 'lexware', 'copy' => null]), 'a system without copies');
-		$this->assertSame(['mode' => 'external', 'system' => 'ch.example.csv', 'copy' => 'off'], InvoicingModeRules::validate(json_decode('{"mode":"external","system":"ch.example.csv"}')), 'case 3');
-		$this->assertSame(['mode' => 'external', 'system' => 'bexio', 'copy' => 'off'], InvoicingModeRules::validate(json_decode('{"mode":"external","system":"bexio","copy":"off"}')));
+		$this->assertSame(['mode' => 'external', 'system' => 'ch.example.csv', 'copy' => 'off', 'archive_pdf' => true], InvoicingModeRules::validate(json_decode('{"mode":"external","system":"ch.example.csv"}')), 'case 3');
+		$this->assertSame(['mode' => 'external', 'system' => 'bexio', 'copy' => 'off', 'archive_pdf' => true], InvoicingModeRules::validate(json_decode('{"mode":"external","system":"bexio","copy":"off"}')));
+		// 0.24.1: archive_pdf in the mode external (default true), dropped in the mode timesister.
+		$this->assertSame(['mode' => 'external', 'system' => 'bexio', 'copy' => 'off', 'archive_pdf' => false], InvoicingModeRules::validate(json_decode('{"mode":"external","system":"bexio","archive_pdf":false}')));
+		$this->assertSame(['mode' => 'external', 'system' => 'bexio', 'copy' => 'off', 'archive_pdf' => true], InvoicingModeRules::validate(json_decode('{"mode":"external","system":"bexio","archive_pdf":null}')));
+		$this->assertSame(['mode' => 'timesister', 'system' => null, 'copy' => 'off'], InvoicingModeRules::validate(json_decode('{"mode":"timesister","archive_pdf":true}')));
+		$this->assertTrue(InvoicingModeRules::archivesPdf(InvoicingModeRules::validate(json_decode('{"mode":"external","system":"bexio"}'))));
+		$this->assertFalse(InvoicingModeRules::archivesPdf(InvoicingModeRules::validate(json_decode('{"mode":"external","system":"bexio","archive_pdf":false}'))));
+		$this->assertFalse(InvoicingModeRules::archivesPdf(null));
+		$this->assertFalse(InvoicingModeRules::archivesPdf(['mode' => 'timesister', 'system' => 'bexio', 'copy' => 'auto']));
 	}
 
 	public function testModeInvalid(): void {
@@ -66,6 +74,7 @@ class HandoverRulesTest extends TestCase {
 			'{"mode":"external"}' => '“invoicing_mode.system” is required for the mode “external”: name the accounting system that issues the invoices.',
 			'{"mode":"external","system":null}' => '“invoicing_mode.system” is required for the mode “external”: name the accounting system that issues the invoices.',
 			'{"mode":"external","system":"bexio","copy":"auto"}' => '“invoicing_mode.copy” must be “off” for the mode “external”: the accounting system issues the invoices itself.',
+			'{"mode":"external","system":"bexio","archive_pdf":"yes"}' => '“invoicing_mode.archive_pdf” must be true, false or null.',
 		] as $json => $message) {
 			$this->assertSame('422 ' . $message, self::outcome(static fn () => InvoicingModeRules::validate(json_decode($json))), $json);
 		}
@@ -74,7 +83,7 @@ class HandoverRulesTest extends TestCase {
 	public function testModeStoredAndShown(): void {
 		$m = InvoicingModeRules::validate(json_decode('{"mode":"external","system":"bexio"}'));
 		$json = InvoicingModeRules::encode($m);
-		$this->assertSame('{"mode":"external","system":"bexio","copy":"off"}', $json);
+		$this->assertSame('{"mode":"external","system":"bexio","copy":"off","archive_pdf":true}', $json);
 		$this->assertSame($m, InvoicingModeRules::decode($json), 'round trip');
 		$this->assertNull(InvoicingModeRules::encode(null));
 		$this->assertNull(InvoicingModeRules::decode(null));
@@ -177,11 +186,46 @@ class HandoverRulesTest extends TestCase {
 		$this->assertSame('external', HandoverRules::statusAfter(LedgerRules::EXTERNAL_ISSUED));
 		$this->assertSame('draft', HandoverRules::statusAfter(LedgerRules::EXTERNAL_REVOKED));
 		$this->assertSame('', HandoverRules::statusAfter(LedgerRules::ISSUED));
+		$this->assertSame('external', HandoverRules::statusAfter(LedgerRules::EXTERNAL_DOCUMENT));
+		$this->assertSame('external', HandoverRules::statusAfter(LedgerRules::EXTERNAL_CANCELLED));
+		$this->assertSame('document', WebhookRules::eventOf(LedgerRules::EXTERNAL_DOCUMENT));
+		$this->assertSame('reversed', WebhookRules::eventOf(LedgerRules::EXTERNAL_CANCELLED));
+	}
+
+	/** 0.24.1: the accounting system's PDF of a handed-over invoice. */
+	public function testExternalDocument(): void {
+		$this->assertSame('ok', self::outcome(static fn () => HandoverRules::requireDocument('%PDF-1.7 …')));
+		$this->assertSame('422 The document must be a PDF.', self::outcome(static fn () => HandoverRules::requireDocument("\x89PNG\r\n")));
+		$this->assertSame('422 The document must be a PDF.', self::outcome(static fn () => HandoverRules::requireDocument('')));
+		$this->assertSame('413 The PDF may be at most 20 MB.', self::outcome(static fn () => HandoverRules::requireDocument('%PDF-' . str_repeat('x', HandoverRules::DOCUMENT_MAX))));
+		$off = '409 This team does not store the accounting system’s PDFs (invoicing_mode.archive_pdf).';
+		$this->assertSame('ok', self::outcome(static fn () => HandoverRules::requireArchive(['mode' => 'external', 'system' => 'bexio', 'copy' => 'off', 'archive_pdf' => true])));
+		$this->assertSame($off, self::outcome(static fn () => HandoverRules::requireArchive(['mode' => 'external', 'system' => 'bexio', 'copy' => 'off', 'archive_pdf' => false])));
+		$this->assertSame($off, self::outcome(static fn () => HandoverRules::requireArchive(null)));
+		$this->assertSame('2026-10-16_bexio-RE-17_Mueller-AG.pdf', HandoverRules::documentName('2026-10-16', 'bexio', 'RE-17', 'Müller AG'));
+		$this->assertSame('2026-10-16_lexware-RE-2026-0001.pdf', HandoverRules::documentName('2026-10-16', 'lexware', 'RE 2026/0001', ''));
+		$sha = str_repeat('a', 64);
+		$ext = (object)['system' => 'bexio', 'id' => '4711', 'number' => 'RE-17'];
+		$this->assertNull(HandoverRules::documentAgain($ext, $sha), 'none yet');
+		$ext->document = (object)['path' => 'TimeSister/T/Buchhaltung/2026/Rechnungen/x.pdf', 'sha256' => $sha, 'size' => 9];
+		$this->assertSame($ext->document, HandoverRules::documentAgain($ext, $sha), 'the same file: no change');
+		$this->assertSame('409 The PDF of this invoice is already stored; it stays as it is.', self::outcome(static fn () => HandoverRules::documentAgain($ext, str_repeat('b', 64))));
+		$this->assertSame('{"id":"4711","key":"inv-1a2b3c4d","number":"RE-17","path":"p/x.pdf","sha256":"' . $sha . '","size":9,"system":"bexio"}',
+			LedgerRules::canonical(HandoverRules::documentPayload('inv-1a2b3c4d', $ext, ['path' => 'p/x.pdf', 'size' => 9, 'file_id' => 3], $sha)));
+		$this->assertSame('{"document":"TimeSister/T/Buchhaltung/2026/Rechnungen/x.pdf","id":"4711","key":"inv-1a2b3c4d","number":"RE-17","system":"bexio"}',
+			LedgerRules::canonical(HandoverRules::cancelPayload('inv-1a2b3c4d', $ext)));
+		// The record keeps `document` and `cancelled_at` in `external`.
+		$b = ExportRules::externalBlock(json_decode('{"system":"bexio","id":"1","number":"RE-17","document":{"size":9,"path":"a/b.pdf","sha256":"' . $sha . '"},"cancelled_at":"2026-10-17T10:00:00Z"}'));
+		$this->assertSame('{"system":"bexio","id":"1","number":"RE-17","url":null,"at":null,"by":null,"document":{"path":"a/b.pdf","sha256":"' . $sha . '","size":9},"cancelled_at":"2026-10-17T10:00:00Z"}', json_encode($b, Json::FLAGS));
+		foreach (['{"path":"a.pdf"}', '{"path":"","sha256":"' . $sha . '","size":1}', '{"path":"a","sha256":"x","size":1}', '{"path":"a","sha256":"' . $sha . '","size":-1}', '"a.pdf"', '{"path":"a","sha256":"' . $sha . '","size":1,"x":1}'] as $bad) {
+			$this->assertSame('422 “external.document” must be null or an object with “path”, “sha256” and “size”.',
+				self::outcome(static fn () => ExportRules::externalBlock(json_decode('{"system":"bexio","id":"1","document":' . $bad . '}'))), $bad);
+		}
 	}
 
 	public function testCapability(): void {
 		$apps = $this->createStub(IAppManager::class);
-		$apps->method('getAppVersion')->willReturn('0.24.0');
-		$this->assertSame(1, (new Capabilities($apps))->getCapabilities()['timesister']['invoice_handover']);
+		$apps->method('getAppVersion')->willReturn('0.24.1');
+		$this->assertSame(2, (new Capabilities($apps))->getCapabilities()['timesister']['invoice_handover'], '0.24.1: the system\'s PDF and cancellation');
 	}
 }

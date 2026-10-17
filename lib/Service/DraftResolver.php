@@ -140,6 +140,25 @@ final class DraftResolver {
 		return [$bookings, $positions, $receipts];
 	}
 
+	/** The customer's name of an invoice record (project, budget, quote), '' when it cannot be told (0.24.1, file names). */
+	public function customerName(int $tenantId, \stdClass $d): string {
+		try {
+			$projectKey = (string)($d->project ?? '');
+			$project = $this->live($tenantId, 'project', $projectKey);
+			if ($project === null) {
+				return '';
+			}
+			$quotes = array_values(array_filter(array_map(
+				static fn ($r) => InvoiceRules::decode($r->getData()),
+				$this->records->findLiveByKind($tenantId, 'quote'))));
+			$key = IssueRules::customerKeyFor($project, $projectKey, (string)($d->budget ?? ''), $quotes);
+			$name = $key === null ? null : ($this->live($tenantId, 'customer', $key)?->name ?? null);
+			return is_string($name) ? $name : '';
+		} catch (ApiException) {
+			return '';
+		}
+	}
+
 	/** The accounting system's number of a handed-over invoice (0.24.0), else null. */
 	private function externalNumber(int $tenantId, string $key): ?string {
 		$d = $this->live($tenantId, InvoiceRules::KIND, $key);

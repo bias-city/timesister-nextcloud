@@ -130,7 +130,7 @@ class InvoiceRulesTest extends TestCase {
 		foreach (['bexio', 'lexware', 'other', 'datev'] as $name) {
 			$this->assertSame('ok', self::check(['external' => ['system' => $name, 'id' => '1']]), $name);
 		}
-		$this->assertSame('422 “external” has an unknown field “note”; allowed are system, id, number, url, at and by.', self::check(['external' => ['system' => 'bexio', 'id' => '1', 'note' => 'x']]));
+		$this->assertSame('422 “external” has an unknown field “note”; allowed are system, id, number, url, at, by, document and cancelled_at.', self::check(['external' => ['system' => 'bexio', 'id' => '1', 'note' => 'x']]));
 		$this->assertSame('422 “external” must be null or an object with “system” and “id”.', self::check(['external' => 'bexio']));
 		$this->assertSame('422 “external.system” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).', self::check(['external' => ['system' => 'SevDesk', 'id' => '1']]));
 		$this->assertSame('422 “external.system” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).', self::check(['external' => ['id' => '1']]));

@@ -64,7 +64,10 @@ use OCP\Capabilities\ICapability;
  * number, frozen lines, PDF with receipt copies, ledger.
  * `invoice_handover: 1` since 0.24.0: team setting `invoicing_mode` and
  * the hand-over of a draft to the accounting system that issues it
- * (POST /invoices/{key}/handover, …/handover/revoke).
+ * (POST /invoices/{key}/handover, …/handover/revoke). `invoice_handover: 2`
+ * since 0.24.1: the accounting system's PDF stored (PUT
+ * /invoices/{key}/external-document, setting `invoicing_mode.archive_pdf`),
+ * its cancellation noted (POST …/external-cancelled).
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -101,7 +104,7 @@ final class Capabilities implements ICapability {
 				'receipts' => 1,
 				'document_tree' => 1,
 				'expense_fixing' => 1,
-				'invoice_handover' => 1,
+				'invoice_handover' => 2,
 			],
 		];
 	}
