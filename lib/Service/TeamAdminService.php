@@ -253,6 +253,9 @@ final class TeamAdminService {
 		if (is_array($settings[ExportRules::FIELD] ?? null)) {
 			$t->setDatevJson(ExportRules::encodeDatev($settings[ExportRules::FIELD]));
 		}
+		if (array_key_exists(InvoicingModeRules::FIELD, $settings)) {
+			$t->setInvoicingModeJson(InvoicingModeRules::encode($settings[InvoicingModeRules::FIELD]));
+		}
 		if (is_array($settings[WebhookRules::FIELD] ?? null)) {
 			$t->setWebhooksJson(WebhookRules::encode($settings[WebhookRules::FIELD]));
 		}

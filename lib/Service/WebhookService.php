@@ -50,9 +50,13 @@ final class WebhookService {
 				return;
 			}
 			$row = $this->invoices->findById($tenantId, $entry->getInvoiceId());
+			// 0.24.0: a hand-over has no frozen row; key and currency come from its payload.
+			$p = $row === null ? json_decode((string)$entry->getPayload(), true) : null;
+			$p = is_array($p) ? $p : [];
 			$invoice = [
-				'key' => $row?->getRkey() ?? '', 'number' => $entry->getNumber(), 'status' => $row?->getStatus() ?? '',
-				'gross' => (float)($row?->getGross() ?? '0'), 'currency' => $row?->getCurrency() ?? '',
+				'key' => $row?->getRkey() ?? (is_string($p['key'] ?? null) ? $p['key'] : ''), 'number' => $entry->getNumber(),
+				'status' => $row?->getStatus() ?? HandoverRules::statusAfter($entry->getAction()),
+				'gross' => (float)($row?->getGross() ?? '0'), 'currency' => $row?->getCurrency() ?? (is_string($p['currency'] ?? null) ? $p['currency'] : ''),
 				'total' => $row === null ? 0.0 : InvoiceFixed::sumsOf($row)->total,
 			];
 			$body = WebhookRules::body($t->getSlug(), $event, $entry->getAction(), $entry->getAt(), $invoice, $entry->getSeq(), $entry->getHash());

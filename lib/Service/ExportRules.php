@@ -30,7 +30,9 @@ final class ExportRules {
 	public const EXTERNAL_URL_MAX = 512;
 	/** 0.23.1: the field `external` of the invoice record. */
 	public const EXTERNAL_FIELD = 'external';
-	public const EXTERNAL_KEYS = ['system', 'id', 'url', 'at', 'by'];
+	public const EXTERNAL_KEYS = ['system', 'id', 'number', 'url', 'at', 'by'];
+	/** 0.24.0: the accounting system's invoice number of a hand-over (kept only when given). */
+	public const EXTERNAL_NUMBER_MAX = 64;
 	public const EXTERNAL_AT_MAX = 32;
 	public const EXTERNAL_BY_MAX = 64;
 	/** The DATEV setting with its defaults (null: not set). */
@@ -351,7 +353,7 @@ final class ExportRules {
 	/**
 	 * The field `external` of the invoice record (0.23.1): null or exactly
 	 * {system, id, url?, at?, by?}, returned complete (missing ones null,
-	 * an integer id as text).
+	 * an integer id as text). 0.24.0: `number` optional, kept only when given.
 	 */
 	public static function externalBlock(mixed $v): ?\stdClass {
 		if ($v === null) {
@@ -362,26 +364,30 @@ final class ExportRules {
 		}
 		foreach (array_keys(get_object_vars($v)) as $k) {
 			if (!in_array($k, self::EXTERNAL_KEYS, true)) {
-				throw ApiException::invalid(Message::of('“external” has an unknown field “{field}”; allowed are system, id, url, at and by.', ['field' => $k]));
+				throw ApiException::invalid(Message::of('“external” has an unknown field “{field}”; allowed are system, id, number, url, at and by.', ['field' => $k]));
 			}
 		}
 		$out = new \stdClass();
 		$out->system = self::system($v->system ?? null, 'external.system');
 		$out->id = self::externalId($v->id ?? null, 'external.id');
+		if (property_exists($v, 'number')) {
+			$out->number = $v->number === null ? null : self::externalNumber($v->number, 'external.number');
+		}
 		$out->url = self::externalUrl($v->url ?? null, 'external.url');
 		$out->at = self::optionalText($v->at ?? null, 'external.at', self::EXTERNAL_AT_MAX);
 		$out->by = self::optionalText($v->by ?? null, 'external.by', self::EXTERNAL_BY_MAX);
 		return $out;
 	}
 
-	private static function system(mixed $v, string $field): string {
+	/** A system name after SYSTEM_PATTERN, or 422 naming the field (shared with the invoicing mode, 0.24.0). */
+	public static function system(mixed $v, string $field): string {
 		if (!is_string($v) || preg_match(self::SYSTEM_PATTERN, $v) !== 1) {
 			throw ApiException::invalid(Message::of('“{field}” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).', ['field' => $field]));
 		}
 		return $v;
 	}
 
-	private static function externalId(mixed $v, string $field): string {
+	public static function externalId(mixed $v, string $field): string {
 		if (is_int($v)) {
 			$v = (string)$v;
 		}
@@ -391,7 +397,18 @@ final class ExportRules {
 		return trim($v);
 	}
 
-	private static function externalUrl(mixed $v, string $field): ?string {
+	/** The accounting system's invoice number (0.24.0): text 1–64 without control characters, an integer as text, trimmed. */
+	public static function externalNumber(mixed $v, string $field): string {
+		if (is_int($v)) {
+			$v = (string)$v;
+		}
+		if (!is_string($v) || trim($v) === '' || mb_strlen(trim($v)) > self::EXTERNAL_NUMBER_MAX || preg_match('/[\x00-\x1F\x7F]/', $v)) {
+			throw ApiException::invalid(Message::of('“{field}” must be text of 1 to {max} characters.', ['field' => $field, 'max' => self::EXTERNAL_NUMBER_MAX]));
+		}
+		return trim($v);
+	}
+
+	public static function externalUrl(mixed $v, string $field): ?string {
 		if ($v === null || $v === '') {
 			return null;
 		}

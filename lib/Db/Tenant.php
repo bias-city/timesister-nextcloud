@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Db;
 
+use OCA\TimeSister\Service\InvoicingModeRules;
 use OCP\AppFramework\Db\Entity;
 use OCP\DB\Types;
 
@@ -38,6 +39,8 @@ use OCP\DB\Types;
  * @method void setDatevJson(?string $datevJson)
  * @method string|null getWebhooksJson()
  * @method void setWebhooksJson(?string $webhooksJson)
+ * @method string|null getInvoicingModeJson()
+ * @method void setInvoicingModeJson(?string $invoicingModeJson)
  */
 final class Tenant extends Entity {
 	protected string $name = '';
@@ -61,6 +64,8 @@ final class Tenant extends Entity {
 	/** Team settings `datev` and `webhooks` (0.20.0) as JSON; null: nothing set. */
 	protected ?string $datevJson = null;
 	protected ?string $webhooksJson = null;
+	/** Team setting `invoicing_mode` (0.24.0) as JSON; null: TimeSister issues, no copy. */
+	protected ?string $invoicingModeJson = null;
 
 	public function __construct() {
 		$this->addType('name', Types::STRING);
@@ -77,10 +82,16 @@ final class Tenant extends Entity {
 		$this->addType('documentsJson', Types::STRING);
 		$this->addType('datevJson', Types::STRING);
 		$this->addType('webhooksJson', Types::STRING);
+		$this->addType('invoicingModeJson', Types::STRING);
 	}
 
 	/** Issuing on the server (0.18.0) is on for this team. */
 	public function invoicingOn(): bool {
 		return $this->invoicing === 1;
+	}
+
+	/** The team setting `invoicing_mode` (0.24.0). @return ?array{mode:string,system:?string,copy:string} */
+	public function invoicingMode(): ?array {
+		return InvoicingModeRules::decode($this->invoicingModeJson);
 	}
 }

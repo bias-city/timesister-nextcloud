@@ -280,6 +280,10 @@ final class EntryService {
 			$t->setDatevJson(ExportRules::encodeDatev($settings[ExportRules::FIELD]));
 			$this->tenants->update($t);
 		}
+		if (array_key_exists(InvoicingModeRules::FIELD, $settings)) {
+			$t->setInvoicingModeJson(InvoicingModeRules::encode($settings[InvoicingModeRules::FIELD]));
+			$this->tenants->update($t);
+		}
 		if (array_key_exists(WebhookRules::FIELD, $settings) && is_array($settings[WebhookRules::FIELD])) {
 			$t->setWebhooksJson(WebhookRules::encode($settings[WebhookRules::FIELD]));
 			$this->tenants->update($t);

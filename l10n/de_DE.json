@@ -556,7 +556,7 @@
 		"“{field}” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).": "„{field}“ muss ein Name mit 1 bis 64 Zeichen sein: Kleinbuchstaben, Ziffern, „.“, „_“ oder „-“, am Anfang ein Buchstabe oder eine Ziffer (zum Beispiel „bexio“).",
 		"“{field}” must be an https address of at most {max} characters.": "„{field}“ muss eine https-Adresse mit höchstens {max} Zeichen sein.",
 		"“external” must be null or an object with “system” and “id”.": "„external“ muss null oder ein Objekt mit „system“ und „id“ sein.",
-		"“external” has an unknown field “{field}”; allowed are system, id, url, at and by.": "„external“ hat ein unbekanntes Feld „{field}“; erlaubt sind system, id, url, at und by.",
+		"“external” has an unknown field “{field}”; allowed are system, id, number, url, at and by.": "„external“ hat ein unbekanntes Feld „{field}“; erlaubt sind system, id, number, url, at und by.",
 		"Only Team Admins export invoices.": "Nur Team Admins exportieren Rechnungen.",
 		"“issuer.besr_id” must be 6 digits.": "„issuer.besr_id“ muss aus 6 Ziffern bestehen.",
 		"“tax_case” must be “domestic”, “eu_reverse” or “export”.": "„tax_case“ muss „domestic“, „eu_reverse“ oder „export“ sein.",
@@ -705,7 +705,21 @@
 		"Only the person and Team Admins read an expense report.": "Nur die Person und Team Admins lesen ein Spesenblatt.",
 		"This expense report has no document yet; it is written when it is fixed.": "Dieses Spesenblatt hat noch kein Dokument; es entsteht beim Fixieren.",
 		"Only Team Admins fix expense reports.": "Nur Team Admins fixieren Spesenblätter.",
-		"Only Team Admins reverse expense reports.": "Nur Team Admins stornieren Spesenblätter."
+		"Only Team Admins reverse expense reports.": "Nur Team Admins stornieren Spesenblätter.",
+		"This team hands its invoices over to {system}, not to {given}.": "Dieses Team übergibt seine Rechnungen an {system}, nicht an {given}.",
+		"This team hands its invoices over to {system}; TimeSister does not issue them.": "Dieses Team übergibt seine Rechnungen an {system}; TimeSister stellt sie nicht aus.",
+		"Only the server sets the status “external”, when an invoice is handed over.": "Den Status „external“ setzt nur der Server, wenn eine Rechnung übergeben wird.",
+		"Only Team Admins hand invoices over to an accounting system.": "Rechnungen an eine Buchhaltung übergeben nur Team Admins.",
+		"Only a draft without a number can be handed over.": "Übergeben lässt sich nur ein Entwurf ohne Nummer.",
+		"Only a handed-over invoice can be revoked.": "Zurücknehmen lässt sich nur eine übergebene Rechnung.",
+		"“invoicing_mode” must be null or an object with “mode”.": "„invoicing_mode“ muss null oder ein Objekt mit „mode“ sein.",
+		"“{field}” must be “timesister” or “external”.": "„{field}“ muss „timesister“ oder „external“ sein.",
+		"“{field}” must be “off”, “auto” or “manual”.": "„{field}“ muss „off“, „auto“ oder „manual“ sein.",
+		"Handing over needs the team setting invoicing_mode external.": "Zum Übergeben braucht es die Team-Einstellung invoicing_mode external.",
+		"This invoice was handed over to {system}; revoke the hand-over first.": "Diese Rechnung wurde an {system} übergeben; nehmen Sie zuerst die Übergabe zurück.",
+		"“invoicing_mode.system” is required for the mode “external”: name the accounting system that issues the invoices.": "„invoicing_mode.system“ fehlt für den Modus „external“: Nennen Sie die Buchhaltung, die die Rechnungen ausstellt.",
+		"“invoicing_mode.copy” must be “off” for the mode “external”: the accounting system issues the invoices itself.": "„invoicing_mode.copy“ muss für den Modus „external“ „off“ sein: Die Buchhaltung stellt die Rechnungen selbst aus.",
+		"“invoicing_mode.copy” needs “invoicing_mode.system”: name the accounting system that gets the copies.": "„invoicing_mode.copy“ braucht „invoicing_mode.system“: Nennen Sie die Buchhaltung, die die Kopien bekommt."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

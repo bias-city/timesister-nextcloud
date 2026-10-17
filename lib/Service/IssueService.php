@@ -105,8 +105,10 @@ final class IssueService {
 
 	/** `POST /invoices/{key}/issue`. @return array<string,mixed> the record plus `issue` */
 	public function issue(Membership $m, string $key, \stdClass $body): array {
-		$this->requireOn($m);
+		$t = $this->requireOn($m);
 		$this->requireAdmin($m);
+		// 0.24.0: in the mode external the accounting system issues.
+		HandoverRules::refuseIssue($t->invoicingMode());
 		RecordValidator::checkAddress(InvoiceRules::KIND, $key);
 		$now = $this->time->getTime();
 		$issuedOn = IssueRules::issuedOn($body->issued_on ?? null, $now);
@@ -344,6 +346,7 @@ final class IssueService {
 	private function reverseWithin(Membership $m, string $key, string $kind, ?string $reason, string $issuedOn, ?array $given, int $now): array {
 		$tid = $m->tenantId;
 		[$cur, $d] = $this->invoiceRecord($tid, $key);
+		HandoverRules::refuseHandedOver($d);
 		$orig = $this->invoices->findByKey($tid, $key);
 		if ($orig === null || !$orig->isLive()) {
 			throw ApiException::invalid('Only an issued or paid invoice can be reversed or credited.');
@@ -369,6 +372,7 @@ final class IssueService {
 		// The marks to release (reversal): the original's events, unless another live invoice bills an occurrence.
 		$release = [];
 		if ($kind === IssueRules::REVERSAL) {
+			$handed = $this->drafts->handedOver($tid);
 			foreach ($this->hours->findByInvoice($tid, $orig->getId()) as $h) {
 				$other = false;
 				foreach ($this->hours->billingsOf($tid, $h->getUid(), $h->getEventUid()) as $b) {
@@ -376,6 +380,8 @@ final class IssueService {
 						$other = true;
 					}
 				}
+				// 0.24.0: or a handed-over invoice.
+				$other = $other || isset($handed[$h->getUid() . "\n" . $h->getEventUid()]);
 				$mark = $this->records->findOne($tid, BillingRules::KIND, BillingRules::key($h->getUid(), $h->getEventUid()));
 				if (!$other && $mark !== null && !$mark->isTombstone()) {
 					$release[$mark->getRkey()] = $mark;
@@ -449,7 +455,8 @@ final class IssueService {
 		$n->created_on = $issuedOn;
 		$n->ledger_seq = $entry->getSeq();
 		$n->hash = $entry->getHash();
-		unset($n->reversed_by, $n->reverses, $n->credits);
+		// The hand-over of the original (0.23.1/0.24.0) is not the new document's.
+		unset($n->reversed_by, $n->reverses, $n->credits, $n->external);
 		if ($kind === IssueRules::REVERSAL) {
 			$n->reverses = $key;
 		} else {

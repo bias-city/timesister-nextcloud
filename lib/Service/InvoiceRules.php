@@ -19,7 +19,8 @@ namespace OCA\TimeSister\Service;
 final class InvoiceRules {
 	public const KIND = 'invoice';
 	public const DRAFT = 'draft';
-	public const STATUSES = [self::DRAFT, 'issued', 'paid', 'cancelled'];
+	/** 0.24.0: `external`, handed over to the accounting system that issues it (set by the server only). */
+	public const STATUSES = [self::DRAFT, 'issued', 'paid', 'cancelled', HandoverRules::STATUS];
 	public const MAX_BOOKINGS = 5000;
 	/** 5000 bookings with their event UIDs need more than the usual 256 KB. */
 	public const MAX_BYTES = 786432;

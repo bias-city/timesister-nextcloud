@@ -1,5 +1,33 @@
 # Changes
 
+## 0.24.0 – 2026-10-17
+
+Additive, `api: 2` unchanged; capability `invoice_handover: 1`; migration
+`Version1017Date20261017120000` (column `ts_tenants.invoicing_mode_json`).
+Contract: `API.md` «Invoicing mode and hand-over, 0.24.0» with «As built».
+
+- **Team setting `invoicing_mode`** (`PUT /team/settings`, `/admin/teams`):
+  `null` (TimeSister issues, the default) or `{ mode: timesister|external,
+  system, copy: off|auto|manual }` – TimeSister with a copy to an
+  accounting system, or the hand-over. Checked per rule (422 with the
+  field path), stored complete, shown in `/me`, `/team`, `/admin/teams` and
+  the team ZIP.
+- **`POST /invoices/{key}/handover`** (Team Admins, mode external): the
+  accounting system issued the draft. One transaction: billing marks with
+  the external number, the receipts billed, the record `status: external`
+  with `external: { system, id, number, url, at, by }`, ledger
+  `external_issued`; no number of the team's counter, no PDF.
+- **`POST /invoices/{key}/handover/revoke`**: marks released, receipts
+  approved again, the record a draft again, ledger `external_revoked`.
+- Issuing in the mode external and reversing a handed-over invoice: 409.
+  Clients may not set the status `external` (422) nor write or delete a
+  handed-over invoice (409).
+- `external` on the invoice record takes `number`; webhooks fire
+  `exported` for both new ledger actions; bookings of handed-over invoices
+  count per occurrence when issuing, handing over, reversing and revoking.
+- A reversal or credit note no longer copies the original's `external`
+  (the hand-over of the original is not the new document's).
+
 ## 0.23.1 – 2026-10-17
 
 Additive, `api: 2` unchanged, no schema change. Contract: `API.md`
