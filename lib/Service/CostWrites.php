@@ -15,7 +15,8 @@ use OCP\AppFramework\Utility\ITimeFactory;
  * against the stored record, inside the record transaction under the team
  * lock: the rights, the fields the server owns, what must exist (person,
  * project, budget, cost position, rule), the uniqueness of recurring
- * receipts per period and of receipts per report. A quote keeps its
+ * receipts per period; since 0.23.0 approval by assignment and one open
+ * expense report per person. A quote keeps its
  * server-written `document`. Files of deleted receipts go to the trash
  * after the commit.
  */
@@ -53,7 +54,7 @@ final class CostWrites {
 		$after = match ($op['kind']) {
 			ReceiptRules::KIND => $this->receipt($m, $op['key'], $before, $after, $batch),
 			ExpenseRuleRules::KIND => $this->rule($m, $before, $after),
-			default => $this->report($m, $op['key'], $before, $after, $batch),
+			default => $this->report($m, $op['key'], $before, $after),
 		};
 		return $after === null ? null : Json::encode($after);
 	}
@@ -124,6 +125,11 @@ final class CostWrites {
 			if ($moved !== null) {
 				$this->moved[] = $moved;
 			}
+			// 0.23.0: assignment is approval; what is still missing goes into the answer.
+			$missing = ReceiptRules::approveByWrite($m->manages(), $m->uid, $led, $after, $team, $budgetCurrency, $this->today());
+			if ($missing !== null && $missing !== []) {
+				$batch->missing[$key] = $missing;
+			}
 		}
 		return $after;
 	}
@@ -179,35 +185,28 @@ final class CostWrites {
 
 	// ------------------------------------------------------------- report
 
-	private function report(Membership $m, string $key, ?\stdClass $before, ?\stdClass $after, CostBatch $batch): ?\stdClass {
+	/**
+	 * A client's write of an expense report (0.23.0): only the open one, by
+	 * the person or a Team Admin, one open report per person; everything
+	 * else is the server's (ready, fix, paid, reverse).
+	 */
+	private function report(Membership $m, string $key, ?\stdClass $before, ?\stdClass $after): ?\stdClass {
 		ExpenseReportRules::requireWrite($m->manages(), $m->uid, $before, $after);
-		$old = ExpenseReportRules::receiptsOf($before);
 		if ($after === null) {
-			foreach ($old as $k) {
-				$batch->marks[$k] = null;
-			}
 			return null;
 		}
 		$this->requireMember($m->tenantId, $after->person);
-		$receipts = [];
-		foreach (ExpenseReportRules::receiptsOf($after) as $k) {
-			$r = $this->live($m->tenantId, ReceiptRules::KIND, $k);
-			ExpenseReportRules::requireEligible($after, $key, $k, $r);
-			$claimedBy = $batch->claimed[$k] ?? null;
-			if ($claimedBy !== null && $claimedBy !== $key) {
-				throw ApiException::conflict(Message::of('The receipt {key} is in the expense report {report}.', ['key' => $k, 'report' => $claimedBy]));
+		if ($before === null) {
+			$reports = [];
+			foreach ($this->records->findLiveByKind($m->tenantId, ExpenseReportRules::KIND) as $r) {
+				$reports[$r->getRkey()] = InvoiceRules::decode($r->getData());
 			}
-			$batch->claimed[$k] = $key;
-			$receipts[] = $r;
+			$open = ExpenseReportRules::openOf($reports, (string)$after->person);
+			if ($open !== null && $open !== $key) {
+				throw ApiException::duplicate(Message::of('The expense report {key} is already the open one of this person.', ['key' => $open]));
+			}
 		}
-		$sums = ExpenseReportRules::sums(array_values(array_filter($receipts)), $this->currency($m->tenantId, null, null));
-		ExpenseReportRules::mergeServer($before, $after, $sums, $this->today());
-		foreach ($old as $k) {
-			$batch->marks[$k] = null;
-		}
-		foreach (ExpenseReportRules::receiptsOf($after) as $k) {
-			$batch->marks[$k] = $key;
-		}
+		ExpenseReportRules::mergeServer($before, $after);
 		return $after;
 	}
 

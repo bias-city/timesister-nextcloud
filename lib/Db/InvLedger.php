@@ -64,6 +64,11 @@ final class InvLedger extends Entity {
 		$this->addType('hash', Types::STRING);
 	}
 
+	/** `invoice_id` goes into the INSERT also when it is 0 (an expense report's entry, 0.23.0). */
+	public function keepInvoiceId(): void {
+		$this->markFieldUpdated('invoiceId');
+	}
+
 	/**
 	 * As in `GET /invoices/ledger` and for LedgerRules::verify().
 	 *

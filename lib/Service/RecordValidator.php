@@ -75,6 +75,10 @@ final class RecordValidator {
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, InvoiceNumbering::FIELD)) {
 			InvoiceNumbering::validate($data->{InvoiceNumbering::FIELD});
 		}
+		// 0.23.0: the expense report's number, a pattern like the invoice's.
+		if ($kind === 'setting' && $key === 'settings' && property_exists($data, InvoiceNumbering::EXPENSE_FIELD)) {
+			InvoiceNumbering::validate($data->{InvoiceNumbering::EXPENSE_FIELD}, InvoiceNumbering::EXPENSE_FIELD);
+		}
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, IssuerRules::FIELD)) {
 			IssuerRules::validate($data->{IssuerRules::FIELD});
 		}

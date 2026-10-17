@@ -9,7 +9,7 @@ namespace OCA\TimeSister\Service;
 /**
  * The receipt (0.22.0, record `receipt`, B3), pure: content and defaults,
  * the fields the server owns, the status, who reads and writes it and
- * what may change after approval.
+ * what may change after approval; since 0.23.0 also when a write approves.
  */
 final class ReceiptRules {
 	public const KIND = 'receipt';
@@ -217,6 +217,68 @@ final class ReceiptRules {
 	/** Approved with a project, internal without. */
 	public static function approvedStatus(\stdClass $d): string {
 		return ($d->project ?? null) === null ? self::INTERNAL : self::APPROVED;
+	}
+
+	/** Who approves (endpoint and write, 0.23.0): Team Admins; a Lead the receipts of projects they lead, not trust ones. @param array<string,true> $led */
+	public static function canApprove(bool $manages, array $led, \stdClass $d): bool {
+		return $manages || (($d->kind ?? null) !== self::TRUST && self::ofLed($d, $led));
+	}
+
+	/** A general receipt the company paid needs no approval (0.23.0); a trust one still does. */
+	public static function needsNoApproval(\stdClass $d): bool {
+		return ($d->project ?? null) === null && ($d->paid_by ?? null) === self::COMPANY && ($d->kind ?? null) !== self::TRUST;
+	}
+
+	/**
+	 * What an open receipt still lacks before it is approved (0.23.0):
+	 * `budget`/`cost` with a project, `file` of kind receipt, `review`
+	 * while marked «please check», `booked` in another currency, `billed`
+	 * for a budget in a third one. Empty: complete.
+	 *
+	 * @return list<string>
+	 */
+	public static function missing(\stdClass $d, string $team, ?string $budgetCurrency): array {
+		$out = [];
+		if (($d->project ?? null) !== null && (!is_string($d->budget ?? null) || !is_int($d->cost ?? null))) {
+			$out[] = 'budget';
+			$out[] = 'cost';
+		}
+		if (($d->kind ?? null) === self::RECEIPT && !(($d->file ?? null) instanceof \stdClass)) {
+			$out[] = 'file';
+		}
+		if (($d->review ?? false) === true) {
+			$out[] = 'review';
+		}
+		if (strtoupper((string)($d->currency ?? $team)) !== $team && !(($d->booked ?? null) instanceof \stdClass)) {
+			$out[] = 'booked';
+		}
+		if (ReceiptBooking::needsBilled($d, $team, $budgetCurrency) && !(($d->billed ?? null) instanceof \stdClass)) {
+			$out[] = 'billed';
+		}
+		return $out;
+	}
+
+	/**
+	 * Assignment is approval (0.23.0): an open receipt written by who may
+	 * approve it – or a company's general one by anyone – is approved in
+	 * the same write when nothing is missing. Returns what is missing
+	 * (empty when approved now), null when this write does not approve.
+	 *
+	 * @param array<string,true> $led
+	 * @return ?list<string>
+	 */
+	public static function approveByWrite(bool $manages, string $uid, array $led, \stdClass $d, string $team, ?string $budgetCurrency, string $today): ?array {
+		if (($d->status ?? null) !== self::OPEN || !(self::canApprove($manages, $led, $d) || self::needsNoApproval($d))) {
+			return null;
+		}
+		$missing = self::missing($d, $team, $budgetCurrency);
+		if ($missing === []) {
+			$d->status = self::approvedStatus($d);
+			$d->approved_by = $uid;
+			$d->approved_on = $today;
+			$d->reject_reason = null;
+		}
+		return $missing;
 	}
 
 	/** Approved in any form: approved, internal, billed. */

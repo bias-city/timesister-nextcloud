@@ -8,6 +8,7 @@ namespace OCA\TimeSister\Tests\Unit;
 
 use OCA\TimeSister\Service\DossierRules;
 use OCA\TimeSister\Service\ExpenseExportRules;
+use OCA\TimeSister\Service\ExpenseReportRules;
 use OCA\TimeSister\Service\ApiException;
 use PHPUnit\Framework\TestCase;
 
@@ -32,12 +33,17 @@ class DossierRulesTest extends TestCase {
 	}
 
 	public function testExpenseExport(): void {
-		$report = (object)['person' => 'alice', 'status' => 'paid'];
-		$r = (object)['kind' => 'trust', 'date' => '2026-10-02', 'supplier' => 'Parking', 'text' => 'Meter', 'project' => null, 'currency' => 'CHF', 'net' => 4.63, 'vat_rate' => 8.1, 'vat' => 0.37, 'gross' => 5.0];
-		$this->assertSame(['alice', 'Alice Example', 'sb-1', 'paid', '2026-10-02', 'Parking', 'Meter', '', 'CHF', '4.63', '8.1', '0.37', '5.00', '1'], ExpenseExportRules::csvRow('Alice Example', 'sb-1', $report, $r));
-		$this->assertSame(['5,00', 'S', 'CHF', '', '', '', '6300', '70001', '', '0210', 'sb-1', '', '', 'Parking Meter'], ExpenseExportRules::datevRow($r, 'sb-1', '6300', '70001'));
+		// 0.23.0: rows are the frozen lines of fixed and paid reports; `report` is the number.
+		$report = (object)['schema' => 2, 'person' => 'alice', 'status' => 'paid', 'number' => 'SP-2026-0001'];
+		$receipt = (object)['kind' => 'trust', 'date' => '2026-10-02', 'supplier' => 'Parking', 'text' => 'Meter', 'project' => null, 'currency' => 'CHF', 'net' => 4.63, 'vat_rate' => 8.1, 'vat' => 0.37, 'gross' => 5.0];
+		$r = ExpenseReportRules::asReceipt(ExpenseReportRules::line('rc-1', $receipt));
+		$this->assertSame(['alice', 'Alice Example', 'SP-2026-0001', 'paid', '2026-10-02', 'Parking', 'Meter', '', 'CHF', '4.63', '8.1', '0.37', '5.00', '1'], ExpenseExportRules::csvRow('Alice Example', 'SP-2026-0001', $report, $r));
+		$this->assertSame(['5,00', 'S', 'CHF', '', '', '', '6300', '70001', '', '0210', 'SP-2026-0001', '', '', 'Parking Meter'], ExpenseExportRules::datevRow($r, 'SP-2026-0001', '6300', '70001'));
+		$this->assertSame('', ExpenseExportRules::csvRow('A', 'SP-1', $report, ExpenseReportRules::asReceipt(ExpenseReportRules::line('rc-2', (object)['kind' => 'receipt', 'date' => '2026-10-02', 'net' => 5, 'vat_rate' => null, 'vat' => 0, 'gross' => 5])))[10], 'no rate: empty');
 		$this->assertTrue(ExpenseExportRules::takes($report));
-		$this->assertFalse(ExpenseExportRules::takes((object)['status' => 'submitted']));
+		$this->assertTrue(ExpenseExportRules::takes((object)['schema' => 2, 'status' => 'fixed']));
+		$this->assertFalse(ExpenseExportRules::takes((object)['schema' => 2, 'status' => 'reversed']));
+		$this->assertFalse(ExpenseExportRules::takes((object)['schema' => 1, 'status' => 'paid']), 'a report of 0.22.0 is ignored');
 		$this->assertSame('csv', ExpenseExportRules::kind(null));
 		$fail = static function (callable $fn): string {
 			try {

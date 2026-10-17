@@ -1,5 +1,30 @@
 # Changes
 
+## 0.23.0 – 2026-10-16 (beta)
+
+API unchanged in form (`api: 2`); capability `expense_fixing: 1` replaces
+`expense_reports`. Contract: `API.md` «Simpler receipt flow and fixed
+expense reports, 0.23.0» with «As built». No schema change.
+
+- **Assignment is approval:** a Team Admin's or the project Lead's write
+  that completes a receipt (budget and cost position, file, amounts in
+  the team's and the budget's currency, not marked «please check»)
+  approves it in the same write – also the file upload; a general receipt
+  the company paid becomes `internal` once complete, from anyone. What is
+  missing comes back as `missing`. `approve` stays.
+- **Expense reports fixed like invoices** (schema 2): `ready`, `fix`
+  (number from `settings.expense_number`, default `SP-{year}-{no:4}`,
+  frozen lines and sums, `report` on the receipts, ledger
+  `expense_fixed`, one transaction), PDF with number, chain line and
+  receipt copies in `Spesen/<person>/` (ledger `expense_document`, retry
+  job on failure), `paid` (`expense_paid`), `reverse` (`expense_reversed`,
+  receipts free again), `document`. Submitting and approving reports
+  (0.22.0) are gone; old reports are ignored, not migrated.
+- **Export of expenses** from the frozen lines of fixed and paid reports;
+  `report` and DATEV Belegfeld 1 carry the number.
+- The chain (verify, head file) covers the new actions; Leads no longer
+  read expense reports.
+
 ## 0.22.0 – 2026-10-16 (beta)
 
 API unchanged in form (`api: 2`); new capabilities `receipts: 1`,

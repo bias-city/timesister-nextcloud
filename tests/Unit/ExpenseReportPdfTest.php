@@ -76,23 +76,26 @@ class ExpenseReportPdfTest extends TestCase {
 
 	public function testReportWithCopies(): void {
 		$pdf = (new ExpenseReportPdf())->render([
-			'lang' => 'de', 'team' => 'Example Team', 'person' => 'Alice Example', 'from' => '2026-10-01', 'to' => '2026-10-31', 'currency' => 'CHF', 'key' => 'sb-1',
+			'lang' => 'de', 'team' => 'Example Team', 'person' => 'Alice Example', 'number' => 'SP-2026-0007', 'chain' => 'Beleg SP-2026-0007 · Kette 12 0123456789ab ← ba9876543210',
+			'from' => '2026-10-01', 'to' => '2026-10-31', 'currency' => 'CHF',
 			'rows' => [
 				['date' => '2026-10-02', 'supplier' => 'Bahn', 'text' => 'Basel–Bern', 'project' => 'D196', 'net' => 100.0, 'vat_rate' => 8.1, 'vat' => 8.1, 'gross' => 108.1, 'without' => false],
 				['date' => '2026-10-31', 'supplier' => '', 'text' => 'Mobile', 'project' => '', 'net' => 50.0, 'vat_rate' => null, 'vat' => 0.0, 'gross' => 50.0, 'without' => true],
 			],
 			'sums' => ['net' => 150.0, 'vat_lines' => [['rate' => 0.0, 'net' => 50.0, 'vat' => 0.0], ['rate' => 8.1, 'net' => 100.0, 'vat' => 8.1]], 'gross' => 158.1],
-			'approved_by' => 'Bob Example', 'approved_on' => '2026-11-02',
+			'fixed_by' => 'Bob Example', 'fixed_on' => '2026-11-02',
 			'copies' => self::copies(),
 		]);
 		$this->assertStringStartsWith('%PDF-', $pdf);
 		$text = self::text($pdf);
-		foreach (['Spesenblatt', 'Alice Example', 'ohne Beleg', 'MWST 8.1 %', '158.10', 'Unterschrift Person', 'Freigabe: Bob Example, 02.11.2026',
+		foreach (['Spesenblatt SP-2026-0007', 'Alice Example', 'ohne Beleg', 'MWST 8.1 %', '158.10', 'Unterschrift Person', 'Fixiert: Bob Example, 02.11.2026',
 			'Beleg 02.10.2026 Bahn (1/2)', 'Beleg 02.10.2026 Bahn (2/2)', 'Beleg 03.10.2026 Kiosk', 'Quittung Seite zwei', 'R/c.pdf', 'SHA-256 dd'] as $s) {
 			$this->assertStringContainsString($s, $text, $s);
 		}
 		// One report page, two imported pages, the image, two pages naming unreadable files.
 		$this->assertSame(6, self::pages($pdf));
+		// The chain line on every page, as on an invoice.
+		$this->assertSame(6, substr_count($text, 'Beleg SP-2026-0007 · Kette 12 0123456789ab'));
 	}
 
 	public function testInvoiceCarriesCopiesBeforeTheBill(): void {

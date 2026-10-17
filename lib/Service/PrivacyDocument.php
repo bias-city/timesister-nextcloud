@@ -210,7 +210,7 @@ final class PrivacyDocument {
 				$this->l->t('Nextcloud admins: everything, including the accounts and this notice'),
 				$this->fill($this->l->t('Team Admins (group admins of the team group): all master data, all time entries, backups, export, deletion. Currently: {names}'), ['names' => $this->join($admins)]),
 				$this->fill($this->l->t('Leads: their projects, the bookings on these projects as the people report them (date, time, person, code, duration, title, notes, billable, billed), the customers of these projects, names and initials of the people; no time calendars, master data, balances or vacation of others. Currently: {names}'), ['names' => $this->join(array_map(static fn (array $ld) => $ld['name'], $leads))]),
-				...(self::costsOn($f) ? [$this->l->t('Receipts and expenses: each person their own; Leads those of the projects they lead and the expense reports they approve; Team Admins all')] : []),
+				...(self::costsOn($f) ? [$this->l->t('Receipts and expenses: each person their own; Leads the receipts of the projects they lead; Team Admins all, and they fix the expense reports')] : []),
 				$this->l->t('Users: only their own data'),
 				$this->l->t('External persons: nothing – their feed is only read'),
 			]],

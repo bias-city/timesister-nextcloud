@@ -14,7 +14,8 @@ use OCP\AppFramework\Utility\ITimeFactory;
  * Receipts (0.22.0, B3): the file under `Belege/` or `Spesen/<person>/`
  * of the document tree, approving (the file is renamed once to its
  * current name) and rejecting. The record's own writes go through
- * RecordService and CostWrites.
+ * RecordService and CostWrites; since 0.23.0 an approver's file upload
+ * that completes a receipt approves it, as a write does.
  */
 final class ReceiptService {
 	public const REASON_MAX = 300;
@@ -51,7 +52,7 @@ final class ReceiptService {
 
 	// --------------------------------------------------------------- file
 
-	/** `PUT /receipts/{key}/file` – PDF, JPEG or PNG, while open. @return array{path:string,sha256:string,size:int,mime:string,version:int} */
+	/** `PUT /receipts/{key}/file` – PDF, JPEG or PNG, while open. @return array<string,mixed> path, sha256, size, mime, version, status, missing? */
 	public function putFile(Membership $m, string $key, string $content): array {
 		[$rec, $d] = $this->load($m, $key);
 		ReceiptRules::requireWrite($m->manages(), $m->uid, $this->led($m), $d, $d);
@@ -70,8 +71,26 @@ final class ReceiptService {
 		$old = $d->file->path ?? null;
 		$written = $this->folders->store($place['owner'], $folder, $name, $content, is_string($old) ? $old : null);
 		$d->file = (object)['path' => $written['path'], 'sha256' => hash('sha256', $content), 'size' => strlen($content), 'mime' => $mime];
+		// 0.23.0: the file may be what completes an assigned receipt – then this write approves it.
+		[$team, $budget] = $this->currencies($m, $d);
+		$missing = ReceiptRules::approveByWrite($m->manages(), $m->uid, $this->led($m), $d, $team, $budget, $this->today());
 		$record = $this->recordService->writeAsServer($m, ReceiptRules::KIND, $key, $rec->getVersion(), $d);
-		return (array)$d->file + ['version' => (int)$record['version']];
+		$out = (array)$d->file + ['version' => (int)$record['version'], 'status' => (string)$d->status];
+		return $missing === null || $missing === [] ? $out : $out + ['missing' => $missing];
+	}
+
+	/** The team's currency, the receipt's budget currency (null without budget) and the project's data. @return array{0:string,1:?string,2:?\stdClass} */
+	private function currencies(Membership $m, \stdClass $d): array {
+		$project = Fields::str($d, 'project');
+		$p = $project === null ? null : $this->records->findOne($m->tenantId, 'project', $project);
+		$pd = $p === null || $p->isTombstone() ? null : InvoiceRules::decode($p->getData());
+		$s = $this->records->findOne($m->tenantId, 'setting', 'settings');
+		$team = ReceiptBooking::teamCurrency($s === null || $s->isTombstone() ? null : InvoiceRules::decode($s->getData()));
+		return [$team, ReceiptBooking::budgetCurrencyOf($pd, $d, $team), $pd];
+	}
+
+	private function today(): string {
+		return gmdate('Y-m-d', $this->time->getTime());
 	}
 
 	/** `GET /receipts/{key}/file`. @return array{content:string,name:string,type:string} */
@@ -90,10 +109,7 @@ final class ReceiptService {
 
 	/** Lead of the project or Team Admins; general and trust receipts Team Admins. */
 	private function requireApprover(Membership $m, \stdClass $d): void {
-		if ($m->manages()) {
-			return;
-		}
-		if (($d->kind ?? null) === ReceiptRules::TRUST || !ReceiptRules::ofLed($d, $this->led($m))) {
+		if (!ReceiptRules::canApprove($m->manages(), $this->led($m), $d)) {
 			throw ApiException::forbidden('Receipts are approved by the project’s Leads and Team Admins; general receipts and those without a file by Team Admins.');
 		}
 	}
@@ -108,17 +124,13 @@ final class ReceiptService {
 		if (($d->kind ?? null) === ReceiptRules::RECEIPT && Fields::obj($d, 'file') === null) {
 			throw ApiException::invalid('The receipt has no file yet.');
 		}
-		$project = Fields::str($d, 'project');
-		$p = $project === null ? null : $this->records->findOne($m->tenantId, 'project', $project);
-		$pd = $p === null || $p->isTombstone() ? null : InvoiceRules::decode($p->getData());
+		[$team, $budget, $pd] = $this->currencies($m, $d);
 		ReceiptRules::requireApprovable($d, $pd);
-		$s = $this->records->findOne($m->tenantId, 'setting', 'settings');
-		$team = ReceiptBooking::teamCurrency($s === null || $s->isTombstone() ? null : InvoiceRules::decode($s->getData()));
-		ReceiptBooking::requireApprovable($d, $team, ReceiptBooking::budgetCurrencyOf($pd, $d, $team));
+		ReceiptBooking::requireApprovable($d, $team, $budget);
 		$moved = $this->places->follow($m->tenantId, $d);
 		$d->status = ReceiptRules::approvedStatus($d);
 		$d->approved_by = $m->uid;
-		$d->approved_on = gmdate('Y-m-d', $this->time->getTime());
+		$d->approved_on = $this->today();
 		$d->reject_reason = null;
 		ReceiptRecognition::clear($d);
 		try {

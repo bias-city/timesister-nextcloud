@@ -7,11 +7,12 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Service;
 
 /**
- * The PDF of an expense report (0.22.0, B4a), A4 portrait like the
- * invoice: head with team, person and period; the receipts (date,
- * supplier, text, project, net, VAT, gross, «without receipt» for trust
- * and recurring ones); the sums per rate; signature lines for the person
- * and the approval; then the receipt copies. No ledger entry.
+ * The PDF of a fixed expense report (0.23.0), A4 portrait like the
+ * invoice: head with team, number, person and period; the frozen lines
+ * (date, supplier, text, project, net, VAT, gross, «without receipt» for
+ * trust and recurring ones); the sums per rate; signature lines for the
+ * person and who fixed it; then the receipt copies. The chain line of its
+ * ledger entry stands on every page, as on an invoice.
  */
 final class ExpenseReportPdf {
 	private const LINE = 4.5;
@@ -19,29 +20,29 @@ final class ExpenseReportPdf {
 	private const COLS = [20.0, 30.0, 45.0, 22.0, 18.0, 17.0, 18.0];
 
 	/**
-	 * @param array{lang:string,team:string,person:string,from:string,to:string,currency:string,key:string,
+	 * @param array{lang:string,team:string,person:string,number:string,chain:string,from:string,to:string,currency:string,
 	 *   rows:list<array{date:string,supplier:string,text:string,project:string,net:float,vat_rate:?float,vat_rates?:list<float>,vat:float,gross:float,without:bool}>,
 	 *   sums:array{net:float,vat_lines:list<array{rate:float,net:float,vat:float}>,gross:float,currency?:string},
-	 *   approved_by:?string,approved_on:?string,
+	 *   fixed_by:?string,fixed_on:?string,
 	 *   copies:list<array{head:string,content:?string,mime:string,path:string,sha256:string}>} $r
 	 */
 	public function render(array $r): string {
 		$lang = $r['lang'];
 		$t = DocumentRules::texts($lang);
-		$title = $t['report'] . ' ' . $r['person'] . ' · ' . DocumentRules::day($r['from'], $lang) . ' – ' . DocumentRules::day($r['to'], $lang);
+		$title = $t['report'] . ' ' . $r['number'] . ' · ' . $r['person'];
 		$pdf = new InvoicePage();
 		$pdf->SetCreator('TimeSister');
 		$pdf->SetAuthor($r['team']);
 		$pdf->SetTitle($title);
-		$pdf->SetSubject($r['key']);
-		$pdf->setFooterText(null, $title, $t['page']);
+		$pdf->SetSubject($r['chain']);
+		$pdf->setFooterText($title, $r['chain'], $t['page']);
 		$pdf->AddPage();
 
 		$pdf->SetFont(InvoicePage::FONT, 'B', 9);
 		$pdf->Cell(0, 4, $r['team'], 0, 1);
 		$pdf->Ln(8);
 		$pdf->SetFont(InvoicePage::FONT, 'B', 14);
-		$pdf->Cell(0, 8, $t['report'], 0, 1);
+		$pdf->Cell(0, 8, $t['report'] . ' ' . $r['number'], 0, 1);
 		$pdf->SetFont(InvoicePage::FONT, '', 9);
 		foreach ([[$t['person'], $r['person']], [$t['period'], DocumentRules::day($r['from'], $lang) . ' – ' . DocumentRules::day($r['to'], $lang)], [$t['team'], $r['team']]] as [$label, $value]) {
 			$pdf->Cell(40, 5, $label, 0, 0);
@@ -112,7 +113,7 @@ final class ExpenseReportPdf {
 		$pdf->Cell(self::COLS[6], 6, DocumentRules::money($s['gross'], $lang), 'T', 1, 'R');
 	}
 
-	/** Two signature lines: the person, and the approval with name and date. @param array<string,mixed> $r @param array<string,string> $t */
+	/** Two signature lines: the person, and who fixed it with name and date. @param array<string,mixed> $r @param array<string,string> $t */
 	private function signatures(InvoicePage $pdf, array $r, array $t): void {
 		if ($pdf->GetY() + 30.0 > (float)$pdf->getPageHeight() - InvoicePage::BOTTOM) {
 			$pdf->AddPage();
@@ -124,9 +125,9 @@ final class ExpenseReportPdf {
 		$pdf->SetFont(InvoicePage::FONT, '', 8);
 		$pdf->SetXY(InvoicePage::MARGIN, $y + 1.0);
 		$pdf->Cell(75, 4, $t['sign_person'] . ': ' . $r['person'], 0, 0);
-		$approval = $t['sign_approval'];
-		if (is_string($r['approved_by'] ?? null)) {
-			$approval .= ': ' . $r['approved_by'] . (is_string($r['approved_on'] ?? null) ? ', ' . DocumentRules::day((string)$r['approved_on'], (string)$r['lang']) : '');
+		$approval = $t['sign_fixed'];
+		if (is_string($r['fixed_by'] ?? null)) {
+			$approval .= ': ' . $r['fixed_by'] . (is_string($r['fixed_on'] ?? null) ? ', ' . DocumentRules::day((string)$r['fixed_on'], (string)$r['lang']) : '');
 		}
 		$pdf->SetXY(InvoicePage::MARGIN + 95.0, $y + 1.0);
 		$pdf->Cell(75, 4, $approval, 0, 1);

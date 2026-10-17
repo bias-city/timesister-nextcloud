@@ -43,7 +43,7 @@ class DocumentTreeTest extends TestCase {
 		$this->assertFalse(DocumentTree::isPlaced('R/Belege/a_c.pdf', 'R/Belege', 'a_b.pdf'));
 		$this->assertFalse(DocumentTree::isPlaced('R/Spesen/X/a_b.pdf', 'R/Belege', 'a_b.pdf'));
 		$this->assertFalse(DocumentTree::isPlaced('R/Belege/a_b_x.pdf', 'R/Belege', 'a_b.pdf'));
-		$this->assertSame('2026-10_Spesenblatt.pdf', DocumentTree::reportName('2026-10-31'));
+		$this->assertSame('2026-10-31_SP-2026-0007_Spesenblatt.pdf', DocumentTree::reportName('2026-10-31', 'SP-2026-0007'));
 		$this->assertSame('chain-2026-10-16.txt', DocumentTree::chainName('2026-10-16'));
 		$this->assertSame('Projektakte-2026-10-16.zip', DocumentTree::dossierName('2026-10-16'));
 		$this->assertSame(['pdf', 'jpg', 'png', 'bin'], [DocumentTree::extension('application/pdf'), DocumentTree::extension('image/jpeg'), DocumentTree::extension('image/png'), DocumentTree::extension('text/plain')]);

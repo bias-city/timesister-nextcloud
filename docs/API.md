@@ -3991,3 +3991,205 @@ client's); the Mac app counts with the same rule (`Beleg::fuer_spesen`,
 cost consumption and the cost burndown in B; its receipt sheet shows a
 line «For the budget in EUR» when needed, and approval asks for the
 amount when it is missing.
+
+## Simpler receipt flow and fixed expense reports, 0.23.0 (2026-10-16)
+
+Decision of 2026-10-16: one receipt list, receipts flow on to an expense
+list (per person) or to invoicing (per project). Expense reports are
+**fixed** like invoices: frozen, numbered, PDF with receipt copies, in the
+ledger. Development, no transition: `expense_report` records of 0.22.0
+(`submitted`/`approved`) are not migrated; clients ignore them.
+Capability `expense_fixing: 1` (replaces `expense_reports`).
+
+### Receipts: assignment is approval
+
+- A Lead (for the projects they lead) or a Team Admin who writes a
+  receipt with a complete assignment approves it in the same write:
+  project receipt with `budget` + `cost` → `approved`; general receipt
+  (no project) → `internal`. Preconditions as for `approve` (file for
+  kind `receipt`, `booked`/`billed` when needed); if one is missing the
+  write is stored and the receipt stays `open` (no error), the answer
+  carries `missing: [field]`.
+- A member's write never approves. `POST /receipts/{key}/approve` stays
+  (“confirm” of a member's proposal, same checks).
+- A **general receipt paid by the company** (`paid_by: company`, no
+  project) needs no approval: any write that makes it complete sets
+  `internal`, also from a member.
+
+### Expense list and expense report
+
+The **expense list** of a person is derived, not stored: their receipts
+with `reimburse: true`, status `approved`/`billed`/`internal`, and no
+`report`. Record `expense_report` (schema 2):
+
+| Field | Rule |
+|---|---|
+| `person` | uid |
+| `status` | server-owned: `open` → `fixed` → `paid`; `reversed` |
+| `ready_on` | date the person said “done” (optional) |
+| `number` | server-owned, from `settings.expense_number` (pattern like `invoice_number`, default `SP-{YYYY}-{NNNN}`), at fixing |
+| `lines` | server-owned, frozen at fixing: per receipt `{receipt, date, supplier, text, project, cost, vat_lines, net, vat, gross, currency, booked, without_file}` |
+| `sums` | server-owned: `VatLines` over the amounts for expenses (booked in team currency), plus `currency` |
+| `fixed_on`, `fixed_by`, `paid_on`, `reversed_on`, `document` | server-owned |
+
+| Method | Path | Who | |
+|---|---|---|---|
+| POST | `/expense-reports/ready` `{person}` | the person, Team Admins | creates or updates the person's one `open` report with `ready_on` = today (“done, please fix”) |
+| POST | `/expense-reports/fix` `{person, receipts?}` | Team Admins | freezes the person's expense list (or the given subset of it) into a new or the `open` report: number, lines, sums; sets `report` on every receipt; renders the PDF (table + receipt copies, like the invoice) into `Buchhaltung/<YYYY>/Spesen/<person>/<date>_<number>_Spesenblatt.pdf`; appends ledger action `expense_fixed` with the payload hash – one transaction. `422` without receipts. |
+| POST | `/expense-reports/{key}/paid` `{date}` | Team Admins | `paid`; ledger `expense_paid` |
+| POST | `/expense-reports/{key}/reverse` `{reason}` | Team Admins | only `fixed` (not `paid`): `reversed`, receipts get `report` null again; ledger `expense_reversed`; the PDF stays |
+| GET | `/expense-reports/{key}/document` | the person, Team Admins | the PDF |
+
+Writes to a fixed report other than these actions: `409`. The chain
+verification (`/invoices/chain/verify`, the head file) covers the new
+actions. Exports (`/exports/expenses`) take `fixed` and `paid` reports.
+
+### Invoicing list (clients)
+
+No new server data. The Mac app shows per project what is still to bill:
+unbilled hours, approved receipts with `invoice_effect` ≠ `none` and no
+`invoice`, and the expense rules of the cost positions; «Create invoice»
+opens the editor with the chosen items (positions `hours`, `costs` with
+`receipts[]`, `expense_percent`/`expense_flat`, `markup`), as in 0.22.0.
+
+### As built, 0.23.0 (2026-10-16)
+
+What the server does beyond or beside the lines above, so the Mac app can
+rely on it. No schema change (`occ upgrade` runs no migration); reports
+and their lines live in the record, the ledger in `ts_inv_ledger`.
+
+**Assignment is approval.**
+- An open receipt is approved in the write when the writer may approve
+  it – Team Admins; a Lead of the receipt's project (after the write),
+  not for kind `trust` – or when it is a general receipt the company paid
+  (`paid_by: company`, no project, kind not `trust`; any writer). Status
+  `approved` (project) or `internal` (general), `approved_by` = the
+  writer, `approved_on` = today (UTC), `reject_reason: null`.
+- Otherwise the receipt stays `open` and the write's answer (single PUT
+  and each record of a batch) carries `missing`, beside `data`: a list of
+  `budget` and `cost` (a project without assignment), `file` (kind
+  `receipt` without file), `review` (marked «please check»), `booked`
+  (another currency than the team's without the amount paid), `billed`
+  (a budget in a third currency without its amount). `missing` is absent
+  when the write approved the receipt or does not approve (a member's
+  write of anything but a company's general receipt).
+- **Addition: `review`.** A receipt marked «please check» is not approved
+  by a write; clearing the mark (allowed to Team Admins, the project's
+  Leads and who recorded it) is the write that approves it. The endpoint
+  `approve` still clears the mark itself.
+- **Addition: the file.** `PUT /receipts/{key}/file` is a write too: when
+  the uploaded file completes the receipt (and the uploader may approve
+  it, or it is a company's general one), it is approved. The answer now
+  carries `status` and, when still open after an approver's upload,
+  `missing`: `{ path, sha256, size, mime, version, status, missing? }`.
+- The file follows its name while open, then is placed once more at the
+  approval in the same write; after that it never moves (as before).
+- `POST /receipts/{key}/approve` and `/reject` are unchanged.
+
+**Expense reports (record `expense_report`, schema 2).**
+- Record fields: `schema` (2, set by the server), `person`, `ready_on`
+  (null or a day) – the only fields a client writes. Server-owned:
+  `status`, `number`, `lines`, `sums`, `fixed_on`, `fixed_by`, `paid_on`,
+  `reversed_on`, `reverse_reason`, `document` `{ path, sha256, size }`,
+  `document_state` (`pending`, `done`, `failed`), `document_error`,
+  `document_tries`, `ledger_seq`, `hash` (of the `expense_fixed` entry).
+- Client writes through `/records`: only an `open` report of schema 2, by
+  its person or a Team Admin (403 otherwise); the person does not change
+  (409); one open report per person (409 `duplicate` “The expense report
+  sb-… is already the open one of this person.”); deleting the open
+  report is allowed. Any write or delete of a fixed, paid, reversed or
+  0.22.0 report: 409 “A fixed expense report changes only through its
+  actions (paid, reverse).”
+- Reading: the person and Team Admins (Leads no longer).
+- Reports of 0.22.0 (schema 1, `submitted`/`approved`) stay as they are;
+  they hold no receipt: a receipt whose `report` names such a report (or
+  a deleted or reversed one) is on the expense list again. **Clients
+  treat `report` as set only when it names a live schema-2 report that is
+  `fixed` or `paid`.**
+- The **expense list** (derived): the person's live receipts with
+  `reimburse: true`, status `approved`, `internal` or `billed`, held by no
+  fixed or paid report.
+- `POST /expense-reports/ready` `{ person }` (the person, Team Admins;
+  else 403; an account outside the team 422): creates the open report
+  (key `sb-` + 8 hex digits) or updates it, `ready_on` = today; answers
+  the record.
+- `POST /expense-reports/fix` `{ person, receipts? }` (Team Admins, 403):
+  without `receipts` the whole list, with them a part of it (1–500
+  distinct keys; one not on the list 422 “The receipt rc-… is not on the
+  expense list of this person.”, one held by a fixed report 409 “The
+  receipt rc-… is in the expense report SP-….”); nothing to fix 422 “The
+  expense list of this person holds no receipts.”. One transaction under
+  the team lock: the open report (else a new key), number, `lines` sorted
+  by date and key, `sums`, `report` on every receipt (server writes, new
+  versions), ledger `expense_fixed`. Then the PDF (below). Answer: the
+  record after the PDF, so normally with `document_state: done`.
+- **Number:** `settings.expense_number` is an object like
+  `invoice_number` (`pattern`, `per_year`, `start`, validated the same
+  way); placeholders `{year}`/`{jahr}`, `{yy}`/`{jj}`, `{no}`/`{nr}` with
+  width; default `SP-{year}-{no:4}` (= the contract's
+  `SP-{YYYY}-{NNNN}`, e.g. `SP-2026-0001`). Own counter `expense:<year>`
+  (or `expense`); `{project}`/`{customer}` stay empty. A number another
+  report already carries: 409. The year is the one of `fixed_on`.
+- **A line:** `{ receipt, date, supplier, text, project, cost, vat_lines,
+  net, vat, gross, currency, booked, without_file }` – the receipt's
+  **own** amounts (as on the receipt), `vat_lines` always a list of
+  `{ rate, net, vat }` (its `vat_lines`, else one line of its `vat_rate`,
+  else `[]` = no rate), `booked` as on the receipt (`{ gross, currency }`
+  or null), `without_file` for `trust` and `recurring`. The amount that
+  counts for expenses follows from the line as from a receipt
+  (`ReceiptBooking::forExpenses`, Mac `Beleg::fuer_spesen`).
+- **`sums`:** `{ currency, net, vat_lines, gross }` – `VatLines` over the
+  counted amounts (booked in the team's currency); all lines in one
+  currency, else 422.
+- **Ledger:** the actions share the invoices' chain (`invoice` = 0,
+  `number` = the report's number). Payloads (canonical JSON, hashed like
+  an invoice's): `expense_fixed` `{ key, number, person, fixed_on,
+  fixed_by, ready_on, lines, sums }`; `expense_document` `{ key, number,
+  kind: "pdf", path, size, sha256 }` (addition: the PDF's hash, as
+  `document` for invoices); `expense_paid` `{ key, number, paid_on }`;
+  `expense_reversed` `{ key, number, reversed_on, reason }`. They raise no
+  webhook. `GET /invoices/ledger`, `chain/verify`, `chain/head` and the
+  daily head file cover them (verify and head are action-agnostic); the
+  project dossier's `ledger.txt` does not list them.
+- **PDF:** `Buchhaltung/<year of fixed_on>/Spesen/<person>/<fixed_on>_<number>_Spesenblatt.pdf`
+  (a taken name `_2`), A4 portrait: title «Spesenblatt <number>»,
+  person, period (first to last receipt date), team; rows with the
+  counted amounts (the original amount in brackets after the text when
+  booked), sums per rate, signature lines «Unterschrift Person: <name>»
+  and «Fixiert: <name>, <date>» (English «Fixed»); the receipt copies;
+  the chain line `Beleg <number> · Kette <seq> <hash12> ← <prev12>` and
+  «Spesenblatt <number> · <person>» in the footer of every page. Language
+  as the invoice. Rendered right after the transaction; a failure sets
+  `document_state: failed` and `document_error`, the job of 0.19.0
+  (every 15 minutes, up to ten tries) renders it again (actor `system`).
+- `POST /expense-reports/{key}/paid` `{ date? }` (Team Admins; default
+  today): only `fixed` (409 “Only a fixed expense report is marked
+  paid.”); `paid`, `paid_on`, ledger `expense_paid`. Answer: the record
+  plus `ledger: { seq, prev_hash, hash }`. There is no «unpaid».
+- `POST /expense-reports/{key}/reverse` `{ reason? }` (Team Admins;
+  `reason` ≤ 500 characters): `paid` 409 “A paid expense report is not
+  reversed.”, anything but `fixed` 409; `reversed`, `reversed_on`,
+  `reverse_reason`, `report: null` on its receipts (those still naming
+  it), ledger `expense_reversed`; the PDF stays. Answer as for paid.
+- `GET /expense-reports/{key}/document`: the person and Team Admins (403
+  otherwise); 404 “This expense report has no document yet; it is
+  written when it is fixed.”
+- `POST /expense-reports/{key}/approve` and the submit by record write of
+  0.22.0 are gone.
+
+**Export of expenses.** Rows are the frozen lines of `fixed` and `paid`
+reports (schema 2); the column `report` and DATEV's Belegfeld 1 carry the
+report's **number** (before: its key); `vat_rate` is the single rate of
+the line, empty for none or several.
+
+**Capability** `expense_fixing: 1`; `expense_reports` is gone.
+
+**Classes.** Pure: `ReceiptRules` (`canApprove`, `needsNoApproval`,
+`missing`, `approveByWrite`), `ExpenseReportRules` (rewritten: list,
+`pick`, `line`, `sums`, `payload`, rights), `InvoiceNumbering`
+(parametrised by field and counter), `LedgerRules` (four actions).
+Services: `CostWrites` (approval in the write, the open report),
+`ReceiptService` (file upload approves), `ExpenseReportService` (ready,
+fix, paid, reverse, document), `ExpenseReportDocuments` (PDF, ledger
+entry, retry), `Transaction` (shared with `IssueService`);
+`ExpenseService` keeps the rule's approval.

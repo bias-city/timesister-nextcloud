@@ -14,7 +14,8 @@ use PHPUnit\Framework\TestCase;
 /**
  * The receipt (0.22.0): content and defaults, the three questions (who
  * paid, reimbursed, where booked), the server's fields, the status and
- * who writes what before and after approval.
+ * who writes what before and after approval; since 0.23.0 approval by
+ * assignment.
  */
 class ReceiptRulesTest extends TestCase {
 	private static function receipt(array $over = []): \stdClass {
@@ -183,6 +184,40 @@ class ReceiptRulesTest extends TestCase {
 		$cost->cost = 3;
 		$this->assertSame('409 A billed receipt changes only in “note”; “cost” stays.', self::outcome(fn () => ReceiptRules::requireWrite(true, 'admin', [], $billed, $cost)));
 		$this->assertSame(['note'], ReceiptRules::changed($ok, $note));
+	}
+
+	/** 0.23.0: assignment is approval – who approves by writing, what is missing, the company's general receipts. */
+	public function testApproveByWrite(): void {
+		$file = (object)['path' => 'R/a.pdf'];
+		$open = fn (array $over = []): \stdClass => self::receipt($over + ['status' => 'open', 'file' => $file, 'currency' => 'CHF', 'review' => false]);
+		$approve = function (bool $manages, string $uid, array $led, \stdClass $d, ?string $budget = 'CHF'): array {
+			$missing = ReceiptRules::approveByWrite($manages, $uid, $led, $d, 'CHF', $budget, '2026-10-16');
+			return [$missing, $d->status, $d->approved_by ?? null];
+		};
+		$this->assertSame([[], 'approved', 'lead'], $approve(false, 'lead', ['d200' => true], $open()), 'the Lead assigns completely: approved');
+		$this->assertSame([[], 'approved', 'admin'], $approve(true, 'admin', [], $open()));
+		$this->assertSame([null, 'open', null], $approve(false, 'ann', [], $open()), 'a member never approves');
+		$this->assertSame([null, 'open', null], $approve(false, 'lead', ['d9' => true], $open()), 'not the Lead of this project');
+		$this->assertSame([null, 'open', null], $approve(false, 'lead', ['d200' => true], $open(['kind' => 'trust'])), 'trust: Team Admins only');
+		$this->assertSame([['budget', 'cost'], 'open', null], $approve(true, 'admin', [], $open(['budget' => null, 'cost' => null])));
+		$this->assertSame([['file'], 'open', null], $approve(true, 'admin', [], $open(['file' => null])));
+		$this->assertSame([[], 'approved', 'admin'], $approve(true, 'admin', [], $open(['kind' => 'trust', 'file' => null])), 'trust has no file');
+		$this->assertSame([['review'], 'open', null], $approve(true, 'admin', [], $open(['review' => true])), '«please check» is not approved by a write');
+		$this->assertSame([['booked'], 'open', null], $approve(true, 'admin', [], $open(['currency' => 'USD'])));
+		$this->assertSame([[], 'approved', 'admin'], $approve(true, 'admin', [], $open(['currency' => 'USD', 'booked' => (object)['gross' => 90.0, 'currency' => 'CHF']])));
+		$this->assertSame([['billed'], 'open', null], $approve(true, 'admin', [], $open(['currency' => 'USD', 'booked' => (object)['gross' => 90.0, 'currency' => 'CHF']]), 'EUR'));
+		$this->assertSame([null, 'approved', null], $approve(true, 'admin', [], self::receipt(['status' => 'approved'])), 'only an open receipt');
+		// General: a Team Admin's write makes it internal; a company's general receipt needs no approval at all.
+		$general = ['project' => null, 'budget' => null, 'cost' => null];
+		$this->assertSame([[], 'internal', 'admin'], $approve(true, 'admin', [], $open($general + ['paid_by' => 'person', 'person' => 'ann'])));
+		$this->assertSame([null, 'open', null], $approve(false, 'ann', [], $open($general + ['paid_by' => 'person', 'person' => 'ann'])), 'a member’s own expense waits');
+		$this->assertSame([[], 'internal', 'ann'], $approve(false, 'ann', [], $open($general)), 'company paid, no project: internal from a member too');
+		$this->assertSame([['file'], 'open', null], $approve(false, 'ann', [], $open($general + ['file' => null])));
+		$this->assertSame([null, 'open', null], $approve(false, 'ann', [], $open($general + ['kind' => 'trust'])), 'a trust receipt still needs a Team Admin');
+		$this->assertTrue(ReceiptRules::canApprove(false, ['d200' => true], self::receipt()));
+		$this->assertFalse(ReceiptRules::canApprove(false, [], self::receipt()));
+		$this->assertTrue(ReceiptRules::needsNoApproval(self::receipt($general)));
+		$this->assertFalse(ReceiptRules::needsNoApproval(self::receipt()));
 	}
 
 	public function testHelpers(): void {

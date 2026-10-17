@@ -8,8 +8,8 @@ namespace OCA\TimeSister\Service;
 
 /**
  * The invoice number (0.16.0): the pattern in `setting/settings`
- * (`invoice_number`) and the team's counter. Pure. The server hands out
- * only the running number; the client fills the pattern.
+ * (`invoice_number`) and the team's counter. Pure. Since 0.23.0 the same
+ * for the expense report's number (`expense_number`, its own counter).
  */
 final class InvoiceNumbering {
 	public const FIELD = 'invoice_number';
@@ -21,32 +21,36 @@ final class InvoiceNumbering {
 	public const PLACEHOLDERS = ['year', 'jahr', 'yy', 'jj', 'project', 'projekt', 'customer', 'kunde'];
 	/** The running number, with an optional width 1–8. */
 	private const NUMBER = '/^(no|nr)(:[1-8])?$/';
-	private const COUNTER = 'invoice';
+	public const COUNTER = 'invoice';
 	/** The number when the team set no pattern (0.18.0). */
 	public const DEFAULT_PATTERN = '{year}-{no:4}';
+	/** The expense report's number (0.23.0): own field, counter and default. */
+	public const EXPENSE_FIELD = 'expense_number';
+	public const EXPENSE_COUNTER = 'expense';
+	public const EXPENSE_DEFAULT = 'SP-{year}-{no:4}';
 
-	/** `invoice_number` of the settings record when it is written; null or missing passes. */
-	public static function validate(mixed $v): void {
+	/** `invoice_number` (or `expense_number`) of the settings record when it is written; null or missing passes. */
+	public static function validate(mixed $v, string $name = self::FIELD): void {
 		if ($v === null) {
 			return;
 		}
 		if (!($v instanceof \stdClass)) {
-			throw ApiException::invalid(Message::of('“{field}” must be an object.', ['field' => self::FIELD]));
+			throw ApiException::invalid(Message::of('“{field}” must be an object.', ['field' => $name]));
 		}
-		self::checkPattern($v->pattern ?? null);
+		self::checkPattern($v->pattern ?? null, $name);
 		$perYear = $v->per_year ?? null;
 		if ($perYear !== null && !is_bool($perYear)) {
-			throw ApiException::notBool(self::FIELD . '.per_year');
+			throw ApiException::notBool($name . '.per_year');
 		}
 		$start = $v->start ?? null;
 		if ($start !== null && (!is_int($start) || $start < 1 || $start > self::START_MAX)) {
-			throw ApiException::invalid(Message::of('“{field}” must be an integer from 1 to {max}.', ['field' => self::FIELD . '.start', 'max' => self::START_MAX]));
+			throw ApiException::invalid(Message::of('“{field}” must be an integer from 1 to {max}.', ['field' => $name . '.start', 'max' => self::START_MAX]));
 		}
 	}
 
 	/** Exactly one number placeholder, only known placeholders, no stray braces. */
-	public static function checkPattern(mixed $p): void {
-		$field = self::FIELD . '.pattern';
+	public static function checkPattern(mixed $p, string $name = self::FIELD): void {
+		$field = $name . '.pattern';
 		if (!is_string($p) || $p === '' || mb_strlen($p) > self::PATTERN_MAX || !mb_check_encoding($p, 'UTF-8')) {
 			throw ApiException::invalid(Message::of('“{field}” must be text of 1 to {max} characters.', ['field' => $field, 'max' => self::PATTERN_MAX]));
 		}
@@ -77,8 +81,8 @@ final class InvoiceNumbering {
 	 *
 	 * @return array{per_year:bool,start:int}
 	 */
-	public static function of(mixed $settings): array {
-		$v = $settings instanceof \stdClass ? ($settings->{self::FIELD} ?? null) : null;
+	public static function of(mixed $settings, string $name = self::FIELD): array {
+		$v = $settings instanceof \stdClass ? ($settings->{$name} ?? null) : null;
 		$perYear = $v instanceof \stdClass ? ($v->per_year ?? null) : null;
 		$start = $v instanceof \stdClass ? ($v->start ?? null) : null;
 		return [
@@ -88,8 +92,8 @@ final class InvoiceNumbering {
 	}
 
 	/** The pattern of the settings record, or null when none is set (lenient like {@see of()}). */
-	public static function patternOf(mixed $settings): ?string {
-		$v = $settings instanceof \stdClass ? ($settings->{self::FIELD} ?? null) : null;
+	public static function patternOf(mixed $settings, string $name = self::FIELD): ?string {
+		$v = $settings instanceof \stdClass ? ($settings->{$name} ?? null) : null;
 		$p = $v instanceof \stdClass ? ($v->pattern ?? null) : null;
 		return is_string($p) && $p !== '' ? $p : null;
 	}
@@ -100,7 +104,7 @@ final class InvoiceNumbering {
 	 * project and customer keys. Without a pattern: `{year}-{no:4}`. The
 	 * result must fit the invoice number (64 characters).
 	 */
-	public static function fill(?string $pattern, int $no, int $year, string $project, ?string $customer): string {
+	public static function fill(?string $pattern, int $no, int $year, string $project, ?string $customer, string $default = self::DEFAULT_PATTERN): string {
 		$out = (string)preg_replace_callback('/\{([^{}]*)\}/', static function (array $m) use ($no, $year, $project, $customer): string {
 			$name = $m[1];
 			if (preg_match(self::NUMBER, $name, $w)) {
@@ -113,7 +117,7 @@ final class InvoiceNumbering {
 				'customer', 'kunde' => $customer ?? '',
 				default => $m[0],
 			};
-		}, $pattern ?? self::DEFAULT_PATTERN);
+		}, $pattern ?? $default);
 		if ($out === '' || mb_strlen($out) > InvoiceRules::NUMBER_MAX) {
 			throw ApiException::invalid(Message::of('The invoice number {number} is empty or longer than {max} characters; change the pattern.', ['number' => $out, 'max' => InvoiceRules::NUMBER_MAX]));
 		}
@@ -121,8 +125,8 @@ final class InvoiceNumbering {
 	}
 
 	/** The counter's name: one per year, or one for all years. */
-	public static function counter(bool $perYear, int $year): string {
-		return $perYear ? self::COUNTER . ':' . $year : self::COUNTER;
+	public static function counter(bool $perYear, int $year, string $name = self::COUNTER): string {
+		return $perYear ? $name . ':' . $year : $name;
 	}
 
 	/** The next number after `$last` (null: none given yet) – never below `$start`. */

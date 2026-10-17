@@ -216,7 +216,7 @@ final class DocumentRules {
 				'receipt' => 'Beleg', 'copy_missing' => 'Die Kopie dieses Belegs liess sich nicht einbinden. Die Datei liegt hier:',
 				'copy_more' => '… und {n} weitere Seiten in der Datei des Belegs.', 'copy_unreadable' => 'Die Datei fehlt.',
 				'report' => 'Spesenblatt', 'supplier' => 'Lieferant', 'text' => 'Text', 'gross_col' => 'Brutto', 'without_receipt' => 'ohne Beleg',
-				'sign_person' => 'Unterschrift Person', 'sign_approval' => 'Freigabe', 'team' => 'Team', 'status' => 'Stand',
+				'sign_person' => 'Unterschrift Person', 'sign_fixed' => 'Fixiert', 'team' => 'Team', 'status' => 'Stand',
 			];
 		}
 		return [
@@ -231,7 +231,7 @@ final class DocumentRules {
 			'receipt' => 'Receipt', 'copy_missing' => 'The copy of this receipt could not be embedded. The file is here:',
 			'copy_more' => '… and {n} more pages in the receipt’s file.', 'copy_unreadable' => 'The file is missing.',
 			'report' => 'Expense report', 'supplier' => 'Supplier', 'text' => 'Text', 'gross_col' => 'Gross', 'without_receipt' => 'without receipt',
-			'sign_person' => 'Signature person', 'sign_approval' => 'Approval', 'team' => 'Team', 'status' => 'Status',
+			'sign_person' => 'Signature person', 'sign_fixed' => 'Fixed', 'team' => 'Team', 'status' => 'Status',
 		];
 	}
 

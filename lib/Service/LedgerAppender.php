@@ -35,6 +35,7 @@ final class LedgerAppender {
 		$e->setActor($actor);
 		$e->setAction($action);
 		$e->setInvoiceId($invoiceId);
+		$e->keepInvoiceId();
 		$e->setNumber($number);
 		$e->setPayload($canonical);
 		$e->setPayloadHash($payloadHash);

@@ -10,7 +10,8 @@
 // documents (folders, preview, stored PDF, ledger hash, chain head) and the
 // e-invoices and exports (tax case, ZUGFeRD, XRechnung, QRR, exports, webhooks),
 // VAT per invoice line and the cost positions of a budget (0.21.0), receipts,
-// expense reports and the document tree (0.22.0).
+// expense reports and the document tree (0.22.0), approval by assignment and
+// fixed expense reports with ledger (0.23.0).
 //
 //   NC_URL=http://localhost:8081 node tests/integration/integration.mjs
 //
