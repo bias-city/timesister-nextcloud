@@ -250,7 +250,7 @@ export async function erechnung() {
 
 		head('E-invoices: hand-over to an accounting system')
 		{
-			expect('external with a bad system', await ocs(A, 'POST', `${ipath(keys.chch)}/external`, { system: 'sage', id: '1' }), 422, 'invalid')
+			expect('external with a bad system', await ocs(A, 'POST', `${ipath(keys.chch)}/external`, { system: 'Sage AG', id: '1' }), 422, 'invalid')
 			expect('external of a draft', await ocs(A, 'POST', `${ipath(`inv-${RUN}zz`)}/external`, { system: 'bexio', id: '1' }), 404, 'not_found')
 			expect('external by a Lead', await ocs(L, 'POST', `${ipath(keys.chch)}/external`, { system: 'bexio', id: '1' }), 403, 'forbidden')
 			const r = await ocs(A, 'POST', `${ipath(keys.chch)}/external`, { system: 'bexio', id: 4711, url: 'https://office.bexio.com/kb_invoice/show/4711' })
@@ -260,6 +260,16 @@ export async function erechnung() {
 			const e = (lg.data?.entries || []).find((x) => x.seq === r.data?.ledger?.seq)
 			check('ledger: exported with payload {key, number, system, id, url}', e?.action === 'exported' && JSON.parse(e.payload).system === 'bexio' && JSON.parse(e.payload).id === '4711', e)
 			check('fixed carries it', (await ocs(A, 'GET', `${ipath(keys.chch)}/fixed`)).data?.external?.id === '4711')
+			// 0.23.1: any system name; the invoice record carries `external` too.
+			expect('external with a system name that is not lower case', await ocs(A, 'POST', `${ipath(keys.chch)}/external`, { system: 'SevDesk', id: '1' }), 422, 'invalid')
+			const before = (await ocs(A, 'GET', path(keys.chch))).data
+			const s = await ocs(A, 'POST', `${ipath(keys.chch)}/external`, { system: 'sevdesk', id: 'SD-17', url: 'https://my.sevdesk.de/fi/detail/type/RE/id/17' })
+			expect('Team Admin records a hand-over to sevdesk', s, 200)
+			const ext = s.data?.record?.data?.external
+			check('… the answer carries the written record with external {system, id, url, at, by}', s.data?.external?.system === 'sevdesk' && ext?.system === 'sevdesk' && ext?.id === 'SD-17' && ext?.url === 'https://my.sevdesk.de/fi/detail/type/RE/id/17' && ext?.by === 'pbadmin' && ext?.at === s.data?.external?.at && s.data?.record?.version === before?.version + 1, s.data?.record)
+			const rec = (await ocs(A, 'GET', path(keys.chch))).data
+			check('the invoice record carries external, the rest unchanged', rec?.data?.external?.system === 'sevdesk' && rec?.data?.external?.id === 'SD-17' && rec?.data?.status === before?.data?.status && rec?.data?.number === before?.data?.number, rec?.data?.external)
+			expect('a client still may not write the issued invoice (external included)', await ocs(A, 'PUT', path(keys.chch), { version: rec?.version, data: { ...rec?.data, external: { system: 'datev', id: '1' } } }), 409, 'issued')
 		}
 
 		head('E-invoices: webhooks')

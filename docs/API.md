@@ -2999,7 +2999,7 @@ missing customer country counts as domestic. The draft may override with
 | GET | `/invoices/export?kind=csv&from=YYYY-MM-DD&to=YYYY-MM-DD` | Team Admins | `text/csv; charset=utf-8` with BOM, `;` separated: one row per issued/cancelled/paid invoice in the period (by `issued_on`): number, status, issued_on, due_on, paid_on, customer name, customer vat_id, project, budget, currency, net, vat rate, vat amount, gross, tax_case, reverses, document sha256, chain seq, chain hash |
 | GET | `/invoices/export?kind=datev&from&to` | Team Admins | DATEV **Buchungsstapel** (EXTF, format version 700, UTF-8 with BOM, `;`): header lines per DATEV spec, then one row per invoice: Umsatz (gross), Soll/Haben (`S` for invoices, `H` for reversals and credits), Konto = debtor account (`customer.datev_account`, else team setting `datev.debtor_account`), Gegenkonto = revenue account by tax case (`datev.revenue_domestic`, `datev.revenue_eu`, `datev.revenue_export`), BU-Schlüssel from the tax case, Belegdatum (DDMM), Belegfeld 1 = number, Buchungstext = customer name + project; `422` when the team's `datev` setting lacks the accounts |
 | GET | `/invoices/export?kind=ledger&from&to` | Team Admins | the ledger as CSV (seq, at, actor, action, number, payload_hash, prev_hash, hash) |
-| POST | `/invoices/{key}/external` | Team Admins | `{ "system": "bexio"\|"lexware"\|"other", "id": ≤128, "url"?: https }` – records a hand-over to an accounting system: ledger `exported`, `fixed.external` |
+| POST | `/invoices/{key}/external` | Team Admins | `{ "system": name, "id": ≤128, "url"?: https }` – records a hand-over to an accounting system: ledger `exported`, `fixed.external`, since 0.23.1 also `external` on the invoice record; `system` since 0.23.1 any name `^[a-z0-9][a-z0-9._-]{0,63}$` (before: `bexio`\|`lexware`\|`other`) |
 
 Team setting `datev` (`PUT /team/settings`, `/admin/teams`):
 `{ "consultant": digits ≤ 7, "client": digits ≤ 5, "fiscal_year_start": "MM-DD", "account_length": 4–8, "debtor_account": digits, "revenue_domestic": digits, "revenue_eu": digits, "revenue_export": digits }`.
@@ -3127,7 +3127,9 @@ rely on it:
   Admins (`PUT /team/settings`) and Nextcloud admins (`/admin/teams`).
   **External:** `POST /invoices/{key}/external` takes
   `{ system: bexio|lexware|other, id: text ≤ 128 (a number is taken as
-  text), url?: https ≤ 512 }`, appends ledger `exported` with payload
+  text), url?: https ≤ 512 }` (since 0.23.1 any system name and the
+  record's field `external`, see «External on the invoice record,
+  0.23.1»), appends ledger `exported` with payload
   `{ key, number, system, id, url }`, stores
   `external: { system, id, url, at, by }` (the latest hand-over) and
   answers `fixed` plus `ledger: { seq, prev_hash, hash }`; `404` for a
@@ -4201,3 +4203,63 @@ Services: `CostWrites` (approval in the write, the open report),
 fix, paid, reverse, document), `ExpenseReportDocuments` (PDF, ledger
 entry, retry), `Transaction` (shared with `IssueService`);
 `ExpenseService` keeps the rule's approval.
+
+## External on the invoice record, 0.23.1 (2026-10-17)
+
+Additive, `api: 2` stays; no schema change, no new capability. For the
+plugins of the Mac app (`PLAN-PLUGINS.md`, stage P1:
+`ts.invoices.setExternal(key, {system, id, url})`): the invoice record
+says where it went.
+
+- The record `invoice` knows the optional field **`external`**: `null` or
+  `{ system, id, url, at, by }` – the latest hand-over to an accounting
+  system. Absent stays absent.
+- `system`: a name after `^[a-z0-9][a-z0-9._-]{0,63}$` (`bexio`,
+  `lexware`, `other`, `sevdesk`, `datev`, `ch.example.csv`).
+- **Without invoicing on the server** (invoices issued on the Mac) the
+  Mac writes `external` into the record itself, like any other field.
+- **With invoicing on the server** clients may not write an issued
+  invoice (`409 issued`); there `external` comes only from
+  `POST /invoices/{key}/external`, which now also writes it into the
+  record.
+
+### As built, 0.23.1 (2026-10-17)
+
+- **Record check** (`InvoiceRules::validate`, shared checker
+  `ExportRules::externalBlock`): `external` is `null` or an object with
+  exactly the keys `system` (required, pattern above), `id` (required,
+  text 1–128 without control characters, trimmed; an integer is taken as
+  text), `url` (optional, `null`, `""` or https ≤ 512), `at` (optional,
+  `null` or text ≤ 32 without control characters), `by` (optional, `null`
+  or text ≤ 64 without control characters). The record stores it
+  complete: missing keys as `null`, the id as text –
+  `{"system":"sevdesk","id":4711}` is stored as
+  `{"system":"sevdesk","id":"4711","url":null,"at":null,"by":null}`.
+- 422 messages: ““external” must be null or an object with “system” and
+  “id”.”, ““external” has an unknown field “note”; allowed are system,
+  id, url, at and by.”, and per field with the path, for example
+  ““external.system” must be a name of 1 to 64 characters: lowercase
+  letters, digits, “.”, “_” or “-”, starting with a letter or digit (for
+  example “bexio”).”, ““external.id” must be text of at most 128
+  characters.”, ““external.url” must be an https address of at most 512
+  characters.”, ““external.at” must be null or text of at most 32
+  characters.”
+- **`POST /invoices/{key}/external`**: `system` any name of the pattern
+  (message as above with “system”; the three names of 0.20.0 stay valid);
+  `id` and `url` as before, other fields of the body are ignored. In one
+  transaction (retried on a deadlock): ledger `exported` (payload
+  unchanged), `fixed.external`, and the record `invoice` with
+  `external: { system, id, url, at, by }` (`at` the ledger entry's time,
+  `by` the Team Admin) as the server's own write – new `version`, a
+  history row, the team's revision raised by one, so `/delta` delivers
+  it. The answer is unchanged plus **`record`**: `fixed` content plus
+  `ledger: { seq, prev_hash, hash }` and `record: { kind, key, version,
+  revision, deleted, modified_by, modified_at, data }` as a record write
+  answers (`data.external` the block above). The record must exist
+  (404 “This invoice does not exist.” otherwise – nothing written).
+- Rights unchanged: Team Admins, invoicing on (404 off, 403 for a Lead,
+  404 for a draft without fixed content).
+- **Classes.** `ExportRules` (`externalBlock`, `SYSTEM_PATTERN`,
+  `EXTERNAL_KEYS`; `SYSTEMS` is gone), `InvoiceRules` (the field),
+  `ExportService` (the record write through `RecordService::applyWithin`,
+  `Transaction`).

@@ -1,5 +1,22 @@
 # Changes
 
+## 0.23.1 – 2026-10-17
+
+Additive, `api: 2` unchanged, no schema change. Contract: `API.md`
+«External on the invoice record, 0.23.1» with «As built».
+
+- **`external` on the invoice record** for the Mac app's plugins
+  (`ts.invoices.setExternal`): `null` or `{ system, id, url, at, by }`,
+  checked strictly (unknown keys 422) and stored complete (missing keys
+  `null`, a number as id taken as text). Without invoicing on the server
+  the Mac writes it into the record.
+- **`POST /invoices/{key}/external`** takes any system name
+  `^[a-z0-9][a-z0-9._-]{0,63}$` (`sevdesk`, `datev`, `ch.example.csv`;
+  `bexio`, `lexware`, `other` stay) and writes `external` into the
+  invoice record as well, in the same transaction as ledger `exported`
+  and `fixed.external`; the answer carries the written `record` besides
+  `fixed` and `ledger`.
+
 ## 0.23.0 – 2026-10-16 (beta)
 
 API unchanged in form (`api: 2`); capability `expense_fixing: 1` replaces

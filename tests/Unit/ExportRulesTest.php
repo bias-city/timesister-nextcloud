@@ -120,15 +120,61 @@ class ExportRulesTest extends TestCase {
 	public function testExternal(): void {
 		$this->assertSame(['system' => 'bexio', 'id' => '4711', 'url' => 'https://office.bexio.com/kb_invoice/show/4711'], ExportRules::external((object)['system' => 'bexio', 'id' => 4711, 'url' => 'https://office.bexio.com/kb_invoice/show/4711']));
 		$this->assertNull(ExportRules::external((object)['system' => 'other', 'id' => 'x', 'url' => ''])['url']);
+		// 0.23.1: any system name of the pattern; the three of 0.20.0 still fit.
+		foreach (['bexio', 'lexware', 'other', 'sevdesk', 'datev', 'ch.example.csv', 'a', '0-x_y', str_repeat('a', 64)] as $name) {
+			$this->assertSame($name, ExportRules::external((object)['system' => $name, 'id' => '1'])['system'], $name);
+		}
+		$this->assertSame('x', ExportRules::external((object)['system' => 'other', 'id' => 'x', 'extra' => 1])['id'], 'the body ignores other fields');
+		$system = '“system” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).';
 		foreach ([
-			'{"system":"sage","id":"1"}' => '“system” must be “bexio”, “lexware” or “other”.',
+			'{"system":"Sage","id":"1"}' => $system,
+			'{"system":".x","id":"1"}' => $system,
+			'{"system":"-x","id":"1"}' => $system,
+			'{"system":"a b","id":"1"}' => $system,
+			'{"system":"","id":"1"}' => $system,
+			'{"system":"' . str_repeat('a', 65) . '","id":"1"}' => $system,
+			'{"system":7,"id":"1"}' => $system,
+			'{"id":"1"}' => $system,
 			'{"system":"bexio"}' => '“id” must be text of at most 128 characters.',
+			'{"system":"bexio","id":"' . str_repeat('1', 129) . '"}' => '“id” must be text of at most 128 characters.',
 			'{"system":"bexio","id":"1","url":"http://x"}' => '“url” must be an https address of at most 512 characters.',
 		] as $json => $message) {
 			try {
 				ExportRules::external(json_decode($json));
 				$this->fail($json);
 			} catch (ApiException $e) {
+				$this->assertSame($message, $e->getMessage(), $json);
+			}
+		}
+	}
+
+	/** 0.23.1: the field `external` of the invoice record. */
+	public function testExternalBlock(): void {
+		$this->assertNull(ExportRules::externalBlock(null));
+		$this->assertEquals((object)['system' => 'sevdesk', 'id' => '4711', 'url' => null, 'at' => null, 'by' => null], ExportRules::externalBlock(json_decode('{"system":"sevdesk","id":4711}')), 'complete, the number as text');
+		$full = (object)['system' => 'ch.example.csv', 'id' => 'R-17', 'url' => 'https://example.org/r/17', 'at' => '2026-10-17T09:45:00Z', 'by' => 'pbadmin'];
+		$this->assertEquals($full, ExportRules::externalBlock(clone $full));
+		$this->assertNull(ExportRules::externalBlock((object)['system' => 'datev', 'id' => '1', 'url' => ''])?->url);
+		foreach ([
+			'"bexio"' => '“external” must be null or an object with “system” and “id”.',
+			'[]' => '“external” must be null or an object with “system” and “id”.',
+			'{"system":"bexio","id":"1","note":"x"}' => '“external” has an unknown field “note”; allowed are system, id, url, at and by.',
+			'{"system":"Bexio","id":"1"}' => '“external.system” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).',
+			'{"system":"bexio"}' => '“external.id” must be text of at most 128 characters.',
+			'{"system":"bexio","id":"' . str_repeat('1', 129) . '"}' => '“external.id” must be text of at most 128 characters.',
+			'{"system":"bexio","id":"a\u0007"}' => '“external.id” must be text of at most 128 characters.',
+			'{"system":"bexio","id":1.5}' => '“external.id” must be text of at most 128 characters.',
+			'{"system":"bexio","id":"1","url":"http://example.org"}' => '“external.url” must be an https address of at most 512 characters.',
+			'{"system":"bexio","id":"1","url":"https://' . str_repeat('a', 510) . '"}' => '“external.url” must be an https address of at most 512 characters.',
+			'{"system":"bexio","id":"1","at":"' . str_repeat('2', 33) . '"}' => '“external.at” must be null or text of at most 32 characters.',
+			'{"system":"bexio","id":"1","at":17}' => '“external.at” must be null or text of at most 32 characters.',
+			'{"system":"bexio","id":"1","by":"' . str_repeat('b', 65) . '"}' => '“external.by” must be null or text of at most 64 characters.',
+		] as $json => $message) {
+			try {
+				ExportRules::externalBlock(json_decode($json));
+				$this->fail($json);
+			} catch (ApiException $e) {
+				$this->assertSame(422, $e->getStatus(), $json);
 				$this->assertSame($message, $e->getMessage(), $json);
 			}
 		}

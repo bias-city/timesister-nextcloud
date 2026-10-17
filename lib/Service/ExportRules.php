@@ -24,9 +24,15 @@ final class ExportRules {
 	public const EOL = "\r\n";
 	/** Ledger action of a hand-over to an accounting system. */
 	public const EXPORTED = 'exported';
-	public const SYSTEMS = ['bexio', 'lexware', 'other'];
+	/** 0.23.1: any system name (plugins: `sevdesk`, `ch.example.csv`); bexio, lexware and other of 0.20.0 fit. */
+	public const SYSTEM_PATTERN = '/^[a-z0-9][a-z0-9._-]{0,63}$/';
 	public const EXTERNAL_ID_MAX = 128;
 	public const EXTERNAL_URL_MAX = 512;
+	/** 0.23.1: the field `external` of the invoice record. */
+	public const EXTERNAL_FIELD = 'external';
+	public const EXTERNAL_KEYS = ['system', 'id', 'url', 'at', 'by'];
+	public const EXTERNAL_AT_MAX = 32;
+	public const EXTERNAL_BY_MAX = 64;
 	/** The DATEV setting with its defaults (null: not set). */
 	public const DATEV_DEFAULTS = ['consultant' => null, 'client' => null, 'fiscal_year_start' => null, 'account_length' => null,
 		'debtor_account' => null, 'revenue_domestic' => null, 'revenue_eu' => null, 'revenue_export' => null,
@@ -330,31 +336,79 @@ final class ExportRules {
 
 	/**
 	 * The body of `POST /invoices/{key}/external`: the system, its id and
-	 * an optional https link.
+	 * an optional https link. Other fields of the body are ignored.
 	 *
 	 * @return array{system:string,id:string,url:?string}
 	 */
 	public static function external(\stdClass $body): array {
-		$system = $body->system ?? null;
-		if (!is_string($system) || !in_array($system, self::SYSTEMS, true)) {
-			throw ApiException::invalid('“system” must be “bexio”, “lexware” or “other”.');
+		return [
+			'system' => self::system($body->system ?? null, 'system'),
+			'id' => self::externalId($body->id ?? null, 'id'),
+			'url' => self::externalUrl($body->url ?? null, 'url'),
+		];
+	}
+
+	/**
+	 * The field `external` of the invoice record (0.23.1): null or exactly
+	 * {system, id, url?, at?, by?}, returned complete (missing ones null,
+	 * an integer id as text).
+	 */
+	public static function externalBlock(mixed $v): ?\stdClass {
+		if ($v === null) {
+			return null;
 		}
-		$id = $body->id ?? null;
-		if (is_int($id)) {
-			$id = (string)$id;
+		if (!$v instanceof \stdClass) {
+			throw ApiException::invalid('“external” must be null or an object with “system” and “id”.');
 		}
-		if (!is_string($id) || trim($id) === '' || mb_strlen($id) > self::EXTERNAL_ID_MAX || preg_match('/[\x00-\x1F\x7F]/', $id)) {
-			throw ApiException::invalid(Message::of('“{field}” must be text of at most {max} characters.', ['field' => 'id', 'max' => self::EXTERNAL_ID_MAX]));
-		}
-		$url = $body->url ?? null;
-		if ($url !== null && $url !== '') {
-			if (!is_string($url) || strlen($url) > self::EXTERNAL_URL_MAX || !preg_match('#^https://[^\s/?\#]+[^\s]*$#', $url)) {
-				throw ApiException::invalid('“url” must be an https address of at most 512 characters.');
+		foreach (array_keys(get_object_vars($v)) as $k) {
+			if (!in_array($k, self::EXTERNAL_KEYS, true)) {
+				throw ApiException::invalid(Message::of('“external” has an unknown field “{field}”; allowed are system, id, url, at and by.', ['field' => $k]));
 			}
-		} else {
-			$url = null;
 		}
-		return ['system' => $system, 'id' => trim($id), 'url' => $url];
+		$out = new \stdClass();
+		$out->system = self::system($v->system ?? null, 'external.system');
+		$out->id = self::externalId($v->id ?? null, 'external.id');
+		$out->url = self::externalUrl($v->url ?? null, 'external.url');
+		$out->at = self::optionalText($v->at ?? null, 'external.at', self::EXTERNAL_AT_MAX);
+		$out->by = self::optionalText($v->by ?? null, 'external.by', self::EXTERNAL_BY_MAX);
+		return $out;
+	}
+
+	private static function system(mixed $v, string $field): string {
+		if (!is_string($v) || preg_match(self::SYSTEM_PATTERN, $v) !== 1) {
+			throw ApiException::invalid(Message::of('“{field}” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).', ['field' => $field]));
+		}
+		return $v;
+	}
+
+	private static function externalId(mixed $v, string $field): string {
+		if (is_int($v)) {
+			$v = (string)$v;
+		}
+		if (!is_string($v) || trim($v) === '' || mb_strlen($v) > self::EXTERNAL_ID_MAX || preg_match('/[\x00-\x1F\x7F]/', $v)) {
+			throw ApiException::invalid(Message::of('“{field}” must be text of at most {max} characters.', ['field' => $field, 'max' => self::EXTERNAL_ID_MAX]));
+		}
+		return trim($v);
+	}
+
+	private static function externalUrl(mixed $v, string $field): ?string {
+		if ($v === null || $v === '') {
+			return null;
+		}
+		if (!is_string($v) || strlen($v) > self::EXTERNAL_URL_MAX || !preg_match('#^https://[^\s/?\#]+[^\s]*$#', $v)) {
+			throw ApiException::invalid(Message::of('“{field}” must be an https address of at most {max} characters.', ['field' => $field, 'max' => self::EXTERNAL_URL_MAX]));
+		}
+		return $v;
+	}
+
+	private static function optionalText(mixed $v, string $field, int $max): ?string {
+		if ($v === null) {
+			return null;
+		}
+		if (!is_string($v) || mb_strlen($v) > $max || preg_match('/[\x00-\x1F\x7F]/', $v)) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or text of at most {max} characters.', ['field' => $field, 'max' => $max]));
+		}
+		return $v;
 	}
 
 	// ------------------------------------------------------------ helpers

@@ -117,6 +117,29 @@ class InvoiceRulesTest extends TestCase {
 		$this->assertSame('422 “schema” is invalid.', self::check(['schema' => '1']));
 	}
 
+	/** 0.23.1: `external` on the record – null or {system, id, url?, at?, by?}, stored complete. */
+	public function testExternal(): void {
+		$this->assertSame('ok', self::check(['external' => null]));
+		$r = RecordValidator::validate('invoice', 'inv-1a2b3c4d', self::data(['external' => ['system' => 'sevdesk', 'id' => 4711]]));
+		$this->assertStringContainsString('"external":{"system":"sevdesk","id":"4711","url":null,"at":null,"by":null}', $r['json'], 'the number as text, missing fields null');
+		$r = RecordValidator::validate('invoice', 'inv-1a2b3c4d', self::data(['status' => 'issued', 'number' => 'RE-1',
+			'external' => ['system' => 'ch.example.csv', 'id' => 'R-17', 'url' => 'https://example.org/r/17', 'at' => '2026-10-17T09:45:00Z', 'by' => 'pbadmin']]));
+		$this->assertStringContainsString('"external":{"system":"ch.example.csv","id":"R-17","url":"https://example.org/r/17","at":"2026-10-17T09:45:00Z","by":"pbadmin"}', $r['json']);
+		$r = RecordValidator::validate('invoice', 'inv-1a2b3c4d', self::data());
+		$this->assertStringNotContainsString('"external"', $r['json'], 'absent stays absent');
+		foreach (['bexio', 'lexware', 'other', 'datev'] as $name) {
+			$this->assertSame('ok', self::check(['external' => ['system' => $name, 'id' => '1']]), $name);
+		}
+		$this->assertSame('422 “external” has an unknown field “note”; allowed are system, id, url, at and by.', self::check(['external' => ['system' => 'bexio', 'id' => '1', 'note' => 'x']]));
+		$this->assertSame('422 “external” must be null or an object with “system” and “id”.', self::check(['external' => 'bexio']));
+		$this->assertSame('422 “external.system” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).', self::check(['external' => ['system' => 'SevDesk', 'id' => '1']]));
+		$this->assertSame('422 “external.system” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).', self::check(['external' => ['id' => '1']]));
+		$this->assertSame('422 “external.id” must be text of at most 128 characters.', self::check(['external' => ['system' => 'bexio', 'id' => str_repeat('1', 129)]]));
+		$this->assertSame('422 “external.id” must be text of at most 128 characters.', self::check(['external' => ['system' => 'bexio', 'id' => ' ']]));
+		$this->assertSame('422 “external.url” must be an https address of at most 512 characters.', self::check(['external' => ['system' => 'bexio', 'id' => '1', 'url' => 'http://example.org/1']]));
+		$this->assertSame('422 “external.by” must be null or text of at most 64 characters.', self::check(['external' => ['system' => 'bexio', 'id' => '1', 'by' => str_repeat('b', 65)]]));
+	}
+
 	public function testBookings(): void {
 		$b = static fn (array $over = []): array => ['bookings' => [array_merge(['person' => 'alice', 'uid' => 'u1', 'start' => '2026-09-02'], $over)]];
 		$this->assertSame('422 “bookings” must be a list of at most 5000 bookings.', self::check([], ['bookings']));

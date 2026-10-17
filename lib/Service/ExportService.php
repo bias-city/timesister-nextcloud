@@ -11,19 +11,22 @@ use OCA\TimeSister\Db\InvInvoiceMapper;
 use OCA\TimeSister\Db\InvLedger;
 use OCA\TimeSister\Db\InvLedgerMapper;
 use OCA\TimeSister\Db\Tenant;
+use OCA\TimeSister\Db\TenantMapper;
 use OCP\AppFramework\Utility\ITimeFactory;
-use OCP\IDBConnection;
 
 /**
  * Exports (0.20.0): the issued invoices of a period as CSV, as a DATEV
  * Buchungsstapel or the ledger as CSV (Team Admins), and the hand-over of
- * an invoice to an accounting system (ledger `exported`, `fixed.external`).
- * The rules are in ExportRules.
+ * an invoice to an accounting system (ledger `exported`, `fixed.external`,
+ * since 0.23.1 also `external` on the invoice record). The rules are in
+ * ExportRules.
  */
 final class ExportService {
 	public function __construct(
-		private IDBConnection $db,
+		private Transaction $tx,
 		private TenantService $team,
+		private TenantMapper $tenants,
+		private RecordService $records,
 		private InvInvoiceMapper $invoices,
 		private InvLedgerMapper $ledger,
 		private InvoiceFixed $fixed,
@@ -109,32 +112,41 @@ final class ExportService {
 
 	/**
 	 * `POST /invoices/{key}/external` – records the hand-over to an
-	 * accounting system: ledger `exported`, `fixed.external`.
+	 * accounting system: ledger `exported`, `fixed.external` and, as the
+	 * server's own write (clients may not write an issued invoice), the
+	 * field `external` of the invoice record.
 	 *
-	 * @return array<string,mixed> the fixed content plus `ledger`
+	 * @return array<string,mixed> the fixed content plus `ledger` and `record`
 	 */
 	public function external(Membership $m, string $key, \stdClass $body): array {
 		$this->requireAdminOn($m);
 		RecordValidator::checkAddress(InvoiceRules::KIND, $key);
 		$v = ExportRules::external($body);
-		$now = $this->time->getTime();
+		return $this->tx->run(fn (): array => $this->externalWithin($m, $key, $v));
+	}
+
+	/**
+	 * @param array{system:string,id:string,url:?string} $v
+	 * @return array<string,mixed>
+	 */
+	private function externalWithin(Membership $m, string $key, array $v): array {
 		$tid = $m->tenantId;
+		$now = $this->time->getTime();
 		$row = $this->invoices->findByKey($tid, $key) ?? throw ApiException::notFound('Nothing is fixed yet: this invoice is a draft.');
-		$this->db->beginTransaction();
-		try {
-			$entry = $this->appender->append($tid, $m->uid, ExportRules::EXPORTED, $row->getId(), $row->getNumber(),
-				LedgerRules::canonical(['key' => $key, 'number' => $row->getNumber(), 'system' => $v['system'], 'id' => $v['id'], 'url' => $v['url']]), $now);
-			$row->setExternalJson(json_encode(['system' => $v['system'], 'id' => $v['id'], 'url' => $v['url'], 'at' => $entry->getAt(), 'by' => $m->uid], Json::FLAGS));
-			$row->setModifiedAt($now);
-			$this->invoices->update($row);
-			$this->db->commit();
-		} catch (\Throwable $e) {
-			if ($this->db->inTransaction()) {
-				$this->db->rollBack();
-			}
-			throw $e;
-		}
-		return $this->fixed->of($row) + ['ledger' => self::block($entry)];
+		[$cur, $d] = $this->drafts->invoiceRecord($tid, $key);
+		// The team lock first, as in IssueService.
+		$top = $this->tenants->bumpRevision($tid, 1);
+		$entry = $this->appender->append($tid, $m->uid, ExportRules::EXPORTED, $row->getId(), $row->getNumber(),
+			LedgerRules::canonical(['key' => $key, 'number' => $row->getNumber(), 'system' => $v['system'], 'id' => $v['id'], 'url' => $v['url']]), $now);
+		$external = ['system' => $v['system'], 'id' => $v['id'], 'url' => $v['url'], 'at' => $entry->getAt(), 'by' => $m->uid];
+		$row->setExternalJson(json_encode($external, Json::FLAGS));
+		$row->setModifiedAt($now);
+		$this->invoices->update($row);
+		$d->{ExportRules::EXTERNAL_FIELD} = (object)$external;
+		$checked = RecordValidator::validate(InvoiceRules::KIND, $key, $d);
+		$op = ['kind' => InvoiceRules::KIND, 'key' => $key, 'version' => $cur->getVersion(), 'json' => $checked['json'], 'accounts' => $checked['accounts']];
+		$written = $this->records->applyWithin($m, [$op], false, $top, true);
+		return $this->fixed->of($row) + ['ledger' => self::block($entry), 'record' => $written['records'][0]];
 	}
 
 	/** @return array{seq:int,prev_hash:string,hash:string} */
