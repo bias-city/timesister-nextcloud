@@ -114,6 +114,10 @@ final class InvoiceRules {
 		}
 		// 0.20.0: the draft may override the tax case.
 		TaxRules::checkOverride($d->{TaxRules::FIELD} ?? null);
+		// 0.23.1: the hand-over to an accounting system, normalised (Mac plugins; on the server only through POST …/external).
+		if (property_exists($d, ExportRules::EXTERNAL_FIELD)) {
+			$d->{ExportRules::EXTERNAL_FIELD} = ExportRules::externalBlock($d->{ExportRules::EXTERNAL_FIELD});
+		}
 		self::bookings($d->bookings ?? null);
 	}
 
