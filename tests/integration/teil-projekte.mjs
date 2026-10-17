@@ -132,11 +132,37 @@ export async function projekte() {
 		await bad('progress above 100', { budgets: [{ id: 'b1', progress: 101 }] }, '“progress” must be null or a whole number from 0 to 100.')
 		await bad('progress with decimals', { budgets: [{ id: 'b1', progress: 12.5 }] }, '“progress” must be null or a whole number from 0 to 100.')
 		await bad('addendum as text', { budgets: [{ id: 'b1', work_packages: [{ no: 1, addendum: 'yes' }] }] }, '“addendum” must be true, false or null.')
+		// 0.25.1: a work package's group and role, the structured invoice plan.
+		const groupMsg = '“group” must be null or text of 1 to 200 characters without control characters.'
+		await bad('group blank', { budgets: [{ id: 'b1', work_packages: [{ no: 1, group: '   ' }] }] }, groupMsg)
+		await bad('group 201 characters', { budgets: [{ id: 'b1', work_packages: [{ no: 1, group: 'g'.repeat(201) }] }] }, groupMsg)
+		await bad('group with a control character', { budgets: [{ id: 'b1', work_packages: [{ no: 1, group: 'a\u0007b' }] }] }, groupMsg)
+		await bad('group a number', { budgets: [{ id: 'b1', work_packages: [{ no: 1, group: 7 }] }] }, groupMsg)
+		await bad('role unknown', { budgets: [{ id: 'b1', work_packages: [{ no: 1, role: 'Bauleitung' }] }] }, '“role” must be null, “gesamtleitung”, “fachplanung” or “bauleitung”.')
+		const plan = (billing_plan) => ({ budgets: [{ id: 'b1', invoice_dates: ['2026-12-31'], billing_plan }] })
+		await bad('billing_plan an object', plan({ date: '2026-12-31' }), '“billing_plan” must be null or a list of at most 200 entries.')
+		await bad('billing_plan 201 entries', plan(Array.from({ length: 201 }, (_, i) => ({ date: new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10) }))), '“billing_plan” must be null or a list of at most 200 entries.')
+		await bad('billing_plan entry no object', plan(['2026-12-31']), 'Entry 1 of “billing_plan” must be an object with “date”.')
+		await bad('billing_plan unknown field', plan([{ date: '2026-12-31', note: 'x' }]), 'Entry 1 of “billing_plan” has an unknown field “note”; allowed are date, share, amount and title.')
+		await bad('billing_plan without date', plan([{ date: '2026-06-30' }, { share: 10 }]), 'Entry 2 of “billing_plan”: “date” must be a day (YYYY-MM-DD).')
+		await bad('billing_plan 30 February', plan([{ date: '2026-02-30' }]), 'Entry 1 of “billing_plan”: “date” must be a day (YYYY-MM-DD).')
+		await bad('billing_plan a date twice', plan([{ date: '2026-12-31' }, { date: '2026-12-31' }]), '“billing_plan” has the date 2026-12-31 twice.')
+		await bad('billing_plan share 101', plan([{ date: '2026-12-31', share: 101 }]), 'Entry 1 of “billing_plan”: “share” must be null or a number from 0 to 100.')
+		await bad('billing_plan negative amount', plan([{ date: '2026-12-31', amount: -1 }]), 'Entry 1 of “billing_plan”: “amount” must be null or a number ≥ 0.')
+		await bad('billing_plan share and amount', plan([{ date: '2026-12-31', share: 50, amount: 1000 }]), 'Entry 1 of “billing_plan”: set “share” or “amount”, not both.')
+		await bad('billing_plan title 201', plan([{ date: '2026-12-31', title: 't'.repeat(201) }]), 'Entry 1 of “billing_plan”: “title” must be null or text of at most 200 characters without control characters.')
 		const b = await ocs(A, 'POST', '/records/batch', { writes: [{ kind: 'project', key: PQ, version: 4, data: quote({ team: [`nobody-${RUN}`] }) }] })
 		check('422 in a batch, naming the write', b.status === 422 && b.data?.message?.startsWith('Write 1: Not members'), `${b.status} ${b.data?.message}`)
 		check('nothing of it was written', (await ocs(A, 'GET', path(PQ))).data?.version === 4)
 		const pa = await ocs(L, 'PUT', path(PQ), { version: 4, data: quote({ status: 'active', budgets: [{ id: 'b1', hours: 40, progress: 45, work_packages: [{ no: 1, rate: null }, { no: 2, addendum: true }] }] }) })
 		check('pblead stores progress 45 and an addendum (0.24.1)', pa.status === 200 && pa.data?.data?.budgets?.[0]?.progress === 45 && pa.data?.data?.budgets?.[0]?.work_packages?.[1]?.addendum === true, [pa.status, pa.text.slice(0, 300)])
+		const billing = [{ date: '2026-06-30', share: 30, title: 'Vorprojekt' }, { date: '2026-12-31', amount: 12000.5 }, { date: '2027-03-31', share: null, amount: null, title: null }]
+		const gr = await ocs(L, 'PUT', path(PQ), { version: 5, data: quote({ status: 'active', budgets: [{ id: 'b1', hours: 40, invoice_dates: ['2026-12-31'], billing_plan: billing,
+			work_packages: [{ no: 1, group: '  Vorprojekt  ', role: 'gesamtleitung' }, { no: 2, group: null, role: 'bauleitung' }, { no: 3, role: null }] }] }) })
+		const gb = gr.data?.data?.budgets?.[0]
+		check('pblead stores billing_plan, group (trimmed) and role (0.25.1)', gr.status === 200 && JSON.stringify(gb?.billing_plan) === JSON.stringify(billing)
+			&& gb?.work_packages?.[0]?.group === 'Vorprojekt' && gb?.work_packages?.[0]?.role === 'gesamtleitung' && gb?.work_packages?.[1]?.role === 'bauleitung'
+			&& JSON.stringify(gb?.invoice_dates) === '["2026-12-31"]', [gr.status, gr.text.slice(0, 400)])
 
 		head('Projects: quotes – no code while a quote, from_quote stays')
 		const PN = `PN-${RUN}`

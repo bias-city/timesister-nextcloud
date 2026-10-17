@@ -17,7 +17,9 @@ use OCA\TimeSister\Db\Record;
  * Pure.
  *
  * Leads and Team Admins read every template. Team Admins write every one; a
- * Lead writes new templates and changes or removes those they saved last.
+ * Lead writes new templates and changes or removes their own: since 0.25.1
+ * (`templates: 2`) the owner is `data.created_by`, set by the server on
+ * every write; a record of 0.25.0 without it falls back to `modified_by`.
  * Members see none.
  */
 final class TemplateRules {
@@ -30,6 +32,8 @@ final class TemplateRules {
 	public const EDITION_PATTERN = '/^[A-Za-z0-9._-]{1,100}$/';
 	public const TITLE_MAX = 200;
 	public const MAX_DEPTH = 32;
+	/** 0.25.1: who created the template – kept by the server, a client's value is replaced. */
+	public const CREATED_BY = 'created_by';
 	/** Fields that carry people or customers – never in a template (as the client's check). */
 	public const PERSON_FIELDS = ['customer', 'client', 'kunde', 'kunden', 'person', 'persons', 'people', 'personen',
 		'lead', 'leads', 'leitung', 'owner', 'members', 'member', 'team', 'user', 'users', 'uid', 'email', 'mail', 'phone',
@@ -102,16 +106,37 @@ final class TemplateRules {
 	}
 
 	/**
+	 * The owner of the stored template: its `created_by`, for a record of
+	 * 0.25.0 without it the last writer; null for none or a tombstone.
+	 */
+	public static function owner(?Record $cur): ?string {
+		if ($cur === null || $cur->isTombstone()) {
+			return null;
+		}
+		$raw = $cur->getData();
+		try {
+			$d = $raw === null ? null : Json::decode($raw);
+		} catch (\JsonException) {
+			$d = null;
+		}
+		$by = $d instanceof \stdClass ? ($d->{self::CREATED_BY} ?? null) : null;
+		return is_string($by) && $by !== '' ? $by : $cur->getModifiedBy();
+	}
+
+	/** Sets `created_by` in the data to be written: the stored owner, for a new one (or on a tombstone) the writer. */
+	public static function stamp(?Record $cur, \stdClass $d, string $uid): void {
+		$d->{self::CREATED_BY} = self::owner($cur) ?? $uid;
+	}
+
+	/**
 	 * A write against the stored record: a Lead creates templates (also on a
-	 * tombstone) and changes or removes only those they saved last.
+	 * tombstone) and changes or removes only their own ({@see owner()}).
 	 *
 	 * @throws ApiException 403
 	 */
 	public static function requireLeadWrite(?Record $cur, string $uid): void {
-		if ($cur === null || $cur->isTombstone()) {
-			return;
-		}
-		if ($cur->getModifiedBy() !== $uid) {
+		$owner = self::owner($cur);
+		if ($owner !== null && $owner !== $uid) {
 			throw ApiException::forbidden('A Lead changes and removes only their own templates.');
 		}
 	}

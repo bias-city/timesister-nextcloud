@@ -256,6 +256,9 @@ final class TeamAdminService {
 		if (array_key_exists(InvoicingModeRules::FIELD, $settings)) {
 			$t->setInvoicingModeJson(InvoicingModeRules::encode($settings[InvoicingModeRules::FIELD]));
 		}
+		if (array_key_exists(CatalogRules::FIELD, $settings)) {
+			$t->setCatalogsJson(CatalogRules::encode($settings[CatalogRules::FIELD]));
+		}
 		if (is_array($settings[WebhookRules::FIELD] ?? null)) {
 			$t->setWebhooksJson(WebhookRules::encode($settings[WebhookRules::FIELD]));
 		}

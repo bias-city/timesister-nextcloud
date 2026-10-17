@@ -70,7 +70,10 @@ use OCP\Capabilities\ICapability;
  * its cancellation noted (POST …/external-cancelled).
  * `templates: 1` since 0.25.0: the team's own project templates as the
  * record kind `template` (Leads and Team Admins read, Team Admins write,
- * a Lead their own).
+ * a Lead their own). `templates: 2` since 0.25.1: the owner is
+ * `data.created_by`, kept by the server (a Lead changes and removes their
+ * own even after a Team Admin's change); team setting `settings.catalogs`;
+ * `billing_plan`, `work_packages[].group` and `.role` in a budget.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -108,7 +111,7 @@ final class Capabilities implements ICapability {
 				'document_tree' => 1,
 				'expense_fixing' => 1,
 				'invoice_handover' => 2,
-				'templates' => 1,
+				'templates' => 2,
 			],
 		];
 	}

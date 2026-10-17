@@ -142,9 +142,71 @@ class TemplateRulesTest extends TestCase {
 		$this->assertTrue(RecordRights::perRecordOnly([$w('template')]), 'a Lead batches templates');
 	}
 
+	/** A stored record as RecordService::store leaves it: the stamped data, the writer. */
+	private static function stored(?Record $cur, \stdClass $d, string $by): Record {
+		TemplateRules::stamp($cur, $d, $by);
+		$r = $cur ?? new Record();
+		$r->setKind('template');
+		$r->setRkey(self::KEY);
+		$r->setData(Json::encode($d));
+		$r->setModifiedBy($by);
+		$r->setDeleted(0);
+		return $r;
+	}
+
+	/** 0.25.1: the owner is `created_by`, kept by the server – a Lead keeps their own after a Team Admin's change. */
+	public function testOwnerByCreatedBy(): void {
+		$rights = self::rights(['lea' => ['d200'], 'bob' => ['d300']]);
+		$admin = new Membership('petra', 1, 'admin');
+		$lea = new Membership('lea', 1, 'lead');
+		$bob = new Membership('bob', 1, 'lead');
+		$own = '403 A Lead changes and removes only their own templates.';
+
+		$this->assertNull(TemplateRules::owner(null));
+		$this->assertSame('ok', self::outcome(fn () => $rights->requireTemplateWrite($lea, null)), 'Lea creates');
+		$r = self::stored(null, self::data(['created_by' => 'mallory']), 'lea');
+		$this->assertSame('lea', Json::decode((string)$r->getData())->created_by, 'a client’s value is replaced');
+		$this->assertSame('lea', TemplateRules::owner($r));
+
+		$this->assertSame('ok', self::outcome(fn () => $rights->requireTemplateWrite($admin, $r)), 'a Team Admin changes it');
+		$r = self::stored($r, self::data(['title' => 'Changed', 'created_by' => 'petra']), 'petra');
+		$this->assertSame('petra', $r->getModifiedBy());
+		$this->assertSame('lea', Json::decode((string)$r->getData())->created_by, 'created_by stays after the admin’s change');
+		$this->assertSame('lea', TemplateRules::owner($r));
+
+		$this->assertSame('ok', self::outcome(fn () => $rights->requireTemplateWrite($lea, $r)), 'Lea changes her own after the admin');
+		$this->assertSame($own, self::outcome(fn () => $rights->requireTemplateWrite($bob, $r)), 'another Lead may not');
+		$this->assertSame($own, self::outcome(fn () => TemplateRules::requireLeadWrite($r, 'bob')));
+		$r = self::stored($r, self::data(['title' => 'Again']), 'lea');
+		$this->assertSame('lea', Json::decode((string)$r->getData())->created_by);
+		$this->assertSame('ok', self::outcome(fn () => $rights->requireTemplateWrite($lea, $r)), 'Lea removes her own');
+
+		// A tombstone has no owner: the next write is new and belongs to its writer.
+		$r->setDeleted(1);
+		$this->assertNull(TemplateRules::owner($r));
+		$this->assertSame('ok', self::outcome(fn () => $rights->requireTemplateWrite($bob, $r)), 'Bob writes on the tombstone');
+		$d = self::data();
+		TemplateRules::stamp($r, $d, 'bob');
+		$this->assertSame('bob', $d->created_by);
+
+		// A record of 0.25.0 without created_by: the last writer owns it.
+		$old = self::record('lea');
+		$this->assertSame('lea', TemplateRules::owner($old));
+		$this->assertSame('ok', self::outcome(fn () => $rights->requireTemplateWrite($lea, $old)));
+		$this->assertSame($own, self::outcome(fn () => $rights->requireTemplateWrite($bob, $old)));
+		$d = self::data(['created_by' => 'bob']);
+		TemplateRules::stamp($old, $d, 'petra');
+		$this->assertSame('lea', $d->created_by, 'stamped from modified_by, not the writer or the client');
+		// An empty or odd stored created_by counts as missing.
+		$odd = self::record('lea');
+		$odd->setData(Json::encode(self::data(['created_by' => ''])));
+		$this->assertSame('lea', TemplateRules::owner($odd));
+		$this->assertSame('ok', self::check(['created_by' => 'lea']), 'created_by is no person field');
+	}
+
 	public function testCapabilityAndZip(): void {
 		$cap = (new Capabilities($this->createMock(IAppManager::class)))->getCapabilities()['timesister'];
-		$this->assertSame(1, $cap['templates']);
+		$this->assertSame(2, $cap['templates'], '0.25.1: created_by, settings.catalogs, billing_plan/group/role');
 		$this->assertSame('records/template/' . self::KEY . '.json', ZipRules::recordPath('template', self::KEY), 'the team ZIP takes templates along');
 		$mapped = ZipRules::mapData(self::data(), ['pblead' => 'lea']);
 		$this->assertEquals(self::data(), $mapped, 'a template names no accounts');

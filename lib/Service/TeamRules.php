@@ -74,7 +74,8 @@ final class TeamRules {
 	 * 422. `documents` (0.19.0) is an object, checked by DocumentRules and
 	 * merged over the stored one; `datev` and `webhooks` (0.20.0) likewise
 	 * by ExportRules and WebhookRules; `invoicing_mode` (0.24.0) is null or
-	 * an object checked by InvoicingModeRules.
+	 * an object checked by InvoicingModeRules; `catalogs` (0.25.1) null or a
+	 * list checked by CatalogRules.
 	 *
 	 * @param array<string,mixed> $in
 	 * @return array<string,mixed>
@@ -105,6 +106,11 @@ final class TeamRules {
 			// 0.24.0: how invoices come about; null is the default (TimeSister, no copy).
 			if ($key === InvoicingModeRules::FIELD) {
 				$out[$key] = InvoicingModeRules::validate($value);
+				continue;
+			}
+			// 0.25.1: the template catalogs in use; null is the client's default.
+			if ($key === CatalogRules::FIELD) {
+				$out[$key] = CatalogRules::validate($value);
 				continue;
 			}
 			if ($key === WebhookRules::FIELD) {
