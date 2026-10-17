@@ -8,14 +8,12 @@ namespace OCA\TimeSister\Service;
 
 /**
  * What the writes of one transaction claim among themselves (0.22.0):
- * recurring receipts per rule and period, receipts per expense report,
- * and the receipts whose `report` the server sets afterwards.
+ * recurring receipts per rule and period; since 0.23.0 what a receipt
+ * written by an approver still lacks (the answer's `missing`).
  */
 final class CostBatch {
 	/** @var array<string,string> "rule|period" → receipt key */
 	public array $recurring = [];
-	/** @var array<string,string> receipt key → report key */
-	public array $claimed = [];
-	/** @var array<string,?string> receipt key → the report to note in it (null: none) */
-	public array $marks = [];
+	/** @var array<string,list<string>> receipt key → what it lacks for approval */
+	public array $missing = [];
 }

@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Controller;
 
 use OCA\TimeSister\Service\ExpenseExportService;
+use OCA\TimeSister\Service\ExpenseReportService;
 use OCA\TimeSister\Service\ExpenseService;
 use OCA\TimeSister\Service\Json;
 use OCA\TimeSister\Service\ReceiptRules;
@@ -23,13 +24,15 @@ use OCP\IL10N;
 use OCP\IRequest;
 
 /**
- * Receipts, expense rules and expense reports (0.22.0): the receipt's
- * file, approving and rejecting, the rule's approval, the report's
- * approval, payment and document, and the export of expenses. The records
- * themselves are written through /records.
+ * Receipts, expense rules and expense reports: the receipt's file,
+ * approving and rejecting, the rule's approval (0.22.0); the report's
+ * ready, fix, paid, reverse and document (0.23.0); the export of
+ * expenses. The records themselves are written through /records.
  */
 final class ReceiptController extends BaseController {
 	private const MAX_BODY = 4 * 1024;
+	/** A fix may name up to 500 receipt keys. */
+	private const MAX_FIX_BODY = 96 * 1024;
 
 	public function __construct(
 		IRequest $request,
@@ -37,6 +40,7 @@ final class ReceiptController extends BaseController {
 		IL10N $l,
 		private ReceiptService $receipts,
 		private ExpenseService $expenses,
+		private ExpenseReportService $reports,
 		private ExpenseExportService $exports,
 	) {
 		parent::__construct($request, $tenants, $l);
@@ -85,13 +89,21 @@ final class ReceiptController extends BaseController {
 		return $this->run(fn () => $this->expenses->approveRule($this->tenants->current(), $key));
 	}
 
-	/** POST /expense-reports/{key}/approve – renders and stores the PDF. */
-	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-reports/{key}/approve')]
+	/** POST /expense-reports/ready `{ person }` – the person’s open report, ready to be fixed. */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-reports/ready')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	public function ready(): DataResponse {
+		return $this->run(fn () => $this->reports->ready($this->tenants->current(), $this->body(self::MAX_BODY)));
+	}
+
+	/** POST /expense-reports/fix `{ person, receipts? }` – freezes, numbers, ledgers and renders. */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-reports/fix')]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 30, period: 60)]
-	public function approveReport(string $key): DataResponse {
-		return $this->run(fn () => $this->expenses->approveReport($this->tenants->current(), $key));
+	public function fix(): DataResponse {
+		return $this->run(fn () => $this->reports->fix($this->tenants->current(), $this->body(self::MAX_FIX_BODY)));
 	}
 
 	/** POST /expense-reports/{key}/paid `{ date }`. */
@@ -99,7 +111,15 @@ final class ReceiptController extends BaseController {
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	public function paid(string $key): DataResponse {
-		return $this->run(fn () => $this->expenses->paid($this->tenants->current(), $key, $this->optionalBody()));
+		return $this->run(fn () => $this->reports->paid($this->tenants->current(), $key, $this->optionalBody()));
+	}
+
+	/** POST /expense-reports/{key}/reverse `{ reason }` – only a fixed report. */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-reports/{key}/reverse')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	public function reverse(string $key): DataResponse {
+		return $this->run(fn () => $this->reports->reverse($this->tenants->current(), $key, $this->optionalBody()));
 	}
 
 	/** GET /expense-reports/{key}/document – the PDF. */
@@ -107,7 +127,7 @@ final class ReceiptController extends BaseController {
 	#[NoAdminRequired]
 	public function reportDocument(string $key): Response {
 		return $this->respond(function () use ($key): Response {
-			$r = $this->expenses->document($this->tenants->current(), $key);
+			$r = $this->reports->document($this->tenants->current(), $key);
 			return new DataDownloadResponse($r['content'], $r['name'], 'application/pdf');
 		});
 	}

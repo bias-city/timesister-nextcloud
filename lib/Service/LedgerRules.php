@@ -23,6 +23,11 @@ final class LedgerRules {
 	public const CANCELLED = 'cancelled';
 	public const PAID = 'paid';
 	public const UNPAID = 'unpaid';
+	/** Expense reports (0.23.0): fixed, its PDF, paid, reversed – in the same chain; `invoice` is 0. */
+	public const EXPENSE_FIXED = 'expense_fixed';
+	public const EXPENSE_DOCUMENT = 'expense_document';
+	public const EXPENSE_PAID = 'expense_paid';
+	public const EXPENSE_REVERSED = 'expense_reversed';
 	public const HASH_PATTERN = '/^[0-9a-f]{64}$/';
 
 	/** `at` of an entry: UTC, `YYYY-MM-DDTHH:MM:SSZ`. */

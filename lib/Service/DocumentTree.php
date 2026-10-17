@@ -103,9 +103,9 @@ final class DocumentTree {
 		return self::join($parts, $ext);
 	}
 
-	/** `<YYYY-MM>_Spesenblatt.pdf` of the month the period ends in. */
-	public static function reportName(string $to): string {
-		return substr($to, 0, 7) . '_Spesenblatt.pdf';
+	/** `<date>_<number>_Spesenblatt.pdf` of a fixed expense report (0.23.0). */
+	public static function reportName(string $date, string $number): string {
+		return self::join([$date, $number, 'Spesenblatt'], 'pdf');
 	}
 
 	public static function chainName(string $day): string {

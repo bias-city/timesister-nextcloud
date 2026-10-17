@@ -12,6 +12,7 @@ use OCA\TimeSister\Service\InvoiceNumbering;
 use OCA\TimeSister\Service\IssueRules;
 use OCA\TimeSister\Service\Json;
 use OCA\TimeSister\Service\LedgerRules;
+use OCA\TimeSister\Service\RecordValidator;
 use OCA\TimeSister\Service\VatLines;
 use OCP\App\IAppManager;
 use PHPUnit\Framework\TestCase;
@@ -178,6 +179,38 @@ class LedgerRulesTest extends TestCase {
 		$this->assertNull(InvoiceNumbering::patternOf(Json::decode('{"invoice_number":null}')));
 		$this->assertNull(InvoiceNumbering::patternOf(null));
 		$this->assertSame('422 The invoice number ' . str_repeat('p', 60) . '-1234567 is empty or longer than 64 characters; change the pattern.', self::outcome(fn () => InvoiceNumbering::fill('{project}-{no}', 1234567, 2026, str_repeat('p', 60), null)));
+	}
+
+	/** 0.23.0: the expense report's number – its own field, counter and default. */
+	public function testExpenseNumber(): void {
+		$this->assertSame('SP-2026-0001', InvoiceNumbering::fill(null, 1, 2026, '', null, InvoiceNumbering::EXPENSE_DEFAULT));
+		$settings = Json::decode('{"invoice_number":{"pattern":"RE-{no}","per_year":false},"expense_number":{"pattern":"S{yy}-{no:3}","start":40}}');
+		$this->assertSame('S{yy}-{no:3}', InvoiceNumbering::patternOf($settings, InvoiceNumbering::EXPENSE_FIELD));
+		$this->assertSame(['per_year' => true, 'start' => 40], InvoiceNumbering::of($settings, InvoiceNumbering::EXPENSE_FIELD));
+		$this->assertSame(['per_year' => false, 'start' => 1], InvoiceNumbering::of($settings));
+		$this->assertSame('expense:2026', InvoiceNumbering::counter(true, 2026, InvoiceNumbering::EXPENSE_COUNTER));
+		$this->assertSame('invoice', InvoiceNumbering::counter(false, 2026));
+		$this->assertSame('422 Unknown placeholder {person} in the invoice number pattern.', self::outcome(fn () => InvoiceNumbering::validate(Json::decode('{"pattern":"{person}-{no}"}'), InvoiceNumbering::EXPENSE_FIELD)));
+		$this->assertSame('422 “expense_number.start” must be an integer from 1 to 999999999.', self::outcome(fn () => InvoiceNumbering::validate(Json::decode('{"pattern":"S-{no}","start":0}'), InvoiceNumbering::EXPENSE_FIELD)));
+		$this->assertSame('ok', self::outcome(fn () => RecordValidator::validate('setting', 'settings', Json::decode('{"expense_number":{"pattern":"SP-{year}-{no:4}"}}'))));
+		$this->assertStringStartsWith('422', self::outcome(fn () => RecordValidator::validate('setting', 'settings', Json::decode('{"expense_number":{"pattern":"SP"}}'))));
+	}
+
+	/** 0.23.0: the expense actions are entries of the same chain; verify checks them like any other. */
+	public function testChainWithExpenseActions(): void {
+		$entries = [];
+		$prev = '';
+		foreach ([[LedgerRules::ISSUED, 'RE-1'], [LedgerRules::EXPENSE_FIXED, 'SP-2026-0001'], [LedgerRules::EXPENSE_DOCUMENT, 'SP-2026-0001'], [LedgerRules::EXPENSE_PAID, 'SP-2026-0001'], [LedgerRules::EXPENSE_REVERSED, 'SP-2026-0002']] as $i => [$action, $number]) {
+			$payload = LedgerRules::canonical(['key' => 'k' . $i, 'number' => $number]);
+			$at = LedgerRules::at(1792000000 + $i);
+			$ph = LedgerRules::payloadHash($payload);
+			$hash = LedgerRules::entryHash($i + 1, $at, 'admin', $action, $number, $ph, $prev);
+			$entries[] = ['seq' => $i + 1, 'at' => $at, 'actor' => 'admin', 'action' => $action, 'number' => $number, 'payload' => $payload, 'payload_hash' => $ph, 'prev_hash' => $prev, 'hash' => $hash];
+			$prev = $hash;
+		}
+		$this->assertSame(['ok' => true, 'entries' => 5, 'head' => $prev], LedgerRules::verify($entries));
+		$entries[3]['payload'] = LedgerRules::canonical(['key' => 'k3', 'number' => 'SP-2026-0001', 'paid_on' => '2026-11-30']);
+		$this->assertSame(['ok' => false, 'first_break' => 4, 'field' => 'payload_hash'], array_intersect_key(LedgerRules::verify($entries), ['ok' => 0, 'field' => 0, 'first_break' => 0]));
 	}
 
 	public function testCapability(): void {

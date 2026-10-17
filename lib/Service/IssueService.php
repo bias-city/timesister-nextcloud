@@ -18,8 +18,6 @@ use OCA\TimeSister\Db\RecordMapper;
 use OCA\TimeSister\Db\Tenant;
 use OCA\TimeSister\Db\TenantMapper;
 use OCP\AppFramework\Utility\ITimeFactory;
-use OCP\DB\Exception as DbException;
-use OCP\IDBConnection;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -36,7 +34,6 @@ final class IssueService {
 	public const LIMIT_MAX = 2000;
 
 	public function __construct(
-		private IDBConnection $db,
 		private TenantMapper $tenants,
 		private RecordMapper $records,
 		private RecordService $recordService,
@@ -52,6 +49,7 @@ final class IssueService {
 		private InvoiceFixed $fixed,
 		private DocumentService $documents,
 		private LoggerInterface $logger,
+		private Transaction $tx,
 	) {
 	}
 
@@ -100,27 +98,7 @@ final class IssueService {
 
 	/** One transaction, retried on a deadlock like the record writes. @return array<string,mixed> */
 	private function transaction(callable $fn): array {
-		for ($attempt = 1; ; $attempt++) {
-			try {
-				$this->db->beginTransaction();
-				try {
-					$out = $fn();
-					$this->db->commit();
-					return $out;
-				} catch (\Throwable $e) {
-					if ($this->db->inTransaction()) {
-						$this->db->rollBack();
-					}
-					throw $e;
-				}
-			} catch (DbException $e) {
-				$retry = in_array($e->getReason(), [DbException::REASON_DEADLOCK, DbException::REASON_LOCK_WAIT_TIMEOUT], true);
-				if (!$retry || $attempt >= 3) {
-					throw $e;
-				}
-				usleep(50000 * $attempt);
-			}
-		}
+		return $this->tx->run($fn);
 	}
 
 	// -------------------------------------------------------------- issue

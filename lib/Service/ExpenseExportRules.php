@@ -7,8 +7,8 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Service;
 
 /**
- * The export of expenses (0.22.0), pure: one row per receipt of an
- * approved or paid expense report, as CSV for payroll or as a DATEV
+ * The export of expenses (0.22.0), pure: one row per frozen line of a
+ * fixed or paid expense report (0.23.0), as CSV for payroll or as a DATEV
  * Buchungsstapel (debit the expense account, credit the person's
  * creditor account).
  */
@@ -29,22 +29,23 @@ final class ExpenseExportRules {
 		return $v;
 	}
 
-	/** Does the export take this report? Approved or paid. */
+	/** Does the export take this report? Fixed or paid (0.23.0). */
 	public static function takes(?\stdClass $report): bool {
-		return in_array($report?->status ?? null, [ExpenseReportRules::APPROVED, ExpenseReportRules::PAID], true);
+		return ExpenseReportRules::holds($report);
 	}
 
-	/** @return list<string> */
-	public static function csvRow(string $personName, string $reportKey, \stdClass $report, \stdClass $r): array {
-		$rate = $r->vat_rate ?? null;
+	/** One row of a frozen line (read as a receipt); `report` is the report's number. @return list<string> */
+	public static function csvRow(string $personName, string $reportNumber, \stdClass $report, \stdClass $r): array {
+		$rates = ExpenseReportRules::ratesOf($r);
+		$rate = count($rates) === 1 ? $rates[0] : null;
 		$e = ReceiptBooking::forExpenses($r, '');
 		$eff = $e['rates'];
 		return [
-			(string)$report->person, $personName, $reportKey, (string)($report->status ?? ''), (string)($r->date ?? ''),
+			(string)$report->person, $personName, $reportNumber, (string)($report->status ?? ''), (string)($r->date ?? ''),
 			(string)($r->supplier ?? ''), (string)($r->text ?? ''), is_string($r->project ?? null) ? $r->project : '', $e['currency'],
-			ExportRules::amount(array_sum(array_column($eff, 'net'))), is_int($rate) || is_float($rate) ? (string)$rate : '',
+			ExportRules::amount(array_sum(array_column($eff, 'net'))), $rate === null ? '' : (string)$rate,
 			ExportRules::amount(array_sum(array_column($eff, 'vat'))), ExportRules::amount($e['gross']),
-			ExpenseReportRules::withoutReceipt($r) ? '1' : '0',
+			($r->without_file ?? false) === true ? '1' : '0',
 		];
 	}
 
@@ -69,18 +70,18 @@ final class ExpenseExportRules {
 	/**
 	 * One booking: Umsatz = gross, S (H when negative), Konto = expense
 	 * account, Gegenkonto = the person's creditor account, no BU key,
-	 * Belegdatum DDMM, Belegfeld 1 = the report's key, text = supplier and text.
+	 * Belegdatum DDMM, Belegfeld 1 = the report's number, text = supplier and text.
 	 *
 	 * @return list<string>
 	 */
-	public static function datevRow(\stdClass $r, string $reportKey, string $expenseAccount, string $creditor): array {
+	public static function datevRow(\stdClass $r, string $reportNumber, string $expenseAccount, string $creditor): array {
 		$e = ReceiptBooking::forExpenses($r, '');
 		$gross = $e['gross'];
 		$date = (string)($r->date ?? '');
 		$text = mb_substr(trim((string)($r->supplier ?? '') . ' ' . (string)($r->text ?? '')), 0, 60);
 		return [
 			number_format(abs($gross), 2, ',', ''), $gross < 0 ? 'H' : 'S', $e['currency'], '', '', '',
-			$expenseAccount, $creditor, '', substr($date, 8, 2) . substr($date, 5, 2), ExportRules::belegfeld($reportKey), '', '', $text,
+			$expenseAccount, $creditor, '', substr($date, 8, 2) . substr($date, 5, 2), ExportRules::belegfeld($reportNumber), '', '', $text,
 		];
 	}
 

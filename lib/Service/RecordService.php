@@ -500,9 +500,13 @@ final class RecordService {
 				}
 			}
 			$rev++;
-			$out[] = $this->present($this->store($m, $op, $cur, $newVersion, $rev, $now));
+			$record = $this->present($this->store($m, $op, $cur, $newVersion, $rev, $now));
+			if ($op['kind'] === ReceiptRules::KIND && isset($costs->missing[$op['key']])) {
+				// 0.23.0: an approver's write that could not approve says what is missing.
+				$record['missing'] = $costs->missing[$op['key']];
+			}
+			$out[] = $record;
 		}
-		$top = $this->applyMarks($m, $costs, $top, $now);
 		$top = $this->deliverAgain($m->tenantId, $top, $scope);
 		return ['revision' => $top, 'records' => $out];
 	}
@@ -544,36 +548,6 @@ final class RecordService {
 		$h->setModifiedAt($now);
 		$this->history->insert($h);
 		return $r;
-	}
-
-	/**
-	 * After an expense report's write (0.22.0): its receipts note it in
-	 * `report`, the ones it no longer holds lose it – the server's own
-	 * writes, each with a new version and revision.
-	 *
-	 * @return int the team's revision afterwards
-	 */
-	private function applyMarks(Membership $m, CostBatch $costs, int $top, int $now): int {
-		$writes = [];
-		foreach ($costs->marks as $key => $report) {
-			$r = $this->records->findOne($m->tenantId, ReceiptRules::KIND, $key);
-			$d = $r === null || $r->isTombstone() ? null : InvoiceRules::decode($r->getData());
-			if ($r === null || $d === null || ($d->report ?? null) === $report) {
-				continue;
-			}
-			$d->report = $report;
-			$writes[] = [$r, Json::encode($d)];
-		}
-		if ($writes === []) {
-			return $top;
-		}
-		$top = $this->tenants->bumpRevision($m->tenantId, count($writes));
-		$rev = $top - count($writes);
-		foreach ($writes as [$r, $json]) {
-			$rev++;
-			$this->store($m, ['kind' => ReceiptRules::KIND, 'key' => $r->getRkey(), 'json' => $json, 'accounts' => null], $r, $r->getVersion() + 1, $rev, $now);
-		}
-		return $top;
 	}
 
 	/**

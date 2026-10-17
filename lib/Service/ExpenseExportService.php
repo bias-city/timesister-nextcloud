@@ -11,7 +11,8 @@ use OCP\AppFramework\Utility\ITimeFactory;
 
 /**
  * `GET /exports/expenses?from&to&kind=csv|datev` (0.22.0, Team Admins):
- * the receipts of approved and paid expense reports dated in the period.
+ * the frozen lines of fixed and paid expense reports (0.23.0) dated in
+ * the period.
  */
 final class ExpenseExportService {
 	public function __construct(
@@ -30,23 +31,16 @@ final class ExpenseExportService {
 		$from = ExportRules::day($from, 'from');
 		$to = ExportRules::day($to, 'to');
 		$tid = $m->tenantId;
-		$receipts = [];
-		foreach ($this->records->findLiveByKind($tid, ReceiptRules::KIND) as $r) {
-			$d = InvoiceRules::decode($r->getData());
-			if ($d !== null) {
-				$receipts[$r->getRkey()] = $d;
-			}
-		}
 		$rows = [];
 		foreach ($this->records->findLiveByKind($tid, ExpenseReportRules::KIND) as $rep) {
 			$report = InvoiceRules::decode($rep->getData());
 			if ($report === null || !ExpenseExportRules::takes($report)) {
 				continue;
 			}
-			foreach (ExpenseReportRules::receiptsOf($report) as $k) {
-				$d = $receipts[$k] ?? null;
-				if ($d !== null && ExportRules::inPeriod((string)($d->date ?? ''), $from, $to)) {
-					$rows[] = [$rep->getRkey(), $report, $d];
+			// 0.23.0: the frozen lines, not the receipts as they are now.
+			foreach (Fields::list($report, 'lines') as $l) {
+				if ($l instanceof \stdClass && ExportRules::inPeriod((string)($l->date ?? ''), $from, $to)) {
+					$rows[] = [(string)($report->number ?? $rep->getRkey()), $report, ExpenseReportRules::asReceipt($l)];
 				}
 			}
 		}

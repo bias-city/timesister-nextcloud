@@ -29,8 +29,6 @@ final class RecordRights {
 	private array $customers = [];
 	/** @var array<string,array<string,true>> "tenant:uid" → active projects led */
 	private array $led = [];
-	/** @var array<int,array<string,\stdClass>> tenant → live receipts by key, read once per request */
-	private array $receipts = [];
 
 	public function __construct(
 		private AccessPolicy $policy,
@@ -108,33 +106,14 @@ final class RecordRights {
 		return true;
 	}
 
-	/** Receipts, expense rules and reports (0.22.0): the person, the project's Leads, Team Admins. */
+	/** Receipts and expense rules (0.22.0): the person, the project's Leads, Team Admins; expense reports (0.23.0): the person and Team Admins. */
 	public function canReadCost(Membership $m, string $kind, ?\stdClass $d): bool {
 		$led = $m->manages() ? [] : $this->ledProjects($m);
 		return match ($kind) {
 			ReceiptRules::KIND => ReceiptRules::canRead($m->manages(), $m->uid, $led, $d),
 			ExpenseRuleRules::KIND => ExpenseRuleRules::canRead($m->manages(), $m->uid, $led, $d),
-			default => ExpenseReportRules::canRead($m->manages(), $m->uid, $led, $d, $this->receiptsOf($m->tenantId, ExpenseReportRules::receiptsOf($d))),
+			default => ExpenseReportRules::canRead($m->manages(), $m->uid, $d),
 		};
-	}
-
-	/**
-	 * The live receipts named, read once per request.
-	 *
-	 * @param list<string> $keys
-	 * @return list<?\stdClass>
-	 */
-	public function receiptsOf(int $tenantId, array $keys): array {
-		if (!isset($this->receipts[$tenantId])) {
-			$this->receipts[$tenantId] = [];
-			foreach ($this->records->findLiveByKind($tenantId, ReceiptRules::KIND) as $r) {
-				$d = InvoiceRules::decode($r->getData());
-				if ($d !== null) {
-					$this->receipts[$tenantId][$r->getRkey()] = $d;
-				}
-			}
-		}
-		return array_map(fn (string $k): ?\stdClass => $this->receipts[$tenantId][$k] ?? null, $keys);
 	}
 
 	/** The rights of a write: per record for billing and bookings, everything else Team Admins. */
