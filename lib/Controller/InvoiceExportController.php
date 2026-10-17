@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Controller;
 
 use OCA\TimeSister\Service\ExportService;
+use OCA\TimeSister\Service\HandoverRules;
 use OCA\TimeSister\Service\HandoverService;
 use OCA\TimeSister\Service\Json;
 use OCA\TimeSister\Service\TenantService;
@@ -80,6 +81,24 @@ final class InvoiceExportController extends BaseController {
 	#[UserRateLimit(limit: 60, period: 60)]
 	public function revokeHandover(string $key): DataResponse {
 		return $this->run(fn () => $this->handovers->revoke($this->tenants->current(), $key, $this->body(self::MAX_BODY)));
+	}
+
+	/** PUT /invoices/{key}/external-document – the body is the accounting system's PDF of a handed-over invoice, at most 20 MB (0.24.1). */
+	#[ApiRoute(verb: 'PUT', url: '/api/v1/invoices/{key}/external-document')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function externalDocument(string $key): DataResponse {
+		return $this->run(fn () => $this->handovers->document($this->tenants->current(), $key, Json::readInput(HandoverRules::DOCUMENT_MAX)));
+	}
+
+	/** POST /invoices/{key}/external-cancelled – the accounting system cancelled the handed-over invoice; noted once (0.24.1). */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/invoices/{key}/external-cancelled')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function externalCancelled(string $key): DataResponse {
+		return $this->run(fn () => $this->handovers->cancelled($this->tenants->current(), $key));
 	}
 
 	/** GET /invoices/webhooks/status – per hook: waiting, delivered, failed, the last error. */

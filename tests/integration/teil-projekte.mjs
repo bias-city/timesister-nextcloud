@@ -128,9 +128,15 @@ export async function projekte() {
 		// Rates per person moved to the person (cost_rates): an empty default passes, content is refused.
 		await bad('rates per person on a budget', { budgets: [{ id: 'b1', rates: { pbuser1: 140 } }] }, '“rates” is no longer part of a budget')
 		await bad('currency two letters', { budgets: [{ id: 'b1', currency: 'CH' }] }, '“currency” must be three letters')
+		// 0.24.1: progress a whole percent, addendum a bool.
+		await bad('progress above 100', { budgets: [{ id: 'b1', progress: 101 }] }, '“progress” must be null or a whole number from 0 to 100.')
+		await bad('progress with decimals', { budgets: [{ id: 'b1', progress: 12.5 }] }, '“progress” must be null or a whole number from 0 to 100.')
+		await bad('addendum as text', { budgets: [{ id: 'b1', work_packages: [{ no: 1, addendum: 'yes' }] }] }, '“addendum” must be true, false or null.')
 		const b = await ocs(A, 'POST', '/records/batch', { writes: [{ kind: 'project', key: PQ, version: 4, data: quote({ team: [`nobody-${RUN}`] }) }] })
 		check('422 in a batch, naming the write', b.status === 422 && b.data?.message?.startsWith('Write 1: Not members'), `${b.status} ${b.data?.message}`)
 		check('nothing of it was written', (await ocs(A, 'GET', path(PQ))).data?.version === 4)
+		const pa = await ocs(L, 'PUT', path(PQ), { version: 4, data: quote({ status: 'active', budgets: [{ id: 'b1', hours: 40, progress: 45, work_packages: [{ no: 1, rate: null }, { no: 2, addendum: true }] }] }) })
+		check('pblead stores progress 45 and an addendum (0.24.1)', pa.status === 200 && pa.data?.data?.budgets?.[0]?.progress === 45 && pa.data?.data?.budgets?.[0]?.work_packages?.[1]?.addendum === true, [pa.status, pa.text.slice(0, 300)])
 
 		head('Projects: quotes – no code while a quote, from_quote stays')
 		const PN = `PN-${RUN}`

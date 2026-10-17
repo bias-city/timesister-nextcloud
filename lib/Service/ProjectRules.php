@@ -156,8 +156,13 @@ final class ProjectRules {
 		}
 	}
 
-	/** One budget: currency (upper case), `rates` refused, `cap` and work package `rate` ≥ 0, `invoice_dates` days, `costs` ({@see CostRules}). Also a quote's budget. */
+	/** One budget: currency (upper case), `rates` refused, `cap` and work package `rate` ≥ 0, `invoice_dates` days, `costs` ({@see CostRules}), `progress` 0–100, work package `addendum` bool. Also a quote's budget. */
 	public static function checkBudget(\stdClass $b): void {
+		// 0.24.1: the progress the Lead sets, a whole percent or null.
+		$p = $b->progress ?? null;
+		if ($p !== null && (!is_int($p) || $p < 0 || $p > 100)) {
+			throw ApiException::invalid('“progress” must be null or a whole number from 0 to 100.');
+		}
 		$c = $b->currency ?? null;
 		if ($c !== null) {
 			if (!is_string($c) || preg_match(self::CURRENCY_PATTERN, $c) !== 1) {
@@ -198,6 +203,10 @@ final class ProjectRules {
 		foreach ($wps as $wp) {
 			if ($wp instanceof \stdClass && ($wp->rate ?? null) !== null && !self::isRate($wp->rate)) {
 				throw ApiException::invalid('“rate” must be a number ≥ 0.');
+			}
+			// 0.24.1: a work package added later (addendum), shown and counted as such.
+			if ($wp instanceof \stdClass && ($wp->addendum ?? null) !== null && !is_bool($wp->addendum)) {
+				throw ApiException::invalid('“addendum” must be true, false or null.');
 			}
 		}
 	}

@@ -1,5 +1,26 @@
 # Changes
 
+## 0.24.1 – 2026-10-17
+
+Additive, `api: 2` unchanged; capability `invoice_handover: 2`; migration
+`Version1018Date20261017150000` (`ts_inv_ledger.action` 16 → 32
+characters). Contract: `API.md` «Budget progress, addenda and the accounting
+system's PDF, 0.24.1». Not published.
+
+- **Budget `progress`** (0–100, whole number, null = not set) and
+  **`work_packages[].addendum`** (bool) checked in projects and quotes.
+- **`invoicing_mode.archive_pdf`** (mode external, default true): store
+  the accounting system's PDF of a handed-over invoice.
+- **`PUT /invoices/{key}/external-document`** (Team Admins): the PDF (≤ 20
+  MB) to `Buchhaltung/<YYYY>/Rechnungen/<date>_<system>-<number>_<customer>.pdf`,
+  ledger `external_document` (sha256, path), record `external.document`;
+  the same file again is no change, another one 409.
+- **`POST /invoices/{key}/external-cancelled`**: the accounting system
+  cancelled it – ledger `external_cancelled` once, `external.cancelled_at`,
+  the PDF stays.
+- Webhooks: `external_document` → `document`, `external_cancelled` →
+  `reversed`.
+
 ## 0.24.0 – 2026-10-17
 
 Additive, `api: 2` unchanged; capability `invoice_handover: 1`; migration

@@ -31,6 +31,9 @@ final class LedgerRules {
 	/** Hand-over to an accounting system that issues the invoice (0.24.0) and its revocation; `invoice` is 0. */
 	public const EXTERNAL_ISSUED = 'external_issued';
 	public const EXTERNAL_REVOKED = 'external_revoked';
+	/** 0.24.1: the accounting system's PDF stored in the document tree, and its cancellation there; `invoice` is 0. */
+	public const EXTERNAL_DOCUMENT = 'external_document';
+	public const EXTERNAL_CANCELLED = 'external_cancelled';
 	public const HASH_PATTERN = '/^[0-9a-f]{64}$/';
 
 	/** `at` of an entry: UTC, `YYYY-MM-DDTHH:MM:SSZ`. */

@@ -35,6 +35,8 @@ final class HandoverService {
 		private LedgerAppender $appender,
 		private Transaction $tx,
 		private ITimeFactory $time,
+		private TeamTree $tree,
+		private DocumentFolder $folders,
 	) {
 	}
 
@@ -167,6 +169,91 @@ final class HandoverService {
 			'ledger' => self::block($entry),
 			'released' => ['bookings' => count($release), 'receipts' => count($receipts)],
 		];
+	}
+
+	// ----------------------------------------------- the system's PDF (0.24.1)
+
+	/**
+	 * `PUT /invoices/{key}/external-document`: the accounting system's PDF of
+	 * a handed-over invoice goes to `Buchhaltung/<YYYY>/Rechnungen/` as
+	 * `<issued_on>_<system>-<number>_<customer>.pdf`, ledger
+	 * `external_document`, the record's `external.document`. The same file
+	 * again changes nothing; another one 409.
+	 *
+	 * @return array{record:array<string,mixed>,document:array{path:string,sha256:string,size:int},stored:bool,ledger:?array{seq:int,prev_hash:string,hash:string}}
+	 */
+	public function document(Membership $m, string $key, string $content): array {
+		$this->requireAdmin($m);
+		RecordValidator::checkAddress(InvoiceRules::KIND, $key);
+		HandoverRules::requireArchive($this->team->tenant($m->tenantId)->invoicingMode());
+		HandoverRules::requireDocument($content);
+		$sha = hash('sha256', $content);
+		$tid = $m->tenantId;
+		[$cur, $d] = $this->drafts->invoiceRecord($tid, $key);
+		$external = $this->handedOver($d, true);
+		$same = HandoverRules::documentAgain($external, $sha);
+		if ($same !== null) {
+			return ['record' => $this->recordService->present($cur), 'document' => (array)$same, 'stored' => false, 'ledger' => null];
+		}
+		$on = $d->issued_on ?? null;
+		$issued = is_string($on) ? $on : gmdate('Y-m-d', $this->time->getTime());
+		$place = $this->tree->of($tid);
+		$folder = DocumentTree::invoiceFolder($place['root'], $issued);
+		$name = HandoverRules::documentName($issued, (string)$external->system, (string)($external->number ?? $external->id), $this->drafts->customerName($tid, $d));
+		// The file first, as with TimeSister's own documents; the record and the ledger in one transaction.
+		$written = $this->folders->store($place['owner'], $folder, $name, $content, null);
+		$now = $this->time->getTime();
+		return $this->tx->run(function () use ($m, $key, $sha, $written, $now): array {
+			[$cur, $d] = $this->drafts->invoiceRecord($m->tenantId, $key);
+			$external = $this->handedOver($d, true);
+			$top = $this->tenants->bumpRevision($m->tenantId, 1);
+			$entry = $this->appender->append($m->tenantId, $m->uid, LedgerRules::EXTERNAL_DOCUMENT, 0, (string)($external->number ?? ''),
+				LedgerRules::canonical(HandoverRules::documentPayload($key, $external, $written, $sha)), $now);
+			$doc = ['path' => $written['path'], 'sha256' => $sha, 'size' => $written['size']];
+			$external->document = (object)$doc;
+			$d->{ExportRules::EXTERNAL_FIELD} = $external;
+			$out = $this->recordService->applyWithin($m, [$this->invoiceOp($key, $cur, $d)], false, $top, true);
+			return ['record' => $out['records'][0], 'document' => $doc, 'stored' => true, 'ledger' => self::block($entry)];
+		});
+	}
+
+	/**
+	 * `POST /invoices/{key}/external-cancelled`: the accounting system
+	 * cancelled the handed-over invoice (read by its plugin's status). The
+	 * ledger notes it once (`external_cancelled`), the record keeps status
+	 * and PDF and gets `external.cancelled_at`.
+	 *
+	 * @return array{record:array<string,mixed>,noted:bool,ledger:?array{seq:int,prev_hash:string,hash:string}}
+	 */
+	public function cancelled(Membership $m, string $key): array {
+		$this->requireAdmin($m);
+		RecordValidator::checkAddress(InvoiceRules::KIND, $key);
+		$now = $this->time->getTime();
+		return $this->tx->run(function () use ($m, $key, $now): array {
+			[$cur, $d] = $this->drafts->invoiceRecord($m->tenantId, $key);
+			$external = $this->handedOver($d, false);
+			if (is_string($external->cancelled_at ?? null)) {
+				return ['record' => $this->recordService->present($cur), 'noted' => false, 'ledger' => null];
+			}
+			$top = $this->tenants->bumpRevision($m->tenantId, 1);
+			$entry = $this->appender->append($m->tenantId, $m->uid, LedgerRules::EXTERNAL_CANCELLED, 0, (string)($external->number ?? ''),
+				LedgerRules::canonical(HandoverRules::cancelPayload($key, $external)), $now);
+			$external->cancelled_at = $entry->getAt();
+			$d->{ExportRules::EXTERNAL_FIELD} = $external;
+			$out = $this->recordService->applyWithin($m, [$this->invoiceOp($key, $cur, $d)], false, $top, true);
+			return ['record' => $out['records'][0], 'noted' => true, 'ledger' => self::block($entry)];
+		});
+	}
+
+	/** The `external` block of a handed-over invoice, else 409. */
+	private function handedOver(\stdClass $d, bool $forDocument): \stdClass {
+		$external = $d->{ExportRules::EXTERNAL_FIELD} ?? null;
+		if (HandoverRules::handedOverTo($d) === null || !$external instanceof \stdClass) {
+			throw $forDocument
+				? ApiException::conflict('Only a handed-over invoice gets the accounting system’s PDF.')
+				: ApiException::conflict('Only a handed-over invoice can be noted as cancelled in the accounting system.');
+		}
+		return $external;
 	}
 
 	/** Does an issued or paid invoice of the server bill an occurrence of the event? */

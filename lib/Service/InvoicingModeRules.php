@@ -20,13 +20,16 @@ final class InvoicingModeRules {
 	public const MODES = [self::TIMESISTER, self::EXTERNAL];
 	public const COPY_OFF = 'off';
 	public const COPIES = [self::COPY_OFF, 'auto', 'manual'];
-	public const KEYS = ['mode', 'system', 'copy'];
+	public const KEYS = ['mode', 'system', 'copy', 'archive_pdf'];
+	/** 0.24.1: store the accounting system's PDF of a handed-over invoice in the document tree (mode external, default on). */
+	public const ARCHIVE_PDF = 'archive_pdf';
 
 	/**
 	 * The setting from a body: null, or an object checked by the rules and
-	 * returned complete (missing `system` null, missing `copy` off).
+	 * returned complete (missing `system` null, missing `copy` off; in the
+	 * mode external `archive_pdf`, missing true – kept only there).
 	 *
-	 * @return ?array{mode:string,system:?string,copy:string}
+	 * @return ?array{mode:string,system:?string,copy:string,archive_pdf?:bool}
 	 */
 	public static function validate(mixed $v): ?array {
 		if ($v === null) {
@@ -64,14 +67,22 @@ final class InvoicingModeRules {
 		if ($mode === self::TIMESISTER && $system === null && $copy !== self::COPY_OFF) {
 			throw ApiException::invalid('“invoicing_mode.copy” needs “invoicing_mode.system”: name the accounting system that gets the copies.');
 		}
-		return ['mode' => $mode, 'system' => $system, 'copy' => $copy];
+		$archive = $v[self::ARCHIVE_PDF] ?? null;
+		if ($archive !== null && !is_bool($archive)) {
+			throw ApiException::invalid(Message::of('“{field}” must be true, false or null.', ['field' => self::FIELD . '.' . self::ARCHIVE_PDF]));
+		}
+		$out = ['mode' => $mode, 'system' => $system, 'copy' => $copy];
+		if ($mode === self::EXTERNAL) {
+			$out[self::ARCHIVE_PDF] = $archive ?? true;
+		}
+		return $out;
 	}
 
 	/**
 	 * The stored setting (JSON, null = TimeSister without a copy); anything
 	 * unreadable counts as null.
 	 *
-	 * @return ?array{mode:string,system:?string,copy:string}
+	 * @return ?array{mode:string,system:?string,copy:string,archive_pdf?:bool}
 	 */
 	public static function decode(?string $json): ?array {
 		if ($json === null || $json === '') {
@@ -84,13 +95,18 @@ final class InvoicingModeRules {
 		}
 	}
 
-	/** @param ?array{mode:string,system:?string,copy:string} $m */
+	/** @param ?array{mode:string,system:?string,copy:string,archive_pdf?:bool} $m */
 	public static function encode(?array $m): ?string {
 		return $m === null ? null : json_encode($m, Json::FLAGS);
 	}
 
-	/** The system that issues the team's invoices (mode external), else null. @param ?array{mode:string,system:?string,copy:string} $m */
+	/** The system that issues the team's invoices (mode external), else null. @param ?array{mode:string,system:?string,copy:string,archive_pdf?:bool} $m */
 	public static function externalSystem(?array $m): ?string {
 		return $m !== null && $m['mode'] === self::EXTERNAL ? $m['system'] : null;
+	}
+
+	/** Does the team store the accounting system's PDF (mode external, `archive_pdf` not false)? @param ?array{mode:string,system:?string,copy:string,archive_pdf?:bool} $m */
+	public static function archivesPdf(?array $m): bool {
+		return self::externalSystem($m) !== null && ($m['archive_pdf'] ?? true) !== false;
 	}
 }

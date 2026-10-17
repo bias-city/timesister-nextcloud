@@ -556,7 +556,6 @@
 		"“{field}” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).": "„{field}“ muss ein Name mit 1 bis 64 Zeichen sein: Kleinbuchstaben, Ziffern, „.“, „_“ oder „-“, am Anfang ein Buchstabe oder eine Ziffer (zum Beispiel „bexio“).",
 		"“{field}” must be an https address of at most {max} characters.": "„{field}“ muss eine https-Adresse mit höchstens {max} Zeichen sein.",
 		"“external” must be null or an object with “system” and “id”.": "„external“ muss null oder ein Objekt mit „system“ und „id“ sein.",
-		"“external” has an unknown field “{field}”; allowed are system, id, number, url, at and by.": "„external“ hat ein unbekanntes Feld „{field}“; erlaubt sind system, id, number, url, at und by.",
 		"Only Team Admins export invoices.": "Nur Team Admins exportieren Rechnungen.",
 		"“issuer.besr_id” must be 6 digits.": "„issuer.besr_id“ muss aus 6 Ziffern bestehen.",
 		"“tax_case” must be “domestic”, “eu_reverse” or “export”.": "„tax_case“ muss „domestic“, „eu_reverse“ oder „export“ sein.",
@@ -719,7 +718,17 @@
 		"This invoice was handed over to {system}; revoke the hand-over first.": "Diese Rechnung wurde an {system} übergeben; nimm zuerst die Übergabe zurück.",
 		"“invoicing_mode.system” is required for the mode “external”: name the accounting system that issues the invoices.": "„invoicing_mode.system“ fehlt für den Modus „external“: Nenne die Buchhaltung, die die Rechnungen ausstellt.",
 		"“invoicing_mode.copy” must be “off” for the mode “external”: the accounting system issues the invoices itself.": "„invoicing_mode.copy“ muss für den Modus „external“ „off“ sein: Die Buchhaltung stellt die Rechnungen selbst aus.",
-		"“invoicing_mode.copy” needs “invoicing_mode.system”: name the accounting system that gets the copies.": "„invoicing_mode.copy“ braucht „invoicing_mode.system“: Nenne die Buchhaltung, die die Kopien bekommt."
+		"“invoicing_mode.copy” needs “invoicing_mode.system”: name the accounting system that gets the copies.": "„invoicing_mode.copy“ braucht „invoicing_mode.system“: Nenne die Buchhaltung, die die Kopien bekommt.",
+		"“external” has an unknown field “{field}”; allowed are system, id, number, url, at, by, document and cancelled_at.": "„external“ hat ein unbekanntes Feld „{field}“; erlaubt sind system, id, number, url, at, by, document und cancelled_at.",
+		"“external.document” must be null or an object with “path”, “sha256” and “size”.": "„external.document“ muss null oder ein Objekt mit „path“, „sha256“ und „size“ sein.",
+		"The PDF may be at most 20 MB.": "Das PDF darf höchstens 20 MB gross sein.",
+		"This team does not store the accounting system’s PDFs (invoicing_mode.archive_pdf).": "Dieses Team legt die PDFs der Buchhaltung nicht ab (invoicing_mode.archive_pdf).",
+		"The PDF of this invoice is already stored; it stays as it is.": "Das PDF dieser Rechnung ist schon abgelegt; es bleibt, wie es ist.",
+		"“{field}” must be true, false or null.": "„{field}“ muss true, false oder null sein.",
+		"“progress” must be null or a whole number from 0 to 100.": "„progress“ muss null oder eine ganze Zahl von 0 bis 100 sein.",
+		"“addendum” must be true, false or null.": "„addendum“ muss true, false oder null sein.",
+		"Only a handed-over invoice gets the accounting system’s PDF.": "Nur eine übergebene Rechnung erhält das PDF der Buchhaltung.",
+		"Only a handed-over invoice can be noted as cancelled in the accounting system.": "Nur eine übergebene Rechnung kann als in der Buchhaltung storniert vermerkt werden."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

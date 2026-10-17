@@ -90,7 +90,7 @@ final class Tenant extends Entity {
 		return $this->invoicing === 1;
 	}
 
-	/** The team setting `invoicing_mode` (0.24.0). @return ?array{mode:string,system:?string,copy:string} */
+	/** The team setting `invoicing_mode` (0.24.0). @return ?array{mode:string,system:?string,copy:string,archive_pdf?:bool} */
 	public function invoicingMode(): ?array {
 		return InvoicingModeRules::decode($this->invoicingModeJson);
 	}

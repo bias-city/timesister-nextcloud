@@ -28,6 +28,7 @@ final class WebhookRules {
 		LedgerRules::CANCELLED => 'reversed', LedgerRules::PAID => 'paid', LedgerRules::UNPAID => 'paid',
 		DocumentRules::ACTION => 'document', ExportRules::EXPORTED => 'exported',
 		LedgerRules::EXTERNAL_ISSUED => 'exported', LedgerRules::EXTERNAL_REVOKED => 'exported',
+		LedgerRules::EXTERNAL_DOCUMENT => 'document', LedgerRules::EXTERNAL_CANCELLED => 'reversed',
 	];
 
 	// ----------------------------------------------------------- settings

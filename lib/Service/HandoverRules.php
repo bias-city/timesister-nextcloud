@@ -16,6 +16,8 @@ final class HandoverRules {
 	/** The invoice record's status after a hand-over. */
 	public const STATUS = 'external';
 	public const REASON_MAX = IssueRules::NOTE_MAX;
+	/** 0.24.1: the accounting system's PDF of a handed-over invoice, at most 20 MB. */
+	public const DOCUMENT_MAX = 20 * 1024 * 1024;
 
 	/**
 	 * The body of `POST /invoices/{key}/handover`.
@@ -38,7 +40,7 @@ final class HandoverRules {
 	/**
 	 * Handing over needs the mode external (409); returns its system.
 	 *
-	 * @param ?array{mode:string,system:?string,copy:string} $mode
+	 * @param ?array{mode:string,system:?string,copy:string,archive_pdf?:bool} $mode
 	 */
 	public static function requireMode(?array $mode): string {
 		return InvoicingModeRules::externalSystem($mode)
@@ -55,7 +57,7 @@ final class HandoverRules {
 	/**
 	 * Issuing in the mode external: 409.
 	 *
-	 * @param ?array{mode:string,system:?string,copy:string} $mode
+	 * @param ?array{mode:string,system:?string,copy:string,archive_pdf?:bool} $mode
 	 */
 	public static function refuseIssue(?array $mode): void {
 		$system = InvoicingModeRules::externalSystem($mode);
@@ -135,10 +137,81 @@ final class HandoverRules {
 		];
 	}
 
+	// ------------------------------------------------- the system's PDF (0.24.1)
+
+	/** The PDF of the accounting system: at most 20 MB (413), a PDF (422). */
+	public static function requireDocument(string $content): void {
+		if (strlen($content) > self::DOCUMENT_MAX) {
+			throw ApiException::tooLarge('The PDF may be at most 20 MB.');
+		}
+		if (!str_starts_with($content, '%PDF-')) {
+			throw ApiException::invalid('The document must be a PDF.');
+		}
+	}
+
+	/**
+	 * Storing the PDF needs the mode external with `archive_pdf` on (409).
+	 *
+	 * @param ?array{mode:string,system:?string,copy:string,archive_pdf?:bool} $mode
+	 */
+	public static function requireArchive(?array $mode): void {
+		if (!InvoicingModeRules::archivesPdf($mode)) {
+			throw ApiException::conflict('This team does not store the accounting system’s PDFs (invoicing_mode.archive_pdf).');
+		}
+	}
+
+	/**
+	 * The stored document of a handed-over invoice: null when none yet, the
+	 * same file again (same hash) is no change, another one 409 – the first
+	 * stays.
+	 */
+	public static function documentAgain(\stdClass $external, string $sha256): ?\stdClass {
+		$doc = $external->document ?? null;
+		if (!$doc instanceof \stdClass) {
+			return null;
+		}
+		if (($doc->sha256 ?? null) !== $sha256) {
+			throw ApiException::conflict('The PDF of this invoice is already stored; it stays as it is.');
+		}
+		return $doc;
+	}
+
+	/** `<issued_on>_<system>-<number>_<customer>.pdf`. */
+	public static function documentName(string $issuedOn, string $system, string $number, string $customer): string {
+		return DocumentTree::invoiceName($issuedOn, $system . '-' . $number, $customer);
+	}
+
+	/**
+	 * The ledger payload of `external_document`.
+	 *
+	 * @param array{path:string,size:int,file_id?:int} $written
+	 * @return array<string,mixed>
+	 */
+	public static function documentPayload(string $key, \stdClass $external, array $written, string $sha256): array {
+		return [
+			'key' => $key, 'system' => self::text($external->system ?? null), 'id' => self::text($external->id ?? null),
+			'number' => self::text($external->number ?? null), 'path' => $written['path'], 'size' => $written['size'], 'sha256' => $sha256,
+		];
+	}
+
+	/**
+	 * The ledger payload of `external_cancelled`: the accounting system
+	 * cancelled the invoice; its PDF stays.
+	 *
+	 * @return array<string,mixed>
+	 */
+	public static function cancelPayload(string $key, \stdClass $external): array {
+		$doc = $external->document ?? null;
+		return [
+			'key' => $key, 'system' => self::text($external->system ?? null), 'id' => self::text($external->id ?? null),
+			'number' => self::text($external->number ?? null), 'document' => $doc instanceof \stdClass ? self::text($doc->path ?? null) : null,
+		];
+	}
+
 	/** The invoice's status a webhook reports after a ledger action without a frozen row. */
 	public static function statusAfter(string $action): string {
 		return match ($action) {
-			LedgerRules::EXTERNAL_ISSUED => self::STATUS,
+			LedgerRules::EXTERNAL_ISSUED, LedgerRules::EXTERNAL_DOCUMENT, LedgerRules::EXTERNAL_CANCELLED => self::STATUS,
 			LedgerRules::EXTERNAL_REVOKED => InvoiceRules::DRAFT,
 			default => '',
 		};
