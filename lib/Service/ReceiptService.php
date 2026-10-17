@@ -124,6 +124,7 @@ final class ReceiptService {
 		if (($d->kind ?? null) === ReceiptRules::RECEIPT && Fields::obj($d, 'file') === null) {
 			throw ApiException::invalid('The receipt has no file yet.');
 		}
+		ReceiptRules::requireContent($d);
 		[$team, $budget, $pd] = $this->currencies($m, $d);
 		ReceiptRules::requireApprovable($d, $pd);
 		ReceiptBooking::requireApprovable($d, $team, $budget);

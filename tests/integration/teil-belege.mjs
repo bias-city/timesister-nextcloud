@@ -106,13 +106,14 @@ export async function belege() {
 	const R6 = `rc-${RUN}-6`
 	const R7 = `rc-${RUN}-7`
 	const R8 = `rc-${RUN}-8`
+	const R9 = `rc-${RUN}-9`
 	const RR = `rc-${RUN}-r1`
 	const RULE = `er-${RUN}`
 	const K1 = `inv-${RUN}b1`
 	const K2 = `inv-${RUN}b2`
 	const K3 = `inv-${RUN}b3`
 	const Q = `q-${sha256(RUN).slice(0, 8)}`
-	const records = [[ 'receipt', R1 ], ['receipt', R2], ['receipt', R3], ['receipt', R4], ['receipt', R5], ['receipt', R6], ['receipt', R7], ['receipt', R8], ['receipt', RR], ['receipt', `rc-${RUN}-r2`], ['expense_rule', RULE], ['expense_report', `sb-${RUN}x`], ['quote', Q]]
+	const records = [[ 'receipt', R1 ], ['receipt', R2], ['receipt', R3], ['receipt', R4], ['receipt', R5], ['receipt', R6], ['receipt', R7], ['receipt', R8], ['receipt', R9], ['receipt', RR], ['receipt', `rc-${RUN}-r2`], ['expense_rule', RULE], ['expense_report', `sb-${RUN}x`], ['quote', Q]]
 	const invoices = [K1, K2, K3]
 	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'pb'")
 	const settings = await ocs(A, 'GET', '/records/setting/settings')
@@ -278,6 +279,16 @@ export async function belege() {
 			check('a member records a company receipt without project: open, missing file', c.status === 200 && c.data?.data?.status === 'open' && JSON.stringify(c.data?.missing) === '["file"]', c.data)
 			const cf = await raw(U1, 'PUT', `/receipts/${R8}/file`, pdf('Toner'), 'application/pdf')
 			check('… the file completes it: internal, approved by the member’s upload', cf.status === 200 && cf.data?.status === 'internal' && cf.data?.missing === undefined && (await get('receipt', R8))?.data?.approved_by === 'pbuser1', cf.data)
+			// 2026-10-17: without amount and supplier nothing is approved, not by upload, write or endpoint.
+			const z = await ocs(U1, 'PUT', rec('receipt', R9), { version: 0, data: receipt({ supplier: '', text: 'Scan', net: 0, vat_rate: null, vat: 0, gross: 0, project: null, budget: null, cost: null, paid_by: 'company', person: null, reimburse: false }) })
+			expect('a member records a company receipt without amount and supplier', z, 200)
+			const zf = await raw(U1, 'PUT', `/receipts/${R9}/file`, pdf('Scan'), 'application/pdf')
+			check('… the upload leaves it open, missing gross and supplier', zf.status === 200 && zf.data?.status === 'open' && JSON.stringify(zf.data?.missing) === '["gross","supplier"]', zf.data)
+			const za = await ocs(A, 'POST', `/receipts/${R9}/approve`, {})
+			check('… approve → 422 naming amount and supplier', za.status === 422 && String(za.data?.message || '').includes('an amount above 0 and a supplier'), za.data)
+			const zc = await get('receipt', R9)
+			const zw = await ocs(U1, 'PUT', rec('receipt', R9), { version: zc.version, data: { ...zc.data, supplier: 'Papeterie', net: 20, vat: 0, gross: 20 } })
+			check('… amount and supplier complete it: internal in that write', zw.status === 200 && zw.data?.data?.status === 'internal' && zw.data?.missing === undefined && zw.data?.data?.approved_by === 'pbuser1', zw.data)
 		}
 
 		head('Receipts: recurring expenses')

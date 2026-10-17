@@ -231,6 +231,7 @@ final class ReceiptRules {
 
 	/**
 	 * What an open receipt still lacks before it is approved (0.23.0):
+	 * `gross` (an amount above 0) and `supplier` (not recurring),
 	 * `budget`/`cost` with a project, `file` of kind receipt, `review`
 	 * while marked «please check», `booked` in another currency, `billed`
 	 * for a budget in a third one. Empty: complete.
@@ -238,7 +239,7 @@ final class ReceiptRules {
 	 * @return list<string>
 	 */
 	public static function missing(\stdClass $d, string $team, ?string $budgetCurrency): array {
-		$out = [];
+		$out = self::missingContent($d);
 		if (($d->project ?? null) !== null && (!is_string($d->budget ?? null) || !is_int($d->cost ?? null))) {
 			$out[] = 'budget';
 			$out[] = 'cost';
@@ -256,6 +257,52 @@ final class ReceiptRules {
 			$out[] = 'billed';
 		}
 		return $out;
+	}
+
+	/**
+	 * Amount and supplier, without which no receipt is approved (user's
+	 * decision 2026-10-17); a recurring one takes both from its rule.
+	 *
+	 * @return list<string>
+	 */
+	public static function missingContent(\stdClass $d): array {
+		if (($d->kind ?? null) === self::RECURRING) {
+			return [];
+		}
+		$out = [];
+		if (self::amount($d) <= 0.0) {
+			$out[] = 'gross';
+		}
+		if (trim((string)($d->supplier ?? '')) === '') {
+			$out[] = 'supplier';
+		}
+		return $out;
+	}
+
+	/** The gross amount: with `vat_lines` their sum, else `gross`. */
+	public static function amount(\stdClass $d): float {
+		if (!ReceiptRecognition::hasLines($d)) {
+			return self::isNumber($d->gross ?? null) ? (float)$d->gross : 0.0;
+		}
+		$sum = 0.0;
+		foreach (ReceiptRecognition::rates($d) as $l) {
+			$sum += $l['net'] + $l['vat'];
+		}
+		return round($sum, 2);
+	}
+
+	/** `approve` (endpoint): 422 while amount or supplier is missing. */
+	public static function requireContent(\stdClass $d): void {
+		$missing = self::missingContent($d);
+		if ($missing === ['gross', 'supplier']) {
+			throw ApiException::invalid('Before approval the receipt needs an amount above 0 and a supplier.');
+		}
+		if ($missing === ['gross']) {
+			throw ApiException::invalid('Before approval the receipt needs an amount above 0.');
+		}
+		if ($missing === ['supplier']) {
+			throw ApiException::invalid('Before approval the receipt needs a supplier.');
+		}
 	}
 
 	/**
