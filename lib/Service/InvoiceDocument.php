@@ -59,6 +59,8 @@ final class InvoiceDocument {
 	public ?string $customerKey = null;
 	public ?string $leitwegId = null;
 	public bool $eInvoice = false;
+	/** 0.26.0: `grouping`, `appendix[]`, `levels[]`, `budget` – or null (flat, nothing appended). @var array<string,mixed>|null */
+	public ?array $layout = null;
 
 	public function __construct() {
 		$this->sums = VatLines::of([], 0.0, TaxRules::DOMESTIC);
@@ -72,9 +74,14 @@ final class InvoiceDocument {
 	public function title(): string {
 		$t = $this->texts();
 		if ($this->number === '') {
-			return $t['invoice'] . ' ' . $t['not_issued'];
+			return ($this->isAdvance() ? $t['advance'] : $t['invoice']) . ' ' . $t['not_issued'];
 		}
-		return DocumentRules::title($t, $this->number, $this->reverses, $this->credits, $this->originalNumber);
+		return DocumentRules::title($t, $this->number, $this->reverses, $this->credits, $this->originalNumber, $this->isAdvance());
+	}
+
+	/** An advance invoice from the invoice plan (0.26.0); a reversal or credit note never is. */
+	public function isAdvance(): bool {
+		return $this->reverses === null && $this->credits === null && InvoiceRules::isAdvance($this->positions);
 	}
 
 	/** The single VAT rate (one line): the invoice's at home, 0 for reverse charge and export. */

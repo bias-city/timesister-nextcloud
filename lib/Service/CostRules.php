@@ -29,6 +29,8 @@ final class CostRules {
 	public const PER = ['invoice', 'budget'];
 	public const REBILL = 'rebill';
 	public const PASS_THROUGH = 'pass_through';
+	/** 0.26.0: at most this many amounts in a forecast (one per milestone). */
+	public const FORECAST_MAX = 200;
 	public const MODES = [self::REBILL, self::PASS_THROUGH];
 
 	private const CONTROL = '/[\x00-\x1F\x7F]/';
@@ -106,6 +108,18 @@ final class CostRules {
 				throw ApiException::invalid(Message::of('“{field}” applies only when “{other}” is “{value}”.', ['field' => $f, 'other' => 'mode', 'value' => self::REBILL]));
 			}
 			self::percent($c, $f, false);
+		}
+		// 0.26.0: the forecast per milestone, at most 200 amounts ≥ 0 (its sum is the cap; the client sets both).
+		$f = $c->forecast ?? null;
+		if ($f !== null) {
+			if (!is_array($f) || !array_is_list($f) || count($f) > self::FORECAST_MAX) {
+				throw ApiException::invalid(Message::of('“{field}” must be a list of at most {limit} entries.', ['field' => 'forecast', 'limit' => self::FORECAST_MAX]));
+			}
+			foreach ($f as $x) {
+				if (!ProjectRules::isRate($x)) {
+					throw ApiException::invalid(Message::of('“{field}” must be a list of numbers ≥ 0.', ['field' => 'forecast']));
+				}
+			}
 		}
 		$d = $c->description ?? null;
 		if ($d !== null && (!is_string($d) || mb_strlen($d) > self::DESCRIPTION_MAX || preg_match(self::CONTROL_TEXT, $d) || !mb_check_encoding($d, 'UTF-8'))) {

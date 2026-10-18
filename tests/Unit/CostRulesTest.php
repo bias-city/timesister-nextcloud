@@ -57,6 +57,7 @@ class CostRulesTest extends TestCase {
 		CostRules::check([]);
 		$this->assertSame(['receipts', 'rebill'], [$c[3]->rule, $c[3]->mode], 'third-party costs: by receipts, re-billed when not said');
 		$this->assertSame('rebill', $c[1]->mode);
+		$this->assertSame('ok', self::message(self::with(2, ['forecast' => [500, 1000.5, 0]])), '0.26.0: the forecast per milestone');
 	}
 
 	public function testErrorsNameTheField(): void {
@@ -82,6 +83,9 @@ class CostRulesTest extends TestCase {
 			[self::with(3, ['markup' => 120]), '422 Cost position 4: “markup” must be a percentage from 0 to 100.'],
 			[self::with(0, ['vat' => '8.1']), '422 Cost position 1: “vat” must be a percentage from 0 to 100.'],
 			[self::with(0, ['description' => str_repeat('x', 301)]), '422 Cost position 1: “description” must be text of at most 300 characters.'],
+			[self::with(2, ['forecast' => [500, -1]]), '422 Cost position 3: “forecast” must be a list of numbers ≥ 0.'],
+			[self::with(2, ['forecast' => array_fill(0, 201, 1)]), '422 Cost position 3: “forecast” must be a list of at most 200 entries.'],
+			[self::with(2, ['forecast' => (object)['a' => 1]]), '422 Cost position 3: “forecast” must be a list of at most 200 entries.'],
 			[[1], '422 Cost position 1: Each cost position must be a JSON object.'],
 		] as $i => [$costs, $want]) {
 			$this->assertSame($want, self::message($costs), (string)$i);

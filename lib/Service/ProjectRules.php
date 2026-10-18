@@ -31,9 +31,10 @@ final class ProjectRules {
 	/** 0.25.0: what the budgets are called («Phasen»), from the template the project came from. */
 	public const BUDGET_LABEL = 'budget_label';
 	public const BUDGET_LABEL_MAX = 60;
-	/** 0.25.1: a work package's group (from the template) and its role in the project. */
-	public const WP_GROUP_MAX = 200;
-	public const WP_ROLES = ['gesamtleitung', 'fachplanung', 'bauleitung'];
+	/** 0.26.0: a work package's level (`parent`: the `no` of the package above) and its tags. */
+	public const WP_PARENT_MAX = 32;
+	public const WP_TAGS_MAX = 20;
+	public const WP_TAG_MAX = 60;
 	/** 0.25.1: the planned invoices as `{date, share?, amount?, title?}` beside `invoice_dates`. */
 	public const BILLING_PLAN = 'billing_plan';
 	public const BILLING_PLAN_MAX = 200;
@@ -218,6 +219,13 @@ final class ProjectRules {
 		if (!is_array($wps)) {
 			return;
 		}
+		// The numbers of the packages, for `parent`.
+		$nos = [];
+		foreach ($wps as $wp) {
+			if ($wp instanceof \stdClass && (is_string($wp->no ?? null) || is_int($wp->no ?? null))) {
+				$nos[] = mb_strtolower(trim((string)$wp->no));
+			}
+		}
 		foreach ($wps as $wp) {
 			if ($wp instanceof \stdClass && ($wp->rate ?? null) !== null && !self::isRate($wp->rate)) {
 				throw ApiException::invalid('“rate” must be a number ≥ 0.');
@@ -227,25 +235,48 @@ final class ProjectRules {
 				throw ApiException::invalid('“addendum” must be true, false or null.');
 			}
 			if ($wp instanceof \stdClass) {
-				self::checkGroupAndRole($wp);
+				self::checkParentAndTags($wp, $nos);
 			}
 		}
 	}
 
-	/** 0.25.1: `group` trimmed text of 1–200 characters or null (stored trimmed), `role` one of WP_ROLES or null. */
-	private static function checkGroupAndRole(\stdClass $wp): void {
-		$g = $wp->group ?? null;
-		if ($g !== null) {
-			$t = is_string($g) && mb_check_encoding($g, 'UTF-8') ? trim($g) : '';
-			if ($t === '' || mb_strlen($t) > self::WP_GROUP_MAX || preg_match(self::CONTROL, $t) === 1) {
-				throw ApiException::invalid(Message::of('“group” must be null or text of 1 to {max} characters without control characters.', ['max' => self::WP_GROUP_MAX]));
+	/**
+	 * 0.26.0: `parent` null or the `no` of another work package of the same
+	 * budget (stored trimmed); `tags` null or at most 20 texts of 1–60
+	 * characters without control characters (stored trimmed). Replace the
+	 * `group` and `role` of 0.25.1.
+	 *
+	 * @param list<string> $nos the packages' numbers, lower case
+	 */
+	private static function checkParentAndTags(\stdClass $wp, array $nos): void {
+		$p = $wp->parent ?? null;
+		if ($p !== null) {
+			$t = is_string($p) && mb_check_encoding($p, 'UTF-8') ? trim($p) : '';
+			$self = mb_strtolower(trim((string)(is_string($wp->no ?? null) || is_int($wp->no ?? null) ? $wp->no : '')));
+			if ($t === '' || mb_strlen($t) > self::WP_PARENT_MAX || preg_match(self::CONTROL, $t) === 1
+				|| mb_strtolower($t) === $self || !in_array(mb_strtolower($t), $nos, true)) {
+				throw ApiException::invalid('“parent” must be null or the “no” of another work package of the budget.');
 			}
-			$wp->group = $t;
+			$wp->parent = $t;
 		}
-		$r = $wp->role ?? null;
-		if ($r !== null && !in_array($r, self::WP_ROLES, true)) {
-			throw ApiException::invalid('“role” must be null, “gesamtleitung”, “fachplanung” or “bauleitung”.');
+		$tags = $wp->tags ?? null;
+		if ($tags === null) {
+			return;
 		}
+		$ok = is_array($tags) && array_is_list($tags) && count($tags) <= self::WP_TAGS_MAX;
+		$out = [];
+		foreach ($ok ? $tags : [] as $x) {
+			$t = is_string($x) && mb_check_encoding($x, 'UTF-8') ? trim($x) : '';
+			if ($t === '' || mb_strlen($t) > self::WP_TAG_MAX || preg_match(self::CONTROL, $t) === 1) {
+				$ok = false;
+				break;
+			}
+			$out[] = $t;
+		}
+		if (!$ok) {
+			throw ApiException::invalid(Message::of('“tags” must be null or a list of at most {n} texts of 1 to {max} characters.', ['n' => self::WP_TAGS_MAX, 'max' => self::WP_TAG_MAX]));
+		}
+		$wp->tags = $out;
 	}
 
 	/**

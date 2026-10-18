@@ -213,6 +213,7 @@ final class DocumentService {
 			'hours' => $r['hours'], 'hours_total' => IssueRules::totalHours($r['hours']),
 			'chain' => ['seq' => null, 'prev_hash' => null, 'hash' => null],
 			'customer_key' => $r['customerKey'], 'qr_reference' => null,
+			'layout' => InvoiceLayout::check($d->{InvoiceLayout::FIELD} ?? null),
 		];
 		$doc = $this->build($t, $f, $r['settings']);
 		$doc->watermark = DocumentRules::watermark($doc->lang);
@@ -365,6 +366,8 @@ final class DocumentService {
 		$doc->body = self::nullable($f['body'] ?? null);
 		$doc->footer = self::nullable($f['footer'] ?? null);
 		$doc->positions = array_values(array_map(static fn (mixed $p): array => self::toArray($p), is_array($f['positions'] ?? null) ? $f['positions'] : []));
+		$layout = self::toArray($f['layout'] ?? null);
+		$doc->layout = $layout === [] ? null : $layout;
 		$doc->currency = self::str($f['currency'] ?? 'CHF');
 		$doc->vat = self::float($f['vat'] ?? 0);
 		$doc->sums = VatLines::fromFixed($f);

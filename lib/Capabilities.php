@@ -74,6 +74,12 @@ use OCP\Capabilities\ICapability;
  * `data.created_by`, kept by the server (a Lead changes and removes their
  * own even after a Team Admin's change); team setting `settings.catalogs`;
  * `billing_plan`, `work_packages[].group` and `.role` in a budget.
+ * `advances: 1` since 0.26.0: invoice positions `advance` and
+ * `advance_deduction` (with `invoice`, the advance's key); an advance
+ * invoice is titled so and is a partial invoice (326) in the e-invoice.
+ * `invoice_layout: 1` since 0.26.1: an invoice's `layout` (grouping by
+ * level, appended tables per level, per tag and the state of the budget),
+ * `positions[].path` and `.tags`, frozen on issue and drawn in the PDF.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -81,7 +87,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int}} */
+	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -112,6 +118,8 @@ final class Capabilities implements ICapability {
 				'expense_fixing' => 1,
 				'invoice_handover' => 2,
 				'templates' => 2,
+				'advances' => 1,
+				'invoice_layout' => 1,
 			],
 		];
 	}

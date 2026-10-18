@@ -188,26 +188,25 @@ class ProjectRulesTest extends TestCase {
 		$this->assertSame('', self::validate('{"id":"p","status":"draft","budgets":[7,"x",null,{"work_packages":"none"}]}'));
 	}
 
-	/** 0.25.1: a work package's group (trimmed text 1–200) and role. */
-	public function testWorkPackageGroupAndRole(): void {
-		$wp = static fn (string $f): string => self::validate('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":1,' . $f . '}]}]}');
-		foreach (['"group":"Vorprojekt"', '"group":null', '"group":"' . str_repeat('ä', 200) . '"', '"role":"gesamtleitung"', '"role":"fachplanung"', '"role":"bauleitung"', '"role":null', '"group":"A","role":"bauleitung"'] as $ok) {
+	/** 0.26.0: a work package's level (`parent`) and tags, instead of group and role. */
+	public function testWorkPackageParentAndTags(): void {
+		$wp = static fn (string $f): string => self::validate('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":"3"},{"no":"31",' . $f . '}]}]}');
+		foreach (['"parent":"3"', '"parent":" 3 "', '"parent":null', '"tags":["Bauleitung","extern"]', '"tags":[]', '"tags":null', '"tags":["' . str_repeat('ä', 60) . '"]'] as $ok) {
 			$this->assertSame('', $wp($ok), $ok);
 		}
-		$group = '422 “group” must be null or text of 1 to 200 characters without control characters.';
-		foreach (['""', '"   "', '"' . str_repeat('x', 201) . '"', '"a\u0007b"', '"a\nb"', '7', 'true', '["A"]', '{}'] as $bad) {
-			$this->assertSame($group, $wp('"group":' . $bad), $bad);
+		$parent = '422 “parent” must be null or the “no” of another work package of the budget.';
+		foreach (['"9"', '"31"', '""', '7', 'true', '["3"]'] as $bad) {
+			$this->assertSame($parent, $wp('"parent":' . $bad), $bad);
 		}
-		$o = self::obj('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":1,"group":"  Vorprojekt  "}]}]}');
+		$tags = '422 “tags” must be null or a list of at most 20 texts of 1 to 60 characters.';
+		foreach (['"Bauleitung"', '[""]', '["a\u0007b"]', '[7]', '["' . str_repeat('x', 61) . '"]', json_encode(array_fill(0, 21, 'x'))] as $bad) {
+			$this->assertSame($tags, $wp('"tags":' . $bad), $bad);
+		}
+		$o = self::obj('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":1},{"no":2,"parent":" 1 ","tags":["  Konzept "]}]}]}');
 		ProjectRules::validate($o);
-		$this->assertSame('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":1,"group":"Vorprojekt"}]}]}', Json::encode($o), 'stored trimmed');
-		$this->assertSame($group, self::outcome(static fn () => ProjectRules::checkBudget((object)['work_packages' => [(object)['group' => "\xC3\x28"]]])), 'not UTF-8');
-		$role = '422 “role” must be null, “gesamtleitung”, “fachplanung” or “bauleitung”.';
-		foreach (['""', '"Bauleitung"', '"lead"', '1', 'true', '["bauleitung"]'] as $bad) {
-			$this->assertSame($role, $wp('"role":' . $bad), $bad);
-		}
+		$this->assertSame('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":1},{"no":2,"parent":"1","tags":["Konzept"]}]}]}', Json::encode($o), 'stored trimmed');
 		// The same in a quote's budget.
-		$this->assertSame($role, self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","work_packages":[{"role":"x"}]}'))));
+		$this->assertSame($parent, self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","work_packages":[{"no":"1","parent":"x"}]}'))));
 	}
 
 	/** 0.25.1: the structured invoice plan beside `invoice_dates`. */

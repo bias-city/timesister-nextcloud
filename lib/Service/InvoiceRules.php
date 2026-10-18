@@ -34,7 +34,10 @@ final class InvoiceRules {
 	public const TEXT_MAX = 4000;
 	public const MAX_POSITIONS = 500;
 	/** 0.21.0: expense positions (a percentage of the hours, a flat amount) and cost lines. */
-	public const POSITION_KINDS = ['hours', 'flat', 'discount', 'text', 'expense_percent', 'expense_flat', 'costs', ReceiptLineRules::MARKUP];
+	/** 0.26.0: an advance from the invoice plan and its deduction in a later invoice (`invoice` = the advance's key). */
+	public const ADVANCE = 'advance';
+	public const ADVANCE_DEDUCTION = 'advance_deduction';
+	public const POSITION_KINDS = ['hours', 'flat', 'discount', 'text', 'expense_percent', 'expense_flat', 'costs', ReceiptLineRules::MARKUP, self::ADVANCE, self::ADVANCE_DEDUCTION];
 	public const POSITION_TEXT_MAX = 500;
 	public const CODE_MAX = 64;
 
@@ -113,6 +116,10 @@ final class InvoiceRules {
 		if (($d->positions ?? null) !== null) {
 			self::checkPositions($d->positions);
 		}
+		// 0.26.0: grouping by level and appended tables.
+		if (property_exists($d, InvoiceLayout::FIELD)) {
+			$d->{InvoiceLayout::FIELD} = InvoiceLayout::check($d->{InvoiceLayout::FIELD});
+		}
 		// 0.20.0: the draft may override the tax case.
 		TaxRules::checkOverride($d->{TaxRules::FIELD} ?? null);
 		// 0.23.1: the hand-over to an accounting system, normalised (Mac plugins; on the server only through POST …/external).
@@ -161,6 +168,8 @@ final class InvoiceRules {
 					throw ApiException::invalid('“amount” must be a number.');
 				}
 				self::checkLineTax($p);
+				self::checkAdvance($p);
+				InvoiceLayout::checkPosition($p);
 			} catch (ApiException $e) {
 				throw ApiException::invalid(Message::of('Position {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]));
 			}
@@ -191,6 +200,49 @@ final class InvoiceRules {
 		}
 		// 0.22.0: a costs line may name its receipts.
 		ReceiptLineRules::checkList($p);
+	}
+
+	/**
+	 * An advance (0.26.0) is a fee line ≥ 0; its deduction is ≤ 0 and names
+	 * the advance invoice's key in `invoice`, no other line does. Neither is
+	 * a cost line or a pass-through item.
+	 */
+	private static function checkAdvance(\stdClass $p): void {
+		$kind = $p->kind ?? null;
+		$ref = $p->invoice ?? null;
+		if ($kind === self::ADVANCE_DEDUCTION) {
+			if (!is_string($ref) || !RecordValidator::isKey($ref)) {
+				throw ApiException::invalid('“invoice” of an advance deduction must be the key of the advance invoice.');
+			}
+		} elseif ($ref !== null) {
+			throw ApiException::invalid('Only an advance deduction names an “invoice”.');
+		}
+		if (!in_array($kind, [self::ADVANCE, self::ADVANCE_DEDUCTION], true)) {
+			return;
+		}
+		$a = $p->amount;
+		if ($kind === self::ADVANCE && $a < 0) {
+			throw ApiException::invalid('An advance has an amount ≥ 0.');
+		}
+		if ($kind === self::ADVANCE_DEDUCTION && $a > 0) {
+			throw ApiException::invalid('An advance deduction has an amount ≤ 0.');
+		}
+		if (($p->cost ?? null) !== null || ($p->vat_mode ?? null) === VatLines::PASS_THROUGH) {
+			throw ApiException::invalid('An advance belongs to the fee: no cost position, not pass-through.');
+		}
+	}
+
+	/** An advance invoice (0.26.0): it has an advance line (positions as arrays or objects). */
+	public static function isAdvance(mixed $positions): bool {
+		foreach (is_array($positions) ? $positions : [] as $p) {
+			if (is_object($p)) {
+				$p = get_object_vars($p);
+			}
+			if (is_array($p) && ($p['kind'] ?? null) === self::ADVANCE) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static function bookings(mixed $list): void {

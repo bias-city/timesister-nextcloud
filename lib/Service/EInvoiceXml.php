@@ -23,6 +23,8 @@ final class EInvoiceXml {
 	/** UN/ECE 1001: invoice, corrected invoice (reversal and credit note with negated amounts). */
 	public const TYPE_INVOICE = '380';
 	public const TYPE_CORRECTION = '384';
+	/** 0.26.0: an advance invoice is a partial invoice (UNTDID 1001, allowed in XRechnung). */
+	public const TYPE_PARTIAL = '326';
 	/** UN/ECE 4461: credit transfer (58 SEPA, 30 other). */
 	private const MEANS_SEPA = '58';
 	private const MEANS_TRANSFER = '30';
@@ -87,7 +89,8 @@ final class EInvoiceXml {
 	public function builder(InvoiceDocument $d, int $profile): ZugferdDocumentBuilder {
 		$b = ZugferdDocumentBuilder::createNew($profile);
 		$correction = $d->reverses !== null || $d->credits !== null;
-		$b->setDocumentInformation($d->number, $correction ? self::TYPE_CORRECTION : self::TYPE_INVOICE, self::date($d->issuedOn), $d->currency);
+		$type = $correction ? self::TYPE_CORRECTION : ($d->isAdvance() ? self::TYPE_PARTIAL : self::TYPE_INVOICE);
+		$b->setDocumentInformation($d->number, $type, self::date($d->issuedOn), $d->currency);
 		if ($d->chainLine !== '') {
 			$b->addDocumentNote($d->chainLine);
 		}

@@ -163,6 +163,8 @@ final class IssueService {
 		$row->setIssuerJson(Json::encode($issuer));
 		$row->setCustomerJson(Json::encode($customerBlock));
 		$row->setPositionsJson(json_encode($positions, Json::FLAGS));
+		$layout = InvoiceLayout::check($d->{InvoiceLayout::FIELD} ?? null);
+		$row->setLayoutJson($layout === null ? null : Json::encode($layout));
 		$row->setGreeting(IssueRules::textOf($d, 'greeting'));
 		$row->setBody(IssueRules::textOf($d, 'body'));
 		$row->setFooter(IssueRules::textOf($d, 'footer'));
@@ -180,7 +182,7 @@ final class IssueService {
 			$this->insertHour($tid, $row->getId(), $h);
 		}
 
-		$payload = IssueRules::payload($key, $number, $issuedOn, $m->uid, $dueOn, $projectKey, (string)$d->budget, $customerKey, (string)$d->from, (string)$d->to, $currency, $sums, $issuer, $customerBlock, $positions, $hours, $row->getGreeting(), $row->getBody(), $row->getFooter(), null, null, $qrReference);
+		$payload = IssueRules::payload($key, $number, $issuedOn, $m->uid, $dueOn, $projectKey, (string)$d->budget, $customerKey, (string)$d->from, (string)$d->to, $currency, $sums, $issuer, $customerBlock, $positions, $hours, $row->getGreeting(), $row->getBody(), $row->getFooter(), null, null, $qrReference, $layout);
 		$entry = $this->append($tid, $m->uid, LedgerRules::ISSUED, $row->getId(), $number, LedgerRules::canonical($payload), $now);
 		$this->chain($row, $entry, $now);
 
