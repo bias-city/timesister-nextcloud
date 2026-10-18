@@ -100,6 +100,8 @@ use OCP\DB\Types;
  * @method void setXmlPath(?string $xmlPath)
  * @method string|null getXmlSha256()
  * @method void setXmlSha256(?string $xmlSha256)
+ * @method string|null getLayoutJson()
+ * @method void setLayoutJson(?string $layoutJson)
  * @method string|null getExternalJson()
  * @method void setExternalJson(?string $externalJson)
  * @method string|null getVatLinesJson()
@@ -168,6 +170,8 @@ final class InvInvoice extends Entity {
 	protected ?string $xmlPath = null;
 	protected ?string $xmlSha256 = null;
 	protected ?string $externalJson = null;
+	/** 0.26.0: the frozen layout (InvoiceLayout). */
+	protected ?string $layoutJson = null;
 	// 0.21.0: net and VAT per rate (JSON), the pass-through items, the amount to pay; null before 0.21.0.
 	protected ?string $vatLinesJson = null;
 	protected ?string $passThrough = null;
@@ -220,6 +224,7 @@ final class InvInvoice extends Entity {
 		$this->addType('xmlPath', Types::STRING);
 		$this->addType('xmlSha256', Types::STRING);
 		$this->addType('externalJson', Types::STRING);
+		$this->addType('layoutJson', Types::STRING);
 		$this->addType('vatLinesJson', Types::STRING);
 		$this->addType('passThrough', Types::DECIMAL);
 		$this->addType('total', Types::DECIMAL);

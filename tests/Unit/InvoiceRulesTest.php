@@ -193,7 +193,7 @@ class InvoiceRulesTest extends TestCase {
 		$this->assertSame('422 “positions” must be a list of at most 500 positions.', self::check(['positions' => array_fill(0, 501, $pos())]));
 		$this->assertSame('ok', self::check(['positions' => array_fill(0, 500, $pos())]));
 		$this->assertSame('422 Position 1: Each position must be a JSON object.', self::check(['positions' => ['x']]));
-		$this->assertSame('422 Position 2: “kind” of a position is one of hours, flat, discount, text, expense_percent, expense_flat, costs, markup.', self::check(['positions' => [$pos(), $pos(['kind' => 'rebate'])]]));
+		$this->assertSame('422 Position 2: “kind” of a position is one of hours, flat, discount, text, expense_percent, expense_flat, costs, markup, advance, advance_deduction.', self::check(['positions' => [$pos(), $pos(['kind' => 'rebate'])]]));
 		$this->assertSame('422 Position 1: “text” must be text of 1 to 500 characters.', self::check(['positions' => [$pos(['text' => ''])]]));
 		$this->assertSame('422 Position 1: “text” must be text of 1 to 500 characters.', self::check(['positions' => [$pos(['text' => str_repeat('t', 501)])]]));
 		$this->assertSame('422 Position 1: “work_package” must be null or an integer ≥ 0.', self::check(['positions' => [$pos(['work_package' => '2'])]]));
@@ -219,6 +219,25 @@ class InvoiceRulesTest extends TestCase {
 		$this->assertSame('422 Booking 1: “code” must be text of at most 64 characters.', self::check($b(['code' => str_repeat('c', 65)])));
 		$this->assertSame('ok', self::outcome(fn () => InvoiceRules::checkPositions([(object)$pos()])), 'the public check for a credit note’s positions');
 		$this->assertSame('422 Position 1: “amount” must be a number.', self::outcome(fn () => InvoiceRules::checkPositions([(object)$pos(['amount' => true])])));
+	}
+
+	/** 0.26.0: the advance and its deduction naming the advance invoice. */
+	public function testAdvanceAndDeduction(): void {
+		$adv = ['kind' => 'advance', 'text' => 'Akonto 1 · Bauprojekt · 30 %', 'amount' => 13500];
+		$ded = ['kind' => 'advance_deduction', 'text' => 'Abzüglich Akontorechnung RE-1', 'amount' => -13500, 'vat' => 8.1, 'invoice' => 'inv-0a1b2c3d'];
+		$this->assertSame('ok', self::check(['positions' => [$adv]]));
+		$this->assertSame('ok', self::check(['positions' => [['kind' => 'hours', 'text' => 'Planung', 'hours' => 300, 'rate' => 150, 'amount' => 45000], $ded]]));
+		$this->assertSame('422 Position 1: An advance has an amount ≥ 0.', self::check(['positions' => [array_merge($adv, ['amount' => -1])]]));
+		$this->assertSame('422 Position 1: An advance deduction has an amount ≤ 0.', self::check(['positions' => [array_merge($ded, ['amount' => 1])]]));
+		$this->assertSame('422 Position 1: “invoice” of an advance deduction must be the key of the advance invoice.', self::check(['positions' => [array_merge($ded, ['invoice' => null])]]));
+		$this->assertSame('422 Position 1: “invoice” of an advance deduction must be the key of the advance invoice.', self::check(['positions' => [array_merge($ded, ['invoice' => '../x'])]]));
+		$this->assertSame('422 Position 1: Only an advance deduction names an “invoice”.', self::check(['positions' => [array_merge($adv, ['invoice' => 'inv-0a1b2c3d'])]]));
+		$this->assertSame('422 Position 1: An advance belongs to the fee: no cost position, not pass-through.', self::check(['positions' => [array_merge($adv, ['cost' => 1])]]));
+		$this->assertSame('422 Position 1: An advance belongs to the fee: no cost position, not pass-through.', self::check(['positions' => [array_merge($ded, ['vat_mode' => 'pass_through'])]]));
+		$this->assertTrue(InvoiceRules::isAdvance([$adv]));
+		$this->assertTrue(InvoiceRules::isAdvance([(object)$adv]));
+		$this->assertFalse(InvoiceRules::isAdvance([$ded]));
+		$this->assertFalse(InvoiceRules::isAdvance(null));
 	}
 
 	public function testIssuedCode(): void {
@@ -381,6 +400,8 @@ class InvoiceRulesTest extends TestCase {
 	public function testCapabilityAndZip(): void {
 		$cap = (new Capabilities($this->createMock(IAppManager::class)))->getCapabilities()['timesister'];
 		$this->assertSame(1, $cap['invoices']);
+		$this->assertSame(1, $cap['advances'], 'advance invoices, 0.26.0');
+		$this->assertSame(1, $cap['invoice_layout'], 'invoice layout, 0.26.0');
 		$mapped = ZipRules::mapData(self::data(), ['alice' => 'alice.new', 'pblead' => 'lea']);
 		$this->assertInstanceOf(\stdClass::class, $mapped);
 		$this->assertSame('alice.new', $mapped->bookings[0]->person, 'a team ZIP moved to other accounts: the booking’s person follows');

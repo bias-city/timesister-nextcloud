@@ -72,6 +72,8 @@ final class InvoiceFixed {
 			'xml_path' => $row->getXmlPath(),
 			'xml_sha256' => $row->getXmlSha256(),
 			'external' => $external,
+			// 0.26.0: grouping by level and appended tables, as issued.
+			'layout' => $row->getLayoutJson() === null ? null : InvoiceRules::decode($row->getLayoutJson()),
 		];
 	}
 

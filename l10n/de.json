@@ -740,8 +740,6 @@
 		"“addendum” must be true, false or null.": "„addendum“ muss true, false oder null sein.",
 		"Only a handed-over invoice gets the accounting system’s PDF.": "Nur eine übergebene Rechnung erhält das PDF der Buchhaltung.",
 		"Only a handed-over invoice can be noted as cancelled in the accounting system.": "Nur eine übergebene Rechnung kann als in der Buchhaltung storniert vermerkt werden.",
-		"“group” must be null or text of 1 to {max} characters without control characters.": "„group“ muss null oder Text mit 1 bis {max} Zeichen ohne Steuerzeichen sein.",
-		"“role” must be null, “gesamtleitung”, “fachplanung” or “bauleitung”.": "„role“ muss null, „gesamtleitung“, „fachplanung“ oder „bauleitung“ sein.",
 		"“billing_plan” must be null or a list of at most {max} entries.": "„billing_plan“ muss null oder eine Liste mit höchstens {max} Einträgen sein.",
 		"Entry {n} of “billing_plan” must be an object with “date”.": "Eintrag {n} von „billing_plan“ muss ein Objekt mit „date“ sein.",
 		"Entry {n} of “billing_plan” has an unknown field “{key}”; allowed are date, share, amount and title.": "Eintrag {n} von „billing_plan“ hat ein unbekanntes Feld „{key}“; erlaubt sind date, share, amount und title.",
@@ -753,7 +751,19 @@
 		"Entry {n} of “billing_plan”: “title” must be null or text of at most {max} characters without control characters.": "Eintrag {n} von „billing_plan“: „title“ muss null oder Text mit höchstens {max} Zeichen ohne Steuerzeichen sein.",
 		"“catalogs” must be null or a list of at most {max} catalogs.": "„catalogs“ muss null oder eine Liste mit höchstens {max} Katalogen sein.",
 		"Each catalog in “catalogs” is “id@edition”: the id in lowercase letters, digits, dots, dashes and underscores, the edition in letters, digits, dots, dashes and underscores, each at most 100.": "Jeder Katalog in „catalogs“ ist „id@edition“: die id aus Kleinbuchstaben, Ziffern, Punkten, Bindestrichen und Unterstrichen, die edition aus Buchstaben, Ziffern, Punkten, Bindestrichen und Unterstrichen, je höchstens 100.",
-		"“catalogs” names “{catalog}” twice.": "„catalogs“ nennt „{catalog}“ zweimal."
+		"“catalogs” names “{catalog}” twice.": "„catalogs“ nennt „{catalog}“ zweimal.",
+		"“invoice” of an advance deduction must be the key of the advance invoice.": "„invoice“ eines Akonto-Abzugs muss der Schlüssel der Akontorechnung sein.",
+		"Only an advance deduction names an “invoice”.": "Nur ein Akonto-Abzug nennt eine „invoice“.",
+		"An advance belongs to the fee: no cost position, not pass-through.": "Ein Akonto gehört zum Honorar: keine Kostenposition, nicht durchlaufend.",
+		"An advance has an amount ≥ 0.": "Ein Akonto hat einen Betrag ≥ 0.",
+		"An advance deduction has an amount ≤ 0.": "Ein Akonto-Abzug hat einen Betrag ≤ 0.",
+		"“{field}” must be a list of numbers ≥ 0.": "„{field}“ muss eine Liste von Zahlen ≥ 0 sein.",
+		"“parent” must be null or the “no” of another work package of the budget.": "„parent“ muss null oder die „no“ eines anderen Arbeitspakets des Budgets sein.",
+		"“tags” must be null or a list of at most {n} texts of 1 to {max} characters.": "„tags“ muss null oder eine Liste von höchstens {n} Texten mit 1 bis {max} Zeichen sein.",
+		"“layout” must be null or an object.": "„layout“ muss null oder ein Objekt sein.",
+		"“{field}” must be a list of {values}.": "„{field}“ muss eine Liste aus {values} sein.",
+		"Each entry of “{field}” must be an object.": "Jeder Eintrag von „{field}“ muss ein Objekt sein.",
+		"“{field}” must be null or a list of at most {n} texts of 1 to {max} characters.": "„{field}“ muss null oder eine Liste von höchstens {n} Texten mit 1 bis {max} Zeichen sein."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

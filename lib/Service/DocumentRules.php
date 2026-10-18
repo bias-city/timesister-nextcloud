@@ -205,7 +205,7 @@ final class DocumentRules {
 	public static function texts(string $lang): array {
 		if ($lang === self::DE) {
 			return [
-				'invoice' => 'Rechnung', 'reversal' => 'Storno zu', 'credit' => 'Gutschrift', 'not_issued' => '(noch nicht gestellt)',
+				'invoice' => 'Rechnung', 'advance' => 'Akontorechnung', 'reversal' => 'Storno zu', 'credit' => 'Gutschrift', 'not_issued' => '(noch nicht gestellt)',
 				'date' => 'Datum', 'due' => 'Zahlbar bis', 'period' => 'Leistungszeitraum', 'project' => 'Projekt', 'budget' => 'Budget',
 				'vat_id' => 'MWST-Nr.', 'email' => 'E-Mail', 'phone' => 'Telefon', 'contact' => 'Kontakt',
 				'position' => 'Position', 'hours' => 'Stunden', 'rate' => 'Ansatz', 'amount' => 'Betrag',
@@ -217,10 +217,12 @@ final class DocumentRules {
 				'copy_more' => '… und {n} weitere Seiten in der Datei des Belegs.', 'copy_unreadable' => 'Die Datei fehlt.',
 				'report' => 'Spesenblatt', 'supplier' => 'Lieferant', 'text' => 'Text', 'gross_col' => 'Brutto', 'without_receipt' => 'ohne Beleg',
 				'sign_person' => 'Unterschrift Person', 'sign_fixed' => 'Fixiert', 'team' => 'Team', 'status' => 'Stand',
+				'subtotal' => 'Zwischensumme', 'by_level' => 'Übersicht je Ebene', 'by_tag' => 'Übersicht je Merkmal', 'budget_state' => 'Stand des Budgets',
+				'target' => 'Soll', 'before' => 'Bisher verrechnet', 'this_invoice' => 'Diese Rechnung', 'rest' => 'Rest', 'tag' => 'Merkmal', 'level' => 'Ebene',
 			];
 		}
 		return [
-			'invoice' => 'Invoice', 'reversal' => 'Reversal of', 'credit' => 'Credit note', 'not_issued' => '(not yet issued)',
+			'invoice' => 'Invoice', 'advance' => 'Advance invoice', 'reversal' => 'Reversal of', 'credit' => 'Credit note', 'not_issued' => '(not yet issued)',
 			'date' => 'Date', 'due' => 'Due', 'period' => 'Period', 'project' => 'Project', 'budget' => 'Budget',
 			'vat_id' => 'VAT ID', 'email' => 'E-mail', 'phone' => 'Phone', 'contact' => 'Contact',
 			'position' => 'Position', 'hours' => 'Hours', 'rate' => 'Rate', 'amount' => 'Amount',
@@ -232,18 +234,20 @@ final class DocumentRules {
 			'copy_more' => '… and {n} more pages in the receipt’s file.', 'copy_unreadable' => 'The file is missing.',
 			'report' => 'Expense report', 'supplier' => 'Supplier', 'text' => 'Text', 'gross_col' => 'Gross', 'without_receipt' => 'without receipt',
 			'sign_person' => 'Signature person', 'sign_fixed' => 'Fixed', 'team' => 'Team', 'status' => 'Status',
+			'subtotal' => 'Subtotal', 'by_level' => 'Overview by level', 'by_tag' => 'Overview by tag', 'budget_state' => 'State of the budget',
+			'target' => 'Target', 'before' => 'Billed before', 'this_invoice' => 'This invoice', 'rest' => 'Remaining', 'tag' => 'Tag', 'level' => 'Level',
 		];
 	}
 
-	/** The document's title: “Invoice RE-2026-0007”, “Reversal of RE-2026-0007”, “Credit note RE-2026-0008”. @param array<string,string> $t */
-	public static function title(array $t, string $number, ?string $reverses, ?string $credits, ?string $originalNumber): string {
+	/** The document's title: “Invoice RE-2026-0007”, “Reversal of RE-2026-0007”, “Credit note RE-2026-0008”, since 0.26.0 “Advance invoice RE-2026-0009”. @param array<string,string> $t */
+	public static function title(array $t, string $number, ?string $reverses, ?string $credits, ?string $originalNumber, bool $advance = false): string {
 		if ($reverses !== null) {
 			return $t['reversal'] . ' ' . ($originalNumber ?? $reverses) . ' – ' . $number;
 		}
 		if ($credits !== null) {
 			return $t['credit'] . ' ' . $number;
 		}
-		return $t['invoice'] . ' ' . $number;
+		return ($advance ? $t['advance'] : $t['invoice']) . ' ' . $number;
 	}
 
 	/** An amount: `1’234.50` in German (Swiss style), `1,234.50` in English. */

@@ -61,6 +61,7 @@ final class InvoicePdf {
 			$pdf->SetFont(InvoicePage::FONT, '', 10);
 			$pdf->MultiCell(0, self::LINE, $d->body, 0, 'L', false, 1);
 		}
+		$this->layoutTables($pdf, $d, $t);
 		if ($d->appendix !== []) {
 			$this->appendix($pdf, $d, $t);
 		}
@@ -179,11 +180,28 @@ final class InvoicePdf {
 		// 0.21.0: the pass-through items stand in their own block under the sums; with several rates each line names its rate.
 		[$taxable] = $d->splitPositions();
 		$several = count($d->sums->lines) > 1;
-		foreach ($taxable as $p) {
+		// 0.26.0: grouped by level - headings where a level begins, a subtotal where a top level ends.
+		$items = ($d->layout['grouping'] ?? 'flat') === 'level' ? InvoiceLayout::grouped($taxable)
+			: array_map(static fn (array $p): array => ['type' => 'pos', 'p' => $p, 'depth' => 0], $taxable);
+		foreach ($items as $it) {
+			$einzug = str_repeat('    ', $it['depth'] ?? 0);
+			if ($it['type'] === 'head') {
+				$pdf->SetFont(InvoicePage::FONT, 'B', 9);
+				$this->row($pdf, self::COLS, [$einzug . ($it['title'] ?? ''), '', '', ''], ['L', 'R', 'R', 'R'], $header);
+				$pdf->SetFont(InvoicePage::FONT, '', 9);
+				continue;
+			}
+			if ($it['type'] === 'sub') {
+				$pdf->SetFont(InvoicePage::FONT, 'I', 9);
+				$this->row($pdf, self::COLS, [$t['subtotal'] . ' ' . ($it['title'] ?? ''), '', '', DocumentRules::money($it['amount'] ?? 0.0, $d->lang)], ['L', 'R', 'R', 'R'], $header);
+				$pdf->SetFont(InvoicePage::FONT, '', 9);
+				continue;
+			}
+			$p = $it['p'] ?? [];
 			$kind = self::str($p['kind'] ?? '');
-			$text = self::str($p['text'] ?? '');
+			$text = $einzug . self::str($p['text'] ?? '');
 			if ($several && $kind !== 'text') {
-				$text .= ' (' . $t['vat'] . ' ' . DocumentRules::percent(VatLines::rateOf((array)$p, $d->vat, $d->taxCase)) . ')';
+				$text .= ' (' . $t['vat'] . ' ' . DocumentRules::percent(VatLines::rateOf($p, $d->vat, $d->taxCase)) . ')';
 			}
 			$hours = $kind === 'hours' && is_numeric($p['hours'] ?? null) ? DocumentRules::hours((float)$p['hours']) : '';
 			$rate = $kind === 'hours' && is_numeric($p['rate'] ?? null) ? DocumentRules::money((float)$p['rate'], $d->lang) : '';
@@ -267,6 +285,63 @@ final class InvoicePdf {
 			$pdf->SetFont(InvoicePage::FONT, 'B', 10);
 			$pdf->Cell($label, 6, $t['total'] . ' ' . $d->currency, 'T', 0, 'R');
 			$pdf->Cell(self::COLS[3], 6, DocumentRules::money($s->total, $d->lang), 'T', 1, 'R');
+		}
+		$pdf->SetFont(InvoicePage::FONT, '', 10);
+	}
+
+	/**
+	 * 0.26.0: the appended tables of the layout, after the sums – per level
+	 * (target, billed before, this invoice, remaining), per tag (hours and
+	 * amount of this invoice), the state of the budget.
+	 *
+	 * @param array<string,string> $t
+	 */
+	private function layoutTables(InvoicePage $pdf, InvoiceDocument $d, array $t): void {
+		$layout = $d->layout ?? [];
+		$appendix = is_array($layout['appendix'] ?? null) ? $layout['appendix'] : [];
+		$money = fn (mixed $v): string => $v === null ? '–' : DocumentRules::money((float)$v, $d->lang);
+		$num = static fn (array $r, string $k): ?float => is_numeric($r[$k] ?? null) ? (float)$r[$k] : null;
+		$rest = static fn (array $r): ?float => ($r['target'] ?? null) === null ? null : (float)$r['target'] - (float)($r['before'] ?? 0) - (float)($r['this'] ?? 0);
+		$cols = [52.0, 28.0, 32.0, 30.0, 28.0];
+		$title = function (string $text) use ($pdf): void {
+			$pdf->Ln(5);
+			$pdf->SetFont(InvoicePage::FONT, 'B', 10);
+			$pdf->Cell(0, 6, $text, 0, 1, 'L');
+		};
+		$head = function (array $labels) use ($pdf, $cols): void {
+			$pdf->SetFont(InvoicePage::FONT, 'B', 8);
+			foreach ($cols as $i => $w) {
+				$pdf->Cell($w, 4.5, $labels[$i], 'B', $i === 4 ? 1 : 0, $i === 0 ? 'L' : 'R');
+			}
+			$pdf->SetFont(InvoicePage::FONT, '', 8);
+		};
+		$levels = is_array($layout['levels'] ?? null) ? $layout['levels'] : [];
+		if (in_array('levels', $appendix, true) && $levels !== []) {
+			$title($t['by_level']);
+			$labels = [$t['level'], $t['target'], $t['before'], $t['this_invoice'], $t['rest']];
+			$head($labels);
+			foreach ($levels as $r) {
+				$r = is_object($r) ? get_object_vars($r) : (array)$r;
+				$this->row($pdf, $cols, [self::str($r['title'] ?? ''), $money($num($r, 'target')), $money($num($r, 'before')), $money($num($r, 'this')), $money($rest($r))],
+					['L', 'R', 'R', 'R', 'R'], fn () => $head($labels), 4.5);
+			}
+		}
+		$tags = InvoiceLayout::tagRows($d->positions);
+		if (in_array('tags', $appendix, true) && $tags !== []) {
+			$title($t['by_tag']);
+			$labels = [$t['tag'], $t['hours'], '', '', $t['amount'] . ' ' . $d->currency];
+			$head($labels);
+			foreach ($tags as $r) {
+				$this->row($pdf, $cols, [$r['tag'], DocumentRules::hours($r['hours']), '', '', $money($r['amount'])], ['L', 'R', 'R', 'R', 'R'], fn () => $head($labels), 4.5);
+			}
+		}
+		$b = $layout['budget'] ?? null;
+		if (in_array('budget', $appendix, true) && $b !== null) {
+			$b = is_object($b) ? get_object_vars($b) : (array)$b;
+			$title($t['budget_state'] . ' ' . $d->budget);
+			$labels = ['', $t['target'], $t['before'], $t['this_invoice'], $t['rest']];
+			$head($labels);
+			$this->row($pdf, $cols, ['', $money($num($b, 'target')), $money($num($b, 'before')), $money($num($b, 'this')), $money($rest($b))], ['L', 'R', 'R', 'R', 'R'], null, 4.5);
 		}
 		$pdf->SetFont(InvoicePage::FONT, '', 10);
 	}

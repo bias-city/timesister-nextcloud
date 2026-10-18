@@ -98,6 +98,8 @@ class DocumentRulesTest extends TestCase {
 		$this->assertSame('Invoice RE-1', DocumentRules::title($t, 'RE-1', null, null, null));
 		$this->assertSame('Reversal of RE-1 – RE-2', DocumentRules::title($t, 'RE-2', 'inv-x', null, 'RE-1'));
 		$this->assertSame('Credit note RE-3', DocumentRules::title($t, 'RE-3', null, 'inv-x', null));
+		$this->assertSame('Advance invoice RE-4', DocumentRules::title($t, 'RE-4', null, null, null, true));
+		$this->assertSame('Akontorechnung RE-4', DocumentRules::title(DocumentRules::texts('de'), 'RE-4', null, null, null, true));
 		$this->assertSame('1’234.50', DocumentRules::money(1234.5, 'de'));
 		$this->assertSame('1,234.50', DocumentRules::money(1234.5, 'en'));
 		$this->assertSame('15.10.2026', DocumentRules::day('2026-10-15', 'de'));

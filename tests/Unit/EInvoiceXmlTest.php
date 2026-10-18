@@ -162,6 +162,18 @@ class EInvoiceXmlTest extends TestCase {
 		$this->assertStringContainsString('<ram:BilledQuantity unitCode="HUR">-12.50</ram:BilledQuantity>', $xml, 'negative quantity, positive price');
 		self::xsd($rev, ZugferdProfiles::PROFILE_EN16931);
 
+		// 0.26.0: an advance invoice is titled so and is a partial invoice (326); its reversal stays 384.
+		$adv = self::document();
+		$adv->positions = [['kind' => 'advance', 'text' => 'Akonto 1 · Phase 1 · 30 %', 'amount' => 13500]];
+		$adv->sums = VatLines::of($adv->positions, $adv->vat, $adv->taxCase);
+		$this->assertSame('Akontorechnung RE-2026-0007', $adv->title());
+		$this->assertStringContainsString('<ram:TypeCode>326</ram:TypeCode>', (new EInvoiceXml())->xml($adv));
+		self::xsd($adv, ZugferdProfiles::PROFILE_XRECHNUNG_3);
+		$adv->reverses = 'inv-1';
+		$adv->originalNumber = 'RE-2026-0006';
+		$this->assertStringContainsString('<ram:TypeCode>384</ram:TypeCode>', (new EInvoiceXml())->xml($adv));
+		$this->assertStringStartsWith('Storno zu RE-2026-0006', $adv->title());
+
 		// A QR-IBAN with the QR reference: the payment part is drawn (0.19.0 left it out) and the reference is in the PDF and the XML.
 		$qr = self::document();
 		$qr->iban = 'CH4431999123000889012';

@@ -1,5 +1,42 @@
 # Changes
 
+## 0.26.1 – 2026-10-17
+
+Additive, `api: 2` unchanged; capability `invoice_layout: 1`; migration
+`Version1020Date20261017220000` (column `ts_inv_invoices.layout_json`).
+Contract: `API.md` «Advance invoices, 0.26.0» (section on the layout). Not
+published.
+
+- **Invoice `layout`**: null or `{grouping: flat|level, appendix: [levels,
+  tags, budget], levels: [{title, target, before, this}], budget: {target,
+  before, this}}`; hours positions carry `path` (the levels above, at most
+  10) and `tags`. Frozen on issue (`layout_json`, in the ledger payload
+  only when set) and drawn: headings and subtotals by level, the tables
+  after the sums. The team setting `tags` (vocabulary) passes unchecked.
+
+## 0.26.0 – 2026-10-17
+
+Additive, `api: 2` unchanged; capability `advances: 1`; no migration.
+Contract: `API.md` «Advance invoices, 0.26.0». Not published.
+
+- **Position `advance`**: a fee line ≥ 0 with the amount agreed in the
+  budget's invoice plan. An invoice with such a line (not a reversal or
+  credit note) is an **advance invoice**: the document says «Advance
+  invoice» / «Akontorechnung», the e-invoice has type code 326 (partial
+  invoice) instead of 380.
+- **Position `advance_deduction`**: a fee line ≤ 0 in a later invoice of
+  the budget, naming the advance invoice's key in `invoice`. Only this
+  kind carries `invoice`. Neither kind is a cost line or pass-through.
+- **Cost position `forecast`**: null or at most 200 amounts ≥ 0, one per
+  milestone of the budget (in the order of the work packages' hours). The
+  client sets `cap` to their sum; a percentage position has none (it
+  follows the fee per phase).
+- **Work package `parent` and `tags`** replace `group` and `role` of
+  0.25.1 (unpublished, no transition): `parent` null or the `no` of another
+  work package of the same budget (the level: 31.2 below 31, 31 below 3);
+  `tags` null or at most 20 trimmed texts of 1–60 characters, the team's
+  own markers (e.g. «Site supervision», «external»). Also in quotes.
+
 ## 0.25.1 – 2026-10-17
 
 Additive, `api: 2` unchanged; capability `templates: 2`; migration
