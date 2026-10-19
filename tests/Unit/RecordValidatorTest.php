@@ -37,7 +37,10 @@ class RecordValidatorTest extends TestCase {
 			'one character' => ['x', true],
 			'129 characters' => [str_repeat('a', 129), false],
 			'empty' => ['', false],
-			'space' => ['a b', false],
+			'space inside' => ['Anna Muster', true],
+			'apostrophe' => ["o'neil", true],
+			'space at the start' => [' ab', false],
+			'space at the end' => ['ab ', false],
 			'slash' => ['a/b', false],
 			'dot path' => ['../x', false],
 			'umlaut' => ['müller', false],
@@ -53,7 +56,7 @@ class RecordValidatorTest extends TestCase {
 	public function testAddress(): void {
 		$this->assertSame('ok', self::code(fn () => RecordValidator::checkAddress('project', 'D200')));
 		$this->assertSame('400 invalid', self::code(fn () => RecordValidator::checkAddress('budget', 'D200')));
-		$this->assertSame('400 invalid', self::code(fn () => RecordValidator::checkAddress('project', 'a b')));
+		$this->assertSame('400 invalid', self::code(fn () => RecordValidator::checkAddress('project', 'a/b')));
 	}
 
 	public function testVersion(): void {

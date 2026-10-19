@@ -205,7 +205,7 @@ class RoleScopeTest extends TestCase {
 		$this->assertSame('422 invalid', self::code(fn () => JobRules::fits($b(['hours' => 0] + $ok))));
 		$this->assertSame('422 invalid', self::code(fn () => JobRules::fits($b(['end' => '2026-10-01'] + $ok))), 'end before start');
 		$this->assertSame('422 invalid', self::code(fn () => JobRules::fits($b(['job' => 7] + $ok))));
-		$this->assertSame('400 invalid', self::code(fn () => JobRules::fits($b(['job' => 'a b'] + $ok))));
+		$this->assertSame('400 invalid', self::code(fn () => JobRules::fits($b(['job' => 'a/b'] + $ok))));
 	}
 
 	/** Leads learn fits or not and which weeks – never load or capacity. */

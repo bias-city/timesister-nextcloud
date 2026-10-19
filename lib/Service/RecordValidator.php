@@ -21,7 +21,8 @@ final class RecordValidator {
 	/** Billing marks (0.7.6): rights per person, see {@see BillingRules}. */
 	public const BILLING = BillingRules::KIND;
 	public const SETTING_KEYS = ['targethours', 'settings', PrivacyRules::KEY];
-	public const KEY_PATTERN = '/^[A-Za-z0-9@._+-]{1,128}$/';
+	/** Every Nextcloud account name is a key, also with spaces and apostrophes (0.26.2). */
+	public const KEY_PATTERN = "/^(?! )[A-Za-z0-9@._+' -]{1,128}(?<! )$/";
 	public const MAX_DATA_BYTES = 262144; // 256 KB
 	/** Kinds whose key lives in the field `id`. */
 	private const ID_KINDS = ['region', 'project', 'customer'];
@@ -40,7 +41,7 @@ final class RecordValidator {
 			throw ApiException::badRequest(Message::of('Unknown kind. Allowed: {kinds}.', ['kinds' => implode(', ', self::KINDS)]));
 		}
 		if (!self::isKey($key)) {
-			throw ApiException::badRequest('Invalid key. Allowed are 1–128 characters from A–Z, a–z, 0–9 and @ . _ + -');
+			throw ApiException::badRequest('Invalid key. Allowed are 1–128 characters from A–Z, a–z, 0–9, spaces (not at the start or end) and @ . _ + - \'');
 		}
 	}
 

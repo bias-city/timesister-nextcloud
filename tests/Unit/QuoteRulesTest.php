@@ -64,7 +64,7 @@ class QuoteRulesTest extends TestCase {
 		foreach (['q-1A2B3C4D', 'q-1a2b3c4', 'q-1a2b3c4d5', 'q-1a2b3c4g', 'Q-1a2b3c4d', 'quote-1a2b3c4d', 'q1a2b3c4d'] as $k) {
 			$this->assertSame('422 The key of a quote is “q-” and 8 lowercase hex digits.', self::check([], [], $k), $k);
 		}
-		$this->assertSame('400 Invalid key. Allowed are 1–128 characters from A–Z, a–z, 0–9 and @ . _ + -', self::check([], [], 'q-1a2b 3c4'), 'the general pattern first');
+		$this->assertSame('400 Invalid key. Allowed are 1–128 characters from A–Z, a–z, 0–9, spaces (not at the start or end) and @ . _ + - \'', self::check([], [], 'q-1a2b/3c4'), 'the general pattern first');
 	}
 
 	public function testValidStoredAsSent(): void {
@@ -102,7 +102,7 @@ class QuoteRulesTest extends TestCase {
 		$this->assertSame($status, self::check([], ['status']));
 		$this->assertSame($status, self::check(['status' => 'active']));
 		$this->assertSame($status, self::check(['status' => 'Accepted']));
-		foreach (['a b', 7, '', str_repeat('k', 129)] as $bad) {
+		foreach (['a/b', ' a', 7, '', str_repeat('k', 129)] as $bad) {
 			$this->assertSame('422 “customer” must be null or the key of a customer.', self::check(['customer' => $bad]), var_export($bad, true));
 			$this->assertSame('422 “project” must be null or the key of a project.', self::check(['project' => $bad]), var_export($bad, true));
 		}

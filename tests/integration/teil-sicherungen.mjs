@@ -330,7 +330,9 @@ async function testteam() {
 		check('all back to default', JSON.stringify(madeWith.data?.settings) === JSON.stringify(defaults), madeWith.text)
 	} finally {
 		if (id) {
-			await ocs(ADMIN, 'DELETE', `/admin/teams/${id}`)
+			// Deleting needs the typed team name since the backup before deleting; without it the team stayed.
+			const weg = await ocs(ADMIN, 'DELETE', `/admin/teams/${id}`, { confirm: 'Backup Test' })
+			check('own test team deleted', weg.status === 200, weg.text)
 		}
 		for (const uid of [first, second]) {
 			await ocs(ADMIN, 'DELETE', `/ocs/v2.php/cloud/users/${uid}`)

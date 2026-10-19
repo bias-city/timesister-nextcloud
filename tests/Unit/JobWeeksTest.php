@@ -58,7 +58,7 @@ class JobWeeksTest extends TestCase {
 		$this->assertSame('422 invalid', self::code(fn () => self::report([self::week(self::MON, -1)])), 'negative');
 		$this->assertSame('422 invalid', self::code(fn () => self::report([self::week(self::MON, 30, [], [1, 1, 1])])), 'seven days');
 		$this->assertSame('422 invalid', self::code(fn () => self::report([self::week(self::MON, 30, [], [2, 1, 1, 1, 1, 0, 0])])), 'weight at most 1');
-		$this->assertSame('400 invalid', self::code(fn () => self::report([self::week(self::MON, 30, ['a b' => ['booked' => 1, 'planned' => 0]])])), 'key');
+		$this->assertSame('400 invalid', self::code(fn () => self::report([self::week(self::MON, 30, ['a/b' => ['booked' => 1, 'planned' => 0]])])), 'key');
 		$this->assertSame('422 invalid', self::code(fn () => JobWeeks::parse(self::obj(['weeks' => 'x']))));
 		$many = [];
 		for ($i = 0; $i <= JobWeeks::MAX_WEEKS; $i++) {
