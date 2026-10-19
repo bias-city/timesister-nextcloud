@@ -1,5 +1,13 @@
 # Changes
 
+## 0.26.2 – 2026-10-19
+
+Additive, `api: 2` unchanged, no migration.
+
+- **Keys take every Nextcloud account name**: spaces (not at the start or
+  end) and apostrophes are allowed, e.g. a person «Anna Muster». Before, master
+  data of such a person was refused with «Invalid key».
+
 ## 0.26.1 – 2026-10-17
 
 Additive, `api: 2` unchanged; capability `invoice_layout: 1`; migration

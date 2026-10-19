@@ -80,7 +80,7 @@ class InvoiceRulesTest extends TestCase {
 
 	public function testInvalidFields(): void {
 		$this->assertSame('422 “project” must be the key of a project.', self::check([], ['project']));
-		$this->assertSame('422 “project” must be the key of a project.', self::check(['project' => 'a b']));
+		$this->assertSame('422 “project” must be the key of a project.', self::check(['project' => 'a/b']));
 		$this->assertSame('422 “project” must be the key of a project.', self::check(['project' => 7]));
 		foreach ([[], ['budget' => ''], ['budget' => '  '], ['budget' => 3], ['budget' => null]] as $i => $over) {
 			$this->assertSame('422 “budget” is required: every invoice belongs to a budget.', $i === 0 ? self::check([], ['budget']) : self::check($over), (string)$i);

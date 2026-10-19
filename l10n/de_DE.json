@@ -163,7 +163,7 @@
 			"%n Datensätze wurden inzwischen geändert; nichts wurde geschrieben."
 		],
 		"Unknown kind. Allowed: {kinds}.": "Unbekannte Art. Erlaubt: {kinds}.",
-		"Invalid key. Allowed are 1–128 characters from A–Z, a–z, 0–9 and @ . _ + -": "Ungültiger Schlüssel. Erlaubt sind 1–128 Zeichen aus A–Z, a–z, 0–9 und @ . _ + -",
+		"Invalid key. Allowed are 1–128 characters from A–Z, a–z, 0–9, spaces (not at the start or end) and @ . _ + - '": "Ungültiger Schlüssel. Erlaubt sind 1–128 Zeichen aus A–Z, a–z, 0–9, Leerzeichen (nicht am Anfang oder Ende) und @ . _ + - '",
 		"The field “{field}” must be an integer ≥ 0.": "Das Feld „{field}“ muss eine ganze Zahl ≥ 0 sein.",
 		"“data” must be a JSON object.": "„data“ muss ein JSON-Objekt sein.",
 		"For a person, “login” must equal the key.": "Bei einer Person muss „login“ gleich dem Schlüssel sein.",
