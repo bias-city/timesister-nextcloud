@@ -7,6 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Notification;
 
 use OCA\TimeSister\AppInfo\Application;
+use OCA\TimeSister\Service\CorrectionMessages;
 use OCA\TimeSister\Service\JobMessages;
 use OCP\IURLGenerator;
 use OCP\L10N\IFactory;
@@ -18,6 +19,8 @@ use OCP\Notification\UnknownNotificationException;
 final class Notifier implements INotifier {
 	/** Jobs (0.6.0): object `job`/key, one subject per event ({@see JobMessages}). */
 	public const JOB_OBJECT = 'job';
+	/** Corrections (0.27.0): object `correction`/record key ({@see CorrectionMessages}). */
+	public const CORRECTION_OBJECT = 'correction';
 	public const JOB_OFFERED = JobMessages::OFFERED;
 	public const JOB_COUNTER = JobMessages::COUNTER;
 	public const JOB_COUNTER_ACCEPTED = JobMessages::COUNTER_ACCEPTED;
@@ -48,12 +51,15 @@ final class Notifier implements INotifier {
 			throw new UnknownNotificationException();
 		}
 		$l = $this->l10nFactory->get(Application::APP_ID, $languageCode);
-		$subject = JobMessages::subject($notification->getSubject(), $notification->getSubjectParameters());
+		$correction = $notification->getObjectType() === self::CORRECTION_OBJECT;
+		$subject = $correction
+			? CorrectionMessages::subject($notification->getSubject(), $notification->getSubjectParameters())
+			: JobMessages::subject($notification->getSubject(), $notification->getSubjectParameters());
 		if ($subject === null) {
 			throw new UnknownNotificationException();
 		}
 		$notification->setParsedSubject($subject->text($l));
-		$notification->setParsedMessage(JobMessages::message()->text($l));
+		$notification->setParsedMessage(($correction ? CorrectionMessages::message() : JobMessages::message())->text($l));
 		$notification->setIcon($this->url->getAbsoluteURL($this->url->imagePath(Application::APP_ID, 'app-dark.svg')));
 		return $notification;
 	}

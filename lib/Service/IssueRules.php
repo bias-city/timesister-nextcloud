@@ -85,6 +85,41 @@ final class IssueRules {
 		return $v;
 	}
 
+	/** `due_days` of the request, or null when missing - the customer's term or the default decide then. */
+	public static function dueDaysGiven(mixed $v): ?int {
+		return $v === null ? null : self::dueDays($v);
+	}
+
+	/** `amount` of a payment: null (the open rest) or a finite number above 0. */
+	public static function paymentAmount(mixed $v): ?float {
+		if ($v === null) {
+			return null;
+		}
+		if (!(is_int($v) || (is_float($v) && is_finite($v))) || $v <= 0) {
+			throw ApiException::invalid('“amount” must be a number above 0.');
+		}
+		return round((float)$v, 2);
+	}
+
+	/** `level` of a dunning request: an integer 0 to 3. */
+	public static function dunningLevel(mixed $v): int {
+		if (!is_int($v) || $v < 0 || $v > InvoiceRules::DUNNING_MAX) {
+			throw ApiException::invalid(Message::of('“{field}” must be an integer from {min} to {max}.', ['field' => 'level', 'min' => 0, 'max' => InvoiceRules::DUNNING_MAX]));
+		}
+		return $v;
+	}
+
+	/** `on` of a dunning request: a day, missing: today. */
+	public static function dunnedOn(mixed $v, int $now): string {
+		if ($v === null) {
+			return gmdate('Y-m-d', $now);
+		}
+		if (!is_string($v) || !Time::isDay($v)) {
+			throw ApiException::invalid(Message::of('“{field}” must be a day in the format YYYY-MM-DD.', ['field' => 'on']));
+		}
+		return $v;
+	}
+
 	/** The day `$days` after `$day`. */
 	public static function dueOn(string $day, int $days): string {
 		return (new \DateTimeImmutable($day . ' 00:00:00', new \DateTimeZone('UTC')))->modify('+' . $days . ' days')->format('Y-m-d');
@@ -189,7 +224,10 @@ final class IssueRules {
 	public static function customerKeyFor(\stdClass $project, string $projectKey, string $budgetId, array $quotes): ?string {
 		foreach ($quotes as $q) {
 			$c = $q->customer ?? null;
-			if (($q->status ?? null) === 'accepted' && ($q->budget_id ?? null) === $budgetId
+			// 0.27.0: a quote holds `budget_ids`; older records one `budget_id`.
+			$rawIds = $q->budget_ids ?? null;
+			$ids = is_array($rawIds) ? $rawIds : [];
+			if (($q->status ?? null) === 'accepted' && (($q->budget_id ?? null) === $budgetId || in_array($budgetId, $ids, true))
 				&& is_string($q->project ?? null) && strcasecmp((string)$q->project, $projectKey) === 0
 				&& is_string($c) && trim($c) !== '') {
 				return $c;

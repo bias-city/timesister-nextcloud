@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Tests\Unit;
 
+use OCA\TimeSister\Db\Entry;
 use OCA\TimeSister\Service\ApiException;
 use OCA\TimeSister\Service\EntryRules;
 use OCA\TimeSister\Service\Json;
@@ -140,6 +141,82 @@ class EntryRulesTest extends TestCase {
 		$this->assertFalse(EntryRules::isFeedUrl('webcal://x/f.ics'));
 		$this->assertFalse(EntryRules::isFeedUrl('file:///etc/passwd'));
 		$this->assertFalse(EntryRules::isFeedUrl(null));
+	}
+
+	/** `POST /entries/list` (0.28.0): uid, objects, deletions; everything else is 422. */
+	public function testListBody(): void {
+		$ics = self::ics(self::event('e1', ['DTSTART:20260901T080000Z', 'DTEND:20260901T100000Z', 'SUMMARY:#D200 x']));
+		$p = EntryRules::parseListBody(Json::decode('{"uid":"ext-max","put":[' . json_encode($ics) . '],"delete":["e2","e2"]}'));
+		$this->assertSame('ext-max', $p['uid']);
+		$this->assertCount(1, $p['put']);
+		$this->assertSame(['e2'], $p['delete']);
+		$this->assertSame(['uid' => 'ext-max', 'put' => [], 'delete' => []], EntryRules::parseListBody(Json::decode('{"uid":"ext-max"}')));
+		// One object is one event: a series with its exception passes, two UIDs in one object do not.
+		$series = self::ics(self::event('s1', ['DTSTART:20260901T080000Z', 'DTEND:20260901T100000Z', 'RRULE:FREQ=DAILY;COUNT=3', 'SUMMARY:#D200 s']),
+			self::event('s1', ['RECURRENCE-ID:20260902T080000Z', 'DTSTART:20260902T090000Z', 'DTEND:20260902T100000Z', 'SUMMARY:#D200 s moved']));
+		$this->assertTrue(EntryRules::oneUid($series));
+		$this->assertCount(1, EntryRules::parseListBody(Json::decode('{"uid":"ext-max","put":[' . json_encode($series) . ']}'))['put']);
+		$two = self::ics(self::event('t1', ['DTSTART:20260901T080000Z', 'DTEND:20260901T100000Z', 'SUMMARY:a']), self::event('t2', ['DTSTART:20260902T080000Z', 'DTEND:20260902T100000Z', 'SUMMARY:b']));
+		$this->assertFalse(EntryRules::oneUid($two));
+		$this->assertFalse(EntryRules::oneUid(self::ics(self::event('', ['DTSTART:20260901T080000Z']))), 'an empty UID');
+		$this->assertFalse(EntryRules::oneUid(self::ics()), 'no event');
+		foreach (['{"uid":"../x","put":[]}', '{"put":[]}', '{"uid":"ext-max","put":["junk"]}', '{"uid":"ext-max","put":"x"}',
+			'{"uid":"ext-max","delete":[""]}', '{"uid":"ext-max","extra":1}', '{"uid":"ext-max","put":[' . json_encode($two) . ']}'] as $bad) {
+			try {
+				EntryRules::parseListBody(Json::decode($bad));
+				$this->fail('accepted: ' . $bad);
+			} catch (ApiException $e) {
+				$this->assertStringContainsString('', $e->getMessage());
+			}
+		}
+	}
+
+	/** A book row without `ics`, as the page reads it. */
+	private static function row(int $id, int $revision, string $uid, string $codes, int $deleted = 0): Entry {
+		$e = new Entry();
+		$e->setId($id);
+		$e->setRevision($revision);
+		$e->setUid($uid);
+		$e->setCodes($codes);
+		$e->setDeleted($deleted);
+		return $e;
+	}
+
+	/** 0.28.0: the page is filtered by role chunk by chunk, before the texts are read. */
+	public function testPageOf(): void {
+		$led = EntryRules::ledCodes([Json::decode('{"codes":["D196"]}')]);
+		$book = [
+			self::row(1, 1, 'anna', 'd196'), self::row(2, 2, 'bruno', 'q1'), self::row(3, 3, 'bruno', 'd196.4'),
+			self::row(4, 4, 'lea', ''), self::row(5, 5, 'anna', 'd1960'), self::row(6, 6, 'bruno', 'd196', 1),
+		];
+		$reads = 0;
+		$chunk = static function (int $since) use ($book, &$reads): array {
+			$reads++;
+			return array_values(array_slice(array_values(array_filter($book, static fn (Entry $e): bool => $e->getRevision() > $since)), 0, 2));
+		};
+		$ids = static fn (array $page): array => array_map(static fn (Entry $e): int => $e->getId(), $page['entries']);
+		$keep = static fn (string $role, string $me): callable => static fn (Entry $e): bool => EntryRules::visible($role, $me, $led, $e->getUid(), $e->codeList());
+		// The Lead lea: her own row and the rows of d196 (also the tombstone), not q1, not d1960.
+		$p = EntryRules::pageOf($chunk, $keep('lead', 'lea'), 0, 2);
+		$this->assertSame([1, 3], $ids($p));
+		$this->assertTrue($p['more']);
+		$p = EntryRules::pageOf($chunk, $keep('lead', 'lea'), 3, 2);
+		$this->assertSame([4, 6], $ids($p));
+		$this->assertFalse($p['more'], 'the last chunk was short');
+		// A member sees only their own rows, through every chunk.
+		$reads = 0;
+		$p = EntryRules::pageOf($chunk, $keep('user', 'bruno'), 0, 2);
+		$this->assertSame([2, 3], $ids($p));
+		$this->assertTrue($p['more']);
+		$this->assertSame(2, $reads, 'two chunks of two rows filled the page');
+		$p = EntryRules::pageOf($chunk, $keep('user', 'bruno'), 3, 2);
+		$this->assertSame([6], $ids($p));
+		$this->assertFalse($p['more']);
+		// A Team Admin: everything, page by page.
+		$p = EntryRules::pageOf($chunk, $keep('admin', 'x'), 0, 2);
+		$this->assertSame([1, 2], $ids($p));
+		$this->assertTrue($p['more']);
+		$this->assertSame([], $ids(EntryRules::pageOf($chunk, $keep('user', 'nobody'), 0, 2)));
 	}
 
 	public function testRoleFilter(): void {

@@ -56,6 +56,17 @@ class QuoteRulesTest extends TestCase {
 		return self::outcome(fn () => RecordValidator::validate('quote', $key, self::data($over, $drop)));
 	}
 
+	/** 0.27.0 (controlling): the probability 0–100 and the reason when lost. */
+	public function testProbabilityAndLostReason(): void {
+		$this->assertSame('ok', self::check(['probability' => 60, 'lost_reason' => null]));
+		$this->assertSame('ok', self::check(['probability' => null, 'lost_reason' => 'Price']));
+		$this->assertSame('ok', self::check(['status' => 'declined', 'lost_reason' => 'Competition – cheaper']));
+		$this->assertSame('422 “probability” must be null or an integer from 0 to 100.', self::check(['probability' => 101]));
+		$this->assertSame('422 “probability” must be null or an integer from 0 to 100.', self::check(['probability' => 50.5]));
+		$this->assertSame('422 “probability” must be null or an integer from 0 to 100.', self::check(['probability' => '60']));
+		$this->assertSame('422 “lost_reason” must be text of at most 500 characters.', self::check(['lost_reason' => str_repeat('x', 501)]));
+	}
+
 	public function testKindAndKey(): void {
 		$this->assertContains('quote', RecordValidator::KINDS);
 		$this->assertContains('quote', RecordRights::PER_RECORD);
@@ -75,7 +86,7 @@ class QuoteRulesTest extends TestCase {
 		$this->assertSame('ok', self::check([], ['schema', 'customer', 'project', 'number', 'date', 'valid_until', 'accepted_on', 'created_on',
 			'leads', 'contact', 'note', 'pdf', 'budget', 'budget_id', 'hours', 'amount', 'currency', 'created_by']), 'only name and status required');
 		$this->assertSame('ok', self::check(['leads' => null, 'customer' => null, 'pdf' => null, 'budget' => null]));
-		foreach (['draft', 'quoted', 'declined'] as $s) {
+		foreach (['draft', 'quoted', 'negotiation', 'verbal', 'declined'] as $s) {
 			$this->assertSame('ok', self::check(['status' => $s]), $s);
 		}
 		$this->assertSame('ok', self::check(['status' => 'accepted', 'project' => 'd200', 'accepted_on' => '2026-10-20', 'budget_id' => 'b7',
@@ -98,7 +109,7 @@ class QuoteRulesTest extends TestCase {
 		foreach ([[], ['name' => ''], ['name' => str_repeat('n', 201)], ['name' => "a\nb"], ['name' => 7]] as $i => $over) {
 			$this->assertSame('422 “name” must be text of 1 to 200 characters.', $i === 0 ? self::check([], ['name']) : self::check($over), (string)$i);
 		}
-		$status = '422 “status” of a quote is one of draft, quoted, accepted, declined.';
+		$status = '422 “status” of a quote is one of draft, quoted, negotiation, verbal, accepted, declined.';
 		$this->assertSame($status, self::check([], ['status']));
 		$this->assertSame($status, self::check(['status' => 'active']));
 		$this->assertSame($status, self::check(['status' => 'Accepted']));
@@ -174,6 +185,47 @@ class QuoteRulesTest extends TestCase {
 		$this->assertSame('ok', self::check($b(['rates' => null])));
 		$this->assertSame('ok', self::check($b(['rates' => new \stdClass()])), 'an empty object is a client’s default');
 		$this->assertSame('422 “rates” is no longer part of a budget; cost rates live on the person.', self::check($b(['rates' => ['pbuser1' => 120]])));
+	}
+
+	/** 0.27.0 (`quotes: 3`): the subtree – `budgets`, `budget_ids`, `project_draft`, the new statuses. */
+	public function testSubtree(): void {
+		$b1 = self::QUOTE['budget'];
+		$b2 = array_merge($b1, ['id' => 'b-q2', 'name' => 'Phase 2', 'currency' => 'eur']);
+		$r = RecordValidator::validate('quote', self::KEY, self::data(['budget' => null, 'budgets' => [$b1, $b2],
+			'project_draft' => ['code' => 'N400', 'name' => 'School house'], 'currency' => 'eur']));
+		$this->assertStringContainsString('"budgets":[{"id":"b-q1"', $r['json']);
+		$this->assertStringContainsString('"id":"b-q2","name":"Phase 2","currency":"EUR"', $r['json'], 'each budget checked as a project’s budget');
+		$this->assertStringContainsString('"project_draft":{"code":"N400","name":"School house"}', $r['json'], 'the draft stored as sent');
+		$this->assertSame('ok', self::check(['budgets' => null, 'budget_ids' => null, 'project_draft' => null]));
+		$this->assertSame('ok', self::check(['budgets' => []]), 'an empty list passes – the client keeps at least one');
+		$this->assertSame('ok', self::check(['project' => null, 'project_draft' => ['name' => 'Only a name']]), 'the code may be missing');
+		$this->assertSame('ok', self::check(['project' => null, 'project_draft' => ['code' => null, 'name' => 'Only a name']]));
+		$this->assertSame('ok', self::check(['budget' => null, 'budgets' => array_map(static fn (int $i) => array_merge($b1, ['id' => 'b-' . $i]), range(1, 50))]), '50 budgets');
+		$this->assertSame('ok', self::check(['status' => 'accepted', 'project' => 'd200', 'budget' => null, 'budget_ids' => ['b7', 'b8'], 'hours' => 60, 'amount' => 5500, 'currency' => 'EUR']), 'accepted: the ids in the project');
+		$list = '422 “budgets” must be null or a list of at most 50 budgets.';
+		foreach (['b1', ['id' => 'b1'], 7] as $bad) {
+			$this->assertSame($list, self::check(['budgets' => $bad]), json_encode($bad));
+		}
+		$this->assertSame($list, self::check(['budgets' => array_map(static fn (int $i) => array_merge($b1, ['id' => 'b-' . $i]), range(1, 51))]), '51 budgets');
+		$id = '422 “budgets” must be null or an object with an “id” of 1 to 128 characters.';
+		$this->assertSame($id, self::check(['budgets' => [$b1, ['name' => 'no id']]]));
+		$this->assertSame($id, self::check(['budgets' => [$b1, 'b2']]));
+		$this->assertSame('422 “currency” must be three letters, for example CHF.', self::check(['budgets' => [$b1, array_merge($b2, ['currency' => 'EURO'])]]), 'the second budget’s content is checked');
+		$this->assertSame('422 “budgets” must not hold the same “id” twice.', self::check(['budgets' => [$b1, $b1]]));
+		$ids = '422 “budget_ids” must be null or a list of at most 50 budget ids of 1 to 128 characters.';
+		foreach (['b7', ['b7', ''], ['b7', 7], [str_repeat('b', 129)], array_map('strval', range(1, 51))] as $bad) {
+			$this->assertSame($ids, self::check(['budget_ids' => $bad]), json_encode($bad));
+		}
+		$draft = '422 “project_draft” must be null or an object with a “name” of 1 to 200 characters.';
+		foreach (['N400', ['code' => 'N400'], ['name' => ''], ['name' => str_repeat('n', 201)], ['name' => "a\nb"], 7] as $bad) {
+			$this->assertSame($draft, self::check(['project' => null, 'project_draft' => $bad]), json_encode($bad));
+		}
+		$code = '422 “project_draft.code” must be null or a code of 1 to 64 characters without spaces, # or dots.';
+		foreach (['', 'N 400', '#N400', 'N400.1', str_repeat('N', 65), 7] as $bad) {
+			$this->assertSame($code, self::check(['project' => null, 'project_draft' => ['code' => $bad, 'name' => 'X']]), var_export($bad, true));
+		}
+		$this->assertSame('422 A quote has either “project” or “project_draft”, not both.', self::check(['project' => 'd200', 'project_draft' => ['code' => 'N400', 'name' => 'X']]));
+		$this->assertSame(3, (new Capabilities($this->createMock(IAppManager::class)))->getCapabilities()['timesister']['quotes']);
 	}
 
 	public function testLimits(): void {
@@ -299,7 +351,7 @@ class QuoteRulesTest extends TestCase {
 
 	public function testCapabilityAndZip(): void {
 		$cap = (new Capabilities($this->createMock(IAppManager::class)))->getCapabilities()['timesister'];
-		$this->assertSame(2, $cap['quotes']);
+		$this->assertSame(3, $cap['quotes']);
 		$mapped = ZipRules::mapData(self::data(), ['pblead' => 'lea', 'pbadmin' => 'petra']);
 		$this->assertInstanceOf(\stdClass::class, $mapped);
 		$this->assertSame(['lea'], $mapped->leads, 'a team ZIP moved to other accounts: the leads follow');

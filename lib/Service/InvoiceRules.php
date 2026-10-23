@@ -40,6 +40,24 @@ final class InvoiceRules {
 	public const POSITION_KINDS = ['hours', 'flat', 'discount', 'text', 'expense_percent', 'expense_flat', 'costs', ReceiptLineRules::MARKUP, self::ADVANCE, self::ADVANCE_DEDUCTION];
 	public const POSITION_TEXT_MAX = 500;
 	public const CODE_MAX = 64;
+	/** 0.27.0 (controlling): the dunning level and the payments (partial payments allowed). */
+	public const DUNNING_MAX = 3;
+	public const PAYMENTS_MAX = 200;
+	public const PAYMENT_NOTE_MAX = 500;
+	/**
+	 * 0.27.0: the approval mark on a draft. A Lead submits the draft
+	 * (`requested`, with `by`, `at`, `note`); `changed_at` says it changed
+	 * after that; a Team Admin returns it (`returned`, with `returned_by`,
+	 * `returned_at`, `returned_note`). Issuing stays a Team Admin's call.
+	 */
+	public const REVIEW = 'review';
+	public const REVIEW_REQUESTED = 'requested';
+	public const REVIEW_RETURNED = 'returned';
+	public const REVIEW_STATES = [self::REVIEW_REQUESTED, self::REVIEW_RETURNED];
+	private const REVIEW_BY = ['by', 'returned_by'];
+	private const REVIEW_AT = ['at', 'changed_at', 'returned_at'];
+	private const REVIEW_NOTE = ['note', 'returned_note'];
+	private const REVIEW_RETURN = ['returned_by', 'returned_at', 'returned_note'];
 
 	private const CONTROL = '/[\x00-\x1F\x7F]/';
 	private const CONTROL_NOTE = '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/';
@@ -114,7 +132,8 @@ final class InvoiceRules {
 			self::text($d->{$f} ?? null, $f, self::TEXT_MAX, self::CONTROL_NOTE);
 		}
 		if (($d->positions ?? null) !== null) {
-			self::checkPositions($d->positions);
+			// A reversal or credit note carries the negated lines (0.27.0): the advance signs mirror.
+			self::checkPositions($d->positions, ($d->reverses ?? null) !== null || ($d->credits ?? null) !== null);
 		}
 		// 0.26.0: grouping by level and appended tables.
 		if (property_exists($d, InvoiceLayout::FIELD)) {
@@ -126,7 +145,117 @@ final class InvoiceRules {
 		if (property_exists($d, ExportRules::EXTERNAL_FIELD)) {
 			$d->{ExportRules::EXTERNAL_FIELD} = ExportRules::externalBlock($d->{ExportRules::EXTERNAL_FIELD});
 		}
+		// 0.27.0: the approval mark, normalised to null when absent.
+		if (property_exists($d, self::REVIEW)) {
+			$d->{self::REVIEW} = self::checkReview($d->{self::REVIEW});
+		}
+		// 0.27.0 (controlling): dunning level with the day of the last reminder, the payments.
+		$dl = $d->dunning_level ?? null;
+		if ($dl !== null && (!is_int($dl) || $dl < 0 || $dl > self::DUNNING_MAX)) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or an integer from {min} to {max}.', ['field' => 'dunning_level', 'min' => 0, 'max' => self::DUNNING_MAX]));
+		}
+		$do = $d->dunned_on ?? null;
+		if ($do !== null && (!is_string($do) || !Time::isDay($do))) {
+			throw ApiException::invalid(Message::of('“{field}” must be a day in the format YYYY-MM-DD.', ['field' => 'dunned_on']));
+		}
+		if (($d->payments ?? null) !== null) {
+			self::checkPayments($d->payments);
+		}
 		self::bookings($d->bookings ?? null);
+	}
+
+	/** `payments`: a list of at most 200 `{ date, amount, note? }` - a day, a number above 0, a note of at most 500 characters. */
+	public static function checkPayments(mixed $list): void {
+		$bad = fn (): ApiException => ApiException::invalid(Message::of('“payments” must be null or a list of at most {max} payments, each with a day “date”, an “amount” above 0 and an optional “note”.', ['max' => self::PAYMENTS_MAX]));
+		if (!is_array($list) || !array_is_list($list) || count($list) > self::PAYMENTS_MAX) {
+			throw $bad();
+		}
+		foreach ($list as $p) {
+			if (!($p instanceof \stdClass)) {
+				throw $bad();
+			}
+			$date = $p->date ?? null;
+			$amount = $p->amount ?? null;
+			if (!is_string($date) || !Time::isDay($date) || !(is_int($amount) || (is_float($amount) && is_finite($amount))) || $amount <= 0) {
+				throw $bad();
+			}
+			$note = $p->note ?? null;
+			if ($note !== null && (!is_string($note) || mb_strlen($note) > self::PAYMENT_NOTE_MAX || preg_match(self::CONTROL_NOTE, $note) || !mb_check_encoding($note, 'UTF-8'))) {
+				throw $bad();
+			}
+		}
+	}
+
+	/** The sum of the payments of a record (none: 0). */
+	public static function paymentsSum(\stdClass $d): float {
+		$sum = 0.0;
+		$list = $d->payments ?? null;
+		foreach (is_array($list) ? $list : [] as $p) {
+			$a = $p->amount ?? null;
+			if (is_int($a) || is_float($a)) {
+				$sum += (float)$a;
+			}
+		}
+		return round($sum, 2);
+	}
+
+	/**
+	 * The approval mark (0.27.0): null, or an object with `state`
+	 * (`requested` or `returned`), `by`/`returned_by` (null or up to 64
+	 * characters), `at`/`changed_at`/`returned_at` (null, a day or a local
+	 * time as a booking's `start`), `note`/`returned_note` (null or up to
+	 * 2000 characters). Other members are dropped.
+	 */
+	public static function checkReview(mixed $v): ?\stdClass {
+		if ($v === null) {
+			return null;
+		}
+		if (!($v instanceof \stdClass)) {
+			throw ApiException::invalid('“review” must be null or a JSON object.');
+		}
+		if (!in_array($v->state ?? null, self::REVIEW_STATES, true)) {
+			throw ApiException::invalid(Message::of('“review.state” is one of {states}.', ['states' => implode(', ', self::REVIEW_STATES)]));
+		}
+		$out = new \stdClass();
+		$out->state = $v->state;
+		foreach (self::REVIEW_BY as $f) {
+			self::text($v->{$f} ?? null, 'review.' . $f, self::BY_MAX, self::CONTROL);
+			$out->{$f} = $v->{$f} ?? null;
+		}
+		foreach (self::REVIEW_AT as $f) {
+			$t = $v->{$f} ?? null;
+			if ($t !== null && (!is_string($t) || !self::isStart($t))) {
+				throw ApiException::invalid(Message::of('“{field}” must be null, a day (YYYY-MM-DD) or a local time (YYYY-MM-DDTHH:MM:SS).', ['field' => 'review.' . $f]));
+			}
+			$out->{$f} = $t;
+		}
+		foreach (self::REVIEW_NOTE as $f) {
+			self::text($v->{$f} ?? null, 'review.' . $f, self::NOTE_MAX, self::CONTROL_NOTE);
+			$out->{$f} = $v->{$f} ?? null;
+		}
+		return $out;
+	}
+
+	/**
+	 * A Lead's part of the mark: submit (`requested`) and withdraw (null)
+	 * freely; never set `returned` nor change the return block – that is
+	 * the Team Admin's answer.
+	 */
+	public static function leadMayReview(?\stdClass $before, ?\stdClass $after): bool {
+		$b = $before?->{self::REVIEW} ?? null;
+		$a = $after?->{self::REVIEW} ?? null;
+		if ($a === null || $after === null) {
+			return true;
+		}
+		if (($a->state ?? null) === self::REVIEW_RETURNED && ($b->state ?? null) !== self::REVIEW_RETURNED) {
+			return false;
+		}
+		foreach (self::REVIEW_RETURN as $f) {
+			if (($a->{$f} ?? null) !== ($b->{$f} ?? null)) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/**
@@ -134,9 +263,10 @@ final class InvoiceRules {
 	 * `text` (0.21.0 also `expense_percent`, `expense_flat`, `costs`), each
 	 * with a text and an amount (negative for a discount, 0 for a text
 	 * line); work package, person, hours and rate optional; since 0.21.0
-	 * `vat`, `vat_mode` and `cost`.
+	 * `vat`, `vat_mode` and `cost`. `$negated`: the lines of a reversal or
+	 * credit note (0.27.0) – an advance is then ≤ 0, its deduction ≥ 0.
 	 */
-	public static function checkPositions(mixed $list): void {
+	public static function checkPositions(mixed $list, bool $negated = false): void {
 		if (!is_array($list) || !array_is_list($list) || count($list) > self::MAX_POSITIONS) {
 			throw ApiException::invalid(Message::of('“positions” must be a list of at most {max} positions.', ['max' => self::MAX_POSITIONS]));
 		}
@@ -168,7 +298,7 @@ final class InvoiceRules {
 					throw ApiException::invalid('“amount” must be a number.');
 				}
 				self::checkLineTax($p);
-				self::checkAdvance($p);
+				self::checkAdvance($p, $negated);
 				InvoiceLayout::checkPosition($p);
 			} catch (ApiException $e) {
 				throw ApiException::invalid(Message::of('Position {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]));
@@ -205,9 +335,10 @@ final class InvoiceRules {
 	/**
 	 * An advance (0.26.0) is a fee line ≥ 0; its deduction is ≤ 0 and names
 	 * the advance invoice's key in `invoice`, no other line does. Neither is
-	 * a cost line or a pass-through item.
+	 * a cost line or a pass-through item. On a reversal or credit note
+	 * (`$negated`) the signs mirror: advance ≤ 0, deduction ≥ 0.
 	 */
-	private static function checkAdvance(\stdClass $p): void {
+	private static function checkAdvance(\stdClass $p, bool $negated = false): void {
 		$kind = $p->kind ?? null;
 		$ref = $p->invoice ?? null;
 		if ($kind === self::ADVANCE_DEDUCTION) {
@@ -220,11 +351,17 @@ final class InvoiceRules {
 		if (!in_array($kind, [self::ADVANCE, self::ADVANCE_DEDUCTION], true)) {
 			return;
 		}
-		$a = $p->amount;
+		$a = $negated ? -$p->amount : $p->amount;
 		if ($kind === self::ADVANCE && $a < 0) {
+			if ($negated) {
+				throw ApiException::invalid('A reversed advance has an amount ≤ 0.');
+			}
 			throw ApiException::invalid('An advance has an amount ≥ 0.');
 		}
 		if ($kind === self::ADVANCE_DEDUCTION && $a > 0) {
+			if ($negated) {
+				throw ApiException::invalid('A reversed advance deduction has an amount ≥ 0.');
+			}
 			throw ApiException::invalid('An advance deduction has an amount ≤ 0.');
 		}
 		if (($p->cost ?? null) !== null || ($p->vat_mode ?? null) === VatLines::PASS_THROUGH) {
@@ -340,6 +477,9 @@ final class InvoiceRules {
 			if ($d !== null && (($d->status ?? null) !== self::DRAFT || ($d->number ?? null) !== null)) {
 				throw ApiException::forbidden('A Lead writes only drafts without a number; issuing, payment and cancelling are for Team Admins.');
 			}
+		}
+		if (!self::leadMayReview($before, $after)) {
+			throw ApiException::forbidden('Only Team Admins return a draft submitted for approval; a Lead submits or withdraws it.');
 		}
 	}
 }

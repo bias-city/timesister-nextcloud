@@ -6,6 +6,7 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
+use OCA\TimeSister\Db\Entry;
 use OCA\TimeSister\Db\EntryMapper;
 use OCA\TimeSister\Db\InvInvoice;
 use OCA\TimeSister\Db\InvInvoiceMapper;
@@ -116,12 +117,17 @@ final class DossierService {
 		$since = 0;
 		do {
 			$page = $this->entries->findChanged($tid, $since, self::PAGE);
+			// The rows come without their texts (0.28.0); only the project's are read.
+			$hits = [];
 			foreach ($page as $e) {
 				$since = max($since, $e->getRevision());
-				if (!$e->isLive() || $e->getCancelled() === 1 || !DossierRules::matches($e->codeList(), $codes)) {
-					continue;
+				if ($e->isLive() && $e->getCancelled() !== 1 && DossierRules::matches($e->codeList(), $codes)) {
+					$hits[] = $e;
 				}
-				$o = DossierRules::occurrence((string)$e->getIcs());
+			}
+			$texts = $hits === [] ? [] : $this->entries->icsByIds(array_map(static fn (Entry $e): int => $e->getId(), $hits));
+			foreach ($hits as $e) {
+				$o = DossierRules::occurrence($texts[$e->getId()] ?? '');
 				$out[] = ['person' => $e->getUid(), 'event_uid' => $e->getEventUid(), 'title' => $e->getSummary(), 'codes' => $e->codeList()] + $o;
 			}
 		} while (count($page) === self::PAGE);

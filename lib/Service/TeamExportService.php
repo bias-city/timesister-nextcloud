@@ -10,6 +10,7 @@ use OCA\TimeSister\AppInfo\Application;
 use OCA\TimeSister\Db\AbsenceMapper;
 use OCA\TimeSister\Db\BackupConsentMapper;
 use OCA\TimeSister\Db\ClientStatusMapper;
+use OCA\TimeSister\Db\EntryMapper;
 use OCA\TimeSister\Db\History;
 use OCA\TimeSister\Db\HistoryMapper;
 use OCA\TimeSister\Db\InvInvoice;
@@ -34,9 +35,10 @@ use Psr\Log\LoggerInterface;
  * every record with its history, status, absences, a fresh export of
  * every active member's time calendar, (0.16.0) the invoice template,
  * (0.17.0) the named time calendars with the cutoff – not the book of
- * entries itself, which is read again from the calendars – and (0.18.0)
- * the invoice ledger and the frozen invoices, for reading only. Layout in
- * {@see ZipRules}.
+ * entries itself, which is read again from the calendars, except (0.28.0)
+ * the list entries of external persons, which live only in the book – and
+ * (0.18.0) the invoice ledger and the frozen invoices, for reading only.
+ * Layout in {@see ZipRules}.
  */
 final class TeamExportService {
 	public function __construct(
@@ -58,8 +60,12 @@ final class TeamExportService {
 		private IssueService $issues,
 		private ITimeFactory $time,
 		private LoggerInterface $logger,
+		private EntryMapper $entries,
 	) {
 	}
+
+	/** The PRODID of a list calendar in the backup. */
+	private const LIST_PRODID = '-//TimeSister//List//EN';
 
 	/**
 	 * Writes the ZIP to a temporary file.
@@ -100,6 +106,13 @@ final class TeamExportService {
 				$files[$p] = ['missing' => true, 'uid' => $uid];
 			} else {
 				$put($p, $ics, ['uid' => $uid]);
+			}
+		}
+		// 0.28.0: the hours of external persons from lists live only in the book - one file each.
+		foreach ($this->entries->listUids($tid) as $uid) {
+			$parts = $this->entries->icsBySource($tid, $uid, TimeCalendar::LIST);
+			if ($parts !== []) {
+				$put(ZipRules::listPath($uid), IcsJoiner::join($parts, self::LIST_PRODID), ['uid' => $uid, 'list' => true]);
 			}
 		}
 		$manifest = ZipRules::manifest(

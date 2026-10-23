@@ -15,12 +15,13 @@ namespace OCA\TimeSister\Service;
  */
 final class PersonAccess {
 	/** Allowlist: what is missing here only Team Admins and the person read. */
-	public const CARD = ['schema', 'login', 'first_name', 'last_name', 'initials', 'accounts'];
+	/** 0.27.0: `company` too - Leads see whose people booked on their projects. */
+	public const CARD = ['schema', 'login', 'first_name', 'last_name', 'initials', 'accounts', 'company'];
 
-	/** The name card: only the fields from CARD that exist. */
-	public static function card(\stdClass $data): \stdClass {
+	/** The name card: only the fields from CARD that exist; a Lead also gets the person's `levels` (0.27.0). */
+	public static function card(\stdClass $data, bool $lead = false): \stdClass {
 		$out = new \stdClass();
-		foreach (self::CARD as $field) {
+		foreach ($lead ? [...self::CARD, ...PersonRules::LEAD_ONLY] : self::CARD as $field) {
 			if (property_exists($data, $field)) {
 				$out->{$field} = $data->{$field};
 			}
@@ -28,10 +29,10 @@ final class PersonAccess {
 		return $out;
 	}
 
-	/** The own person for whoever does not manage the team: everything but the admin-only fields. */
-	public static function own(\stdClass $data): \stdClass {
+	/** The own person for whoever does not manage the team: everything but the admin-only fields – and, unless a Lead, the lead-only ones. */
+	public static function own(\stdClass $data, bool $lead = false): \stdClass {
 		$out = clone $data;
-		foreach (PersonRules::ADMIN_ONLY as $field) {
+		foreach ($lead ? PersonRules::ADMIN_ONLY : [...PersonRules::ADMIN_ONLY, ...PersonRules::LEAD_ONLY] as $field) {
 			unset($out->{$field});
 		}
 		return $out;

@@ -58,6 +58,7 @@ final class ReceiptController extends BaseController {
 	/** GET /receipts/{key}/file – the stored file. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/receipts/{key}/file')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function getFile(string $key): Response {
 		return $this->respond(function () use ($key): Response {
 			$r = $this->receipts->getFile($this->tenants->current(), $key);
@@ -79,6 +80,14 @@ final class ReceiptController extends BaseController {
 	#[NoAdminRequired]
 	public function reject(string $key): DataResponse {
 		return $this->run(fn () => $this->receipts->reject($this->tenants->current(), $key, $this->body(self::MAX_BODY)));
+	}
+
+	/** POST /receipts/{key}/reopen – a Team Admin takes the approval back (0.27.0). */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/receipts/{key}/reopen')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	public function reopen(string $key): DataResponse {
+		return $this->run(fn () => $this->receipts->reopen($this->tenants->current(), $key));
 	}
 
 	/** POST /expense-rules/{key}/approve. */
@@ -125,6 +134,7 @@ final class ReceiptController extends BaseController {
 	/** GET /expense-reports/{key}/document – the PDF. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/expense-reports/{key}/document')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function reportDocument(string $key): Response {
 		return $this->respond(function () use ($key): Response {
 			$r = $this->reports->document($this->tenants->current(), $key);

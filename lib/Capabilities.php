@@ -32,7 +32,9 @@ use OCP\Capabilities\ICapability;
  * work package `rate` in the budgets – only for Team Admins and the
  * project's Leads. `quotes: 2` since 0.16.0: also the kind `quote` (Team
  * Admins, Leads the quotes naming them or of their projects); the project
- * statuses above stay. `cost_rates: 1` since 0.16.0: the person's `cost_rates`
+ * statuses above stay. `quotes: 3` since 0.27.0: the quote as a subtree –
+ * `budgets`, `project_draft`, `budget_ids`, statuses `negotiation` and
+ * `verbal`. `cost_rates: 1` since 0.16.0: the person's `cost_rates`
  * (hourly cost from a day on), read by Team Admins alone. `invoices: 1`
  * since 0.16.0: the kind `invoice` (Team Admins, Leads their drafts), the
  * pattern `invoice_number` in `setting/settings` and the team's counter
@@ -57,6 +59,8 @@ use OCP\Capabilities\ICapability;
  * `costs: 1` since 0.21.0: cost positions `costs[]` in a budget (module
  * «costs», `settings.modules.costs`), checked and stored. `receipts: 1`
  * since 0.22.0: receipts with files, approval, invoicing from receipts;
+ * `receipts: 2` since 0.27.0: a Team Admin takes an approval back
+ * (POST /receipts/{key}/reopen, `reopened_by`/`reopened_on`);
  * `document_tree: 1`: one root per team (`documents.root`) with a fixed
  * scheme, quote PDFs through the server, the project dossier.
  * `expense_fixing: 1` since 0.23.0 (replaces `expense_reports`): assigning
@@ -87,7 +91,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int}} */
+	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -102,7 +106,7 @@ final class Capabilities implements ICapability {
 				'lead_scope' => 1,
 				'booking_reports' => 1,
 				'job_fits' => 1,
-				'quotes' => 2,
+				'quotes' => 3,
 				'cost_rates' => 1,
 				'invoices' => 1,
 				'invoice_template' => 1,
@@ -113,13 +117,15 @@ final class Capabilities implements ICapability {
 				'invoice_export' => 1,
 				'vat_lines' => 1,
 				'costs' => 1,
-				'receipts' => 1,
+				'receipts' => 2,
 				'document_tree' => 1,
 				'expense_fixing' => 1,
 				'invoice_handover' => 2,
 				'templates' => 2,
 				'advances' => 1,
 				'invoice_layout' => 1,
+				'corrections' => 2,
+				'entry_lists' => 1,
 			],
 		];
 	}

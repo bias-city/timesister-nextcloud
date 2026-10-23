@@ -32,7 +32,7 @@ final class ReceiptRules {
 	public const INTERNAL = 'internal';
 	public const BILLED = 'billed';
 	/** Owned by the server: ignored on write, the stored value is kept. */
-	public const SERVER = ['status', 'file', 'invoice', 'report', 'created_by', 'created_on', 'approved_by', 'approved_on', 'reject_reason'];
+	public const SERVER = ['status', 'file', 'invoice', 'report', 'created_by', 'created_on', 'approved_by', 'approved_on', 'reject_reason', 'reopened_by', 'reopened_on'];
 	/** What a Lead or Team Admin may still change after approval; after billing only the note. */
 	public const CORRECTABLE = ['project', 'cost_kind', 'budget', 'cost', 'billed', 'invoice_effect', 'note'];
 	/** Set only by Team Admins and the project's Leads; a member's write keeps the stored values (member triage). */
@@ -331,6 +331,36 @@ final class ReceiptRules {
 	/** Approved in any form: approved, internal, billed. */
 	public static function isApproved(?\stdClass $d): bool {
 		return in_array($d?->status ?? null, [self::APPROVED, self::INTERNAL, self::BILLED], true);
+	}
+
+	/**
+	 * `reopen` (endpoint, 0.27.0): a Team Admin takes an approval back –
+	 * approved or internal, not billed with an invoice (reverse it first)
+	 * and not on a fixed expense report (`$heldBy`, reverse it first).
+	 */
+	public static function requireReopen(bool $manages, \stdClass $d, ?string $heldBy): void {
+		if (!$manages) {
+			throw ApiException::forbidden('Only Team Admins take an approval back.');
+		}
+		if (($d->status ?? null) === self::BILLED || ($d->invoice ?? null) !== null) {
+			throw ApiException::conflict('This receipt is billed with an invoice; reverse the invoice first.');
+		}
+		if ($heldBy !== null) {
+			throw ApiException::conflict(Message::of('This receipt is on the fixed expense report {report}; reverse the report first.', ['report' => $heldBy]));
+		}
+		if (!in_array($d->status ?? null, [self::APPROVED, self::INTERNAL], true)) {
+			throw ApiException::conflict('Only an approved receipt is reopened.');
+		}
+	}
+
+	/** Open again, logged: who took the approval back and when; the approval itself is gone. */
+	public static function reopen(\stdClass $d, string $uid, string $today): void {
+		$d->status = self::OPEN;
+		$d->approved_by = null;
+		$d->approved_on = null;
+		$d->reject_reason = null;
+		$d->reopened_by = $uid;
+		$d->reopened_on = $today;
 	}
 
 	/**

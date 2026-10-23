@@ -231,6 +231,31 @@ class ReceiptRulesTest extends TestCase {
 		$this->assertFalse(ReceiptRules::needsNoApproval(self::receipt()));
 	}
 
+	/** 0.27.0: a Team Admin takes an approval back – not billed, not on a fixed report. */
+	public function testReopen(): void {
+		$approved = self::receipt(['status' => 'approved', 'approved_by' => 'lead', 'approved_on' => '2026-10-04', 'created_by' => 'ann']);
+		$try = fn (bool $manages, \stdClass $d, ?string $held = null): string => self::outcome(fn () => ReceiptRules::requireReopen($manages, $d, $held));
+		$this->assertSame('ok', $try(true, $approved));
+		$this->assertSame('ok', $try(true, self::receipt(['status' => 'internal', 'project' => null])));
+		$this->assertStringStartsWith('403 ', $try(false, $approved), 'a Lead does not take an approval back');
+		$this->assertStringContainsString('reverse the invoice first', $try(true, self::receipt(['status' => 'billed', 'invoice' => 'inv-1'])));
+		$this->assertStringContainsString('reverse the invoice first', $try(true, self::receipt(['status' => 'approved', 'invoice' => 'inv-1'])), 'an invoice set counts as billed');
+		$this->assertStringContainsString('expense report SB-7', $try(true, $approved, 'SB-7'));
+		$this->assertStringStartsWith('409 ', $try(true, self::receipt(['status' => 'open'])), 'only an approved one');
+		$this->assertStringStartsWith('409 ', $try(true, self::receipt(['status' => 'rejected'])));
+		ReceiptRules::reopen($approved, 'admin', '2026-10-22');
+		$this->assertSame(['open', null, null, 'admin', '2026-10-22', 'ann'], [$approved->status, $approved->approved_by, $approved->approved_on, $approved->reopened_by, $approved->reopened_on, $approved->created_by], 'open again, logged, the creator stays');
+		$this->assertContains('reopened_by', ReceiptRules::SERVER, 'the log is the server’s');
+		// Open again: the date changes, as before the approval.
+		$changed = clone $approved;
+		$changed->date = '2026-11-01';
+		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireWrite(true, 'admin', [], $approved, $changed)));
+		// A client's write keeps the log.
+		$again = self::receipt();
+		ReceiptRules::mergeServer($approved, $again, 'ann', '2026-10-23', ReceiptRules::OPEN);
+		$this->assertSame(['open', 'admin', '2026-10-22'], [$again->status, $again->reopened_by, $again->reopened_on]);
+	}
+
 	public function testHelpers(): void {
 		$project = (object)['codes' => ['D196'], 'budgets' => [(object)['id' => 'b1', 'costs' => [(object)['no' => 2]]]]];
 		$this->assertTrue(ReceiptRules::hasCost($project, 'b1', 2));

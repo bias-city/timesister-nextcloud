@@ -15,7 +15,8 @@ use OCP\AppFramework\Utility\ITimeFactory;
  * of the document tree, approving (the file is renamed once to its
  * current name) and rejecting. The record's own writes go through
  * RecordService and CostWrites; since 0.23.0 an approver's file upload
- * that completes a receipt approves it, as a write does.
+ * that completes a receipt approves it, as a write does. Since 0.27.0 a
+ * Team Admin takes an approval back (`reopen`).
  */
 final class ReceiptService {
 	public const REASON_MAX = 300;
@@ -159,5 +160,29 @@ final class ReceiptService {
 		$d->status = ReceiptRules::REJECTED;
 		$d->reject_reason = trim($reason);
 		return $this->recordService->writeAsServer($m, ReceiptRules::KIND, $key, $rec->getVersion(), $d);
+	}
+
+	/**
+	 * `POST /receipts/{key}/reopen` (0.27.0): a Team Admin takes the approval
+	 * back – the receipt is open again, with who and when; not while billed
+	 * with an invoice or on a fixed expense report. The file keeps its name
+	 * until the next approval.
+	 *
+	 * @return array<string,mixed> the record
+	 */
+	public function reopen(Membership $m, string $key): array {
+		[$rec, $d] = $this->load($m, $key);
+		ReceiptRules::requireReopen($m->manages(), $d, ExpenseReportRules::heldBy($d, $this->reports($m->tenantId)));
+		ReceiptRules::reopen($d, $m->uid, $this->today());
+		return $this->recordService->writeAsServer($m, ReceiptRules::KIND, $key, $rec->getVersion(), $d);
+	}
+
+	/** The live expense reports by key. @return array<string,?\stdClass> */
+	private function reports(int $tid): array {
+		$out = [];
+		foreach ($this->records->findLiveByKind($tid, ExpenseReportRules::KIND) as $r) {
+			$out[$r->getRkey()] = InvoiceRules::decode($r->getData());
+		}
+		return $out;
 	}
 }

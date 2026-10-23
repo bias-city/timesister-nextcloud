@@ -90,7 +90,8 @@ class RoleScopeTest extends TestCase {
 		$data = Json::decode(self::PERSON);
 		$lead = new Membership('lea', 1, 'lead');
 		$shaped = $rights->shape($lead, $mia, $data, ['lea']);
-		$this->assertSame(PersonAccess::CARD, array_keys(get_object_vars($shaped)), 'a Lead reads the name card of others');
+		// `company` (0.27.0) is on the card only when the record has it.
+		$this->assertSame(array_values(array_diff(PersonAccess::CARD, ['company'])), array_keys(get_object_vars($shaped)), 'a Lead reads the name card of others');
 		$this->assertObjectNotHasProperty('feed', $shaped);
 		// The own person: everything but the cost rates (0.16.0: personnel cost, Team Admins only).
 		$own = clone $data;
@@ -227,7 +228,7 @@ class RoleScopeTest extends TestCase {
 		$this->assertSame(1, $cap['lead_scope']);
 		$this->assertSame(1, $cap['booking_reports']);
 		$this->assertSame(1, $cap['job_fits']);
-		$this->assertSame(2, $cap['quotes'], 'the kind quote (0.16.0)');
+		$this->assertSame(3, $cap['quotes'], 'the kind quote (0.16.0), as a subtree with budgets (0.27.0)');
 		$this->assertSame(1, $cap['cost_rates']);
 		$this->assertSame(1, $cap['derived_lead']);
 		$this->assertArrayNotHasKey('lead_reach', $cap);

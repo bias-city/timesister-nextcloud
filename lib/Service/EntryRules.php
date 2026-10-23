@@ -6,6 +6,8 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Service;
 
+use OCA\TimeSister\Db\Entry;
+
 /**
  * The rules of the time entries (0.17.0), pure: what the server reads
  * out of a calendar object (codes, first start, last end, cancelled),
@@ -83,7 +85,7 @@ final class EntryRules {
 	 * end as dates (`last_end` null while the recurrence has no end or a
 	 * COUNT). Null: no VEVENT, or no UID.
 	 *
-	 * @return ?array{uid:string,summary:string,codes:list<string>,first_start:?string,last_end:?string,cancelled:bool}
+	 * @return ?array{uid:string,summary:string,codes:list<string>,first_start:?string,last_end:?string,cancelled:bool,level:?string}
 	 */
 	public static function parse(string $ics): ?array {
 		$components = self::components($ics, self::COMPONENTS);
@@ -142,6 +144,8 @@ final class EntryRules {
 			'first_start' => $firstStart,
 			'last_end' => $open ? null : $lastEnd,
 			'cancelled' => $status === 'CANCELLED',
+			// 0.27.0: the level of the booking as the clients wrote it (`X-TIMESISTER-LEVEL`), master only.
+			'level' => CorrectionRules::levelOf($master),
 		];
 	}
 
@@ -370,6 +374,62 @@ final class EntryRules {
 		return $out;
 	}
 
+	/** `POST /entries/list` (0.28.0): at most this many objects and deletions per call. */
+	public const LIST_MAX = 2000;
+
+	/**
+	 * The body of `POST /entries/list`: `uid` (the external person), `put`
+	 * (iCalendar objects with one UID each) and `delete` (event UIDs).
+	 *
+	 * @return array{uid:string,put:list<string>,delete:list<string>}
+	 * @throws ApiException 422
+	 */
+	public static function parseListBody(\stdClass $body): array {
+		foreach (array_map('strval', array_keys(get_object_vars($body))) as $f) {
+			if (!in_array($f, ['uid', 'put', 'delete'], true)) {
+				throw ApiException::invalid(Message::of('“{field}” is not a field of a list.', ['field' => $f]));
+			}
+		}
+		$uid = $body->uid ?? null;
+		if (!is_string($uid) || preg_match('/^[A-Za-z0-9._@-]{1,64}$/', $uid) !== 1 || trim($uid, '.') === '') {
+			throw ApiException::invalid('“uid” must be the key of a person.');
+		}
+		$put = $body->put ?? [];
+		$delete = $body->delete ?? [];
+		if (!is_array($put) || !array_is_list($put) || !is_array($delete) || !array_is_list($delete)
+			|| count($put) + count($delete) > self::LIST_MAX) {
+			throw ApiException::invalid(Message::of('“put” and “delete” must be lists of at most {max} items together.', ['max' => self::LIST_MAX]));
+		}
+		foreach ($put as $ics) {
+			if (!is_string($ics) || strlen($ics) > self::MAX_OBJECT || self::parse($ics) === null || !self::oneUid($ics)) {
+				throw ApiException::invalid('Each item of “put” must be one event in iCalendar, at most 256 KB.');
+			}
+		}
+		foreach ($delete as $ev) {
+			if (!is_string($ev) || trim($ev) === '' || strlen($ev) > 255 || preg_match('/[\x00-\x1F\x7F]/', $ev) === 1) {
+				throw ApiException::invalid('Each item of “delete” must be an event UID.');
+			}
+		}
+		return ['uid' => $uid, 'put' => $put, 'delete' => array_values(array_unique($delete))];
+	}
+
+	/**
+	 * One object is one event: every VEVENT carries the same UID (a series
+	 * with its exceptions). Components with another UID would be stored
+	 * under the master's and never show as entries of their own.
+	 */
+	public static function oneUid(string $ics): bool {
+		$uid = null;
+		foreach (self::components($ics, self::COMPONENTS) as $c) {
+			$u = trim(self::unescape(self::first($c, 'UID') ?? ''));
+			if ($u === '' || ($uid !== null && $u !== $uid)) {
+				return false;
+			}
+			$uid = $u;
+		}
+		return $uid !== null;
+	}
+
 	/** Only http(s) feeds are read. */
 	public static function isFeedUrl(mixed $url): bool {
 		return is_string($url) && preg_match('#^https?://[^\s/?\#]+#i', trim($url)) === 1;
@@ -463,6 +523,42 @@ final class EntryRules {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * A page of the book in revision order (0.28.0): `$chunk($cursor)` reads
+	 * the next rows after a revision, `$keep` is the role filter; the page
+	 * is filled from as many chunks as it takes. `more` is true when a
+	 * further page may follow.
+	 *
+	 * @param callable(int):list<Entry> $chunk
+	 * @param callable(Entry):bool $keep
+	 * @return array{entries:list<Entry>,more:bool}
+	 */
+	public static function pageOf(callable $chunk, callable $keep, int $since, int $limit): array {
+		$out = [];
+		$more = false;
+		$cursor = $since;
+		while (count($out) < $limit) {
+			$rows = $chunk($cursor);
+			foreach ($rows as $e) {
+				$cursor = $e->getRevision();
+				if ($keep($e)) {
+					$out[] = $e;
+				}
+			}
+			if (count($rows) < $limit) {
+				break;
+			}
+			if (count($out) >= $limit) {
+				$more = true;
+			}
+		}
+		if (count($out) > $limit) {
+			$more = true;
+			$out = array_slice($out, 0, $limit);
+		}
+		return ['entries' => $out, 'more' => $more];
 	}
 
 	/**

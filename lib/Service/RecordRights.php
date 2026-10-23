@@ -19,7 +19,7 @@ use OCA\TimeSister\Db\RecordMapper;
 final class RecordRights {
 	/** Kinds with rights per record: a non-admin batch may hold only these. */
 	public const PER_RECORD = [RecordValidator::BILLING, BookingRules::REPORT, BookingRules::MARK, InvoiceRules::KIND, QuoteRules::KIND,
-		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND, TemplateRules::KIND];
+		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND, TemplateRules::KIND, CorrectionRules::KIND];
 	/** Kinds whose Lead write is checked against the stored record, and whose tombstone keeps its last data for that. */
 	public const AGAINST_STORED = [InvoiceRules::KIND, QuoteRules::KIND, ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND];
 	/** 0.22.0: every member writes these; CostWrites checks each write against the stored record. */
@@ -93,8 +93,16 @@ final class RecordRights {
 			$person = BillingRules::personOf($key);
 			return BillingRules::canRead($m->role, $person !== null && in_array($person, $ownKeys, true));
 		}
+		if ($kind === CorrectionRules::KIND) {
+			// 0.27.0: Team Admins; the person (their locked fields); a Lead their own and those of the projects they lead.
+			return $this->canReadCorrection($m, $key, $ownKeys, InvoiceRules::decode($record?->getData()));
+		}
 		if (BookingRules::isKind($kind)) {
 			return BookingRules::canRead($m->role, $m->uid, $kind, $key, $m->manages() ? [] : $this->ledProjects($m));
+		}
+		// 0.27.0: office costs, balances and reserve (cashflow) reach Team Admins only.
+		if ($kind === 'setting' && $key === OfficeCostRules::KEY) {
+			return $m->manages();
 		}
 		if (!$this->policy->canRead($m, $kind, $key, $accounts)) {
 			return false;
@@ -104,6 +112,39 @@ final class RecordRights {
 			return isset($this->customersOf($m, $ownKeys)[$key]);
 		}
 		return true;
+	}
+
+	/** A correction record: Team Admins, the person, the Lead who wrote it or who leads a project of its codes. */
+	private function canReadCorrection(Membership $m, string $key, array $ownKeys, ?\stdClass $d): bool {
+		if ($m->manages()) {
+			return true;
+		}
+		$person = CorrectionRules::personOf($key);
+		if ($person !== null && in_array($person, $ownKeys, true)) {
+			return true;
+		}
+		if ($m->role !== Role::LEAD || $d === null) {
+			return false;
+		}
+		if (($d->by ?? null) === $m->uid) {
+			return true;
+		}
+		$rawCodes = $d->codes ?? null;
+		$codes = is_array($rawCodes) ? $rawCodes : [];
+		$code = $d->code ?? null;
+		if (is_string($code)) {
+			$codes[] = $code;
+		}
+		$led = \OCP\Server::get(EntryService::class)->ledCodesOf($m);
+		foreach ($codes as $c) {
+			$c = mb_strtolower((string)$c);
+			foreach ($led as $l) {
+				if ($c === $l || str_starts_with($c, $l . '.')) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	/** Receipts and expense rules (0.22.0): the person, the project's Leads, Team Admins; expense reports (0.23.0): the person and Team Admins. */
@@ -127,6 +168,16 @@ final class RecordRights {
 		}
 		if (BookingRules::isKind($kind)) {
 			BookingRules::requireWrite($m->role, $m->uid, $kind, $key, $m->manages() ? [] : $this->ledProjects($m));
+			return;
+		}
+		if ($kind === CorrectionRules::KIND) {
+			// 0.27.0: Team Admins and Leads; the project is checked as the record is applied (CorrectionService::prepare).
+			if (CorrectionRules::personOf($key) === null) {
+				throw ApiException::invalid('The key of a correction is the person’s key, “+” and 32 hex digits of the SHA-256 of the event UID (and recurrence).');
+			}
+			if (!$m->manages() && $m->role !== Role::LEAD) {
+				throw ApiException::forbidden('Only Team Admins and the project’s Leads correct bookings.');
+			}
 			return;
 		}
 		if ($kind === InvoiceRules::KIND) {
@@ -221,9 +272,14 @@ final class RecordRights {
 		if ($r->getKind() === 'project' && !$this->policy->canSeeFullProject($m, $data, $ownKeys)) {
 			return ProjectAccess::catalog($data);
 		}
+		// 0.27.0: rates (the levels' defaults, a person's level) reach Leads, never members.
+		$lead = $this->ledProjects($m) !== [];
 		if ($r->getKind() === 'person') {
 			return AccessPolicy::isOwnPerson($m->uid, $r->getRkey(), $r->accountList())
-				? PersonAccess::own($data) : PersonAccess::card($data);
+				? PersonAccess::own($data, $lead) : PersonAccess::card($data, $lead);
+		}
+		if ($r->getKind() === 'setting' && $r->getRkey() === 'settings' && !$lead) {
+			return LevelRules::withoutRates($data);
 		}
 		return $data;
 	}

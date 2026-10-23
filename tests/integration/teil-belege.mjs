@@ -145,7 +145,7 @@ export async function belege() {
 		head('Receipts: setup and the document tree')
 		{
 			const cap = (await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')).data?.capabilities?.timesister
-			check('capabilities receipts, document_tree, expense_fixing: 1 (expense_reports gone)', cap?.receipts === 1 && cap?.document_tree === 1 && cap?.expense_fixing === 1 && cap?.expense_reports === undefined, cap)
+			check('capabilities receipts: 2, document_tree, expense_fixing: 1 (expense_reports gone)', cap?.receipts === 2 && cap?.document_tree === 1 && cap?.expense_fixing === 1 && cap?.expense_reports === undefined, cap)
 			const set = await ocs(A, 'PUT', '/team/settings', { documents: { root: FOLDER } })
 			expect('Team Admin sets documents.root', set, 200)
 			check('… settings.documents is { root, chain_mail }', JSON.stringify(Object.keys(set.data?.documents || {}).sort()) === '["chain_mail","root"]' && set.data?.documents?.root === FOLDER, set.data)

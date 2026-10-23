@@ -27,6 +27,8 @@ final class ChainHead extends TimedJob {
 		parent::__construct($time);
 		$this->setInterval(86400);
 		$this->setTimeSensitivity(IJob::TIME_INSENSITIVE);
+		// One run at a time: a second cron would only double the work.
+		$this->setAllowParallelRuns(false);
 	}
 
 	protected function run(mixed $argument): void {

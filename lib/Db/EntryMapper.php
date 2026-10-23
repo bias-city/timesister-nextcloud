@@ -42,7 +42,7 @@ final class EntryMapper extends QBMapper {
 	 */
 	public function findByEvent(int $tenantId, string $uid, string $eventUid): ?Entry {
 		$qb = $this->db->getQueryBuilder();
-		$qb->select('id', 'tenant_id', 'uid', 'source', 'event_uid', 'object_uri', 'etag', 'summary', 'codes', 'first_start', 'last_end', 'cancelled', 'kept', 'deleted', 'revision', 'modified_at')
+		$qb->select('id', 'tenant_id', 'uid', 'source', 'event_uid', 'object_uri', 'etag', 'summary', 'codes', 'first_start', 'last_end', 'level', 'cancelled', 'kept', 'deleted', 'revision', 'modified_at')
 			->from($this->getTableName())
 			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
 			->andWhere($qb->expr()->eq('uid', $qb->createNamedParameter($uid)))
@@ -65,7 +65,7 @@ final class EntryMapper extends QBMapper {
 	 */
 	public function bySource(int $tenantId, string $uid, string $source, bool $all = false): array {
 		$qb = $this->db->getQueryBuilder();
-		$qb->select('id', 'tenant_id', 'uid', 'source', 'event_uid', 'object_uri', 'etag', 'summary', 'codes', 'first_start', 'last_end', 'cancelled', 'kept', 'deleted', 'revision', 'modified_at')
+		$qb->select('id', 'tenant_id', 'uid', 'source', 'event_uid', 'object_uri', 'etag', 'summary', 'codes', 'first_start', 'last_end', 'level', 'cancelled', 'kept', 'deleted', 'revision', 'modified_at')
 			->from($this->getTableName())
 			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
 			->andWhere($qb->expr()->eq('uid', $qb->createNamedParameter($uid)))
@@ -83,13 +83,16 @@ final class EntryMapper extends QBMapper {
 
 	/**
 	 * A page in revision order: `revision > $since`, at most `$limit`.
-	 * With `$since = 0` tombstones are left out, as for the records.
+	 * With `$since = 0` tombstones are left out, as for the records. `ics`
+	 * is left out (0.28.0): the role filter needs only uid and codes, the
+	 * texts follow for the hits with {@see icsByIds()}.
 	 *
 	 * @return list<Entry>
 	 */
 	public function findChanged(int $tenantId, int $since, int $limit): array {
 		$qb = $this->db->getQueryBuilder();
-		$qb->select('*')->from($this->getTableName())
+		$qb->select('id', 'tenant_id', 'uid', 'source', 'event_uid', 'object_uri', 'etag', 'summary', 'codes', 'first_start', 'last_end', 'level', 'cancelled', 'kept', 'deleted', 'revision', 'modified_at')
+			->from($this->getTableName())
 			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
 			->andWhere($qb->expr()->gt('revision', $qb->createNamedParameter($since, IQueryBuilder::PARAM_INT)));
 		if ($since <= 0) {
@@ -97,6 +100,27 @@ final class EntryMapper extends QBMapper {
 		}
 		$qb->orderBy('revision', 'ASC')->addOrderBy('id', 'ASC')->setMaxResults($limit);
 		return $this->findEntities($qb);
+	}
+
+	/**
+	 * The texts of the given rows, at most 2000 at a time.
+	 *
+	 * @param list<int> $ids
+	 * @return array<int,string> id → ics
+	 */
+	public function icsByIds(array $ids): array {
+		$out = [];
+		foreach (array_chunk($ids, 500) as $part) {
+			$qb = $this->db->getQueryBuilder();
+			$qb->select('id', 'ics')->from($this->getTableName())
+				->where($qb->expr()->in('id', $qb->createNamedParameter($part, IQueryBuilder::PARAM_INT_ARRAY)));
+			$res = $qb->executeQuery();
+			while ($row = $res->fetch()) {
+				$out[(int)$row['id']] = (string)$row['ics'];
+			}
+			$res->closeCursor();
+		}
+		return $out;
 	}
 
 	/**
@@ -115,6 +139,52 @@ final class EntryMapper extends QBMapper {
 		$out = [];
 		while ($row = $res->fetch()) {
 			$out[(string)$row['source'] . '/' . (string)$row['uid']] = (int)$row['n'];
+		}
+		$res->closeCursor();
+		return $out;
+	}
+
+	/**
+	 * The persons with live entries from lists (0.28.0).
+	 *
+	 * @return list<string>
+	 */
+	public function listUids(int $tenantId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->selectDistinct('uid')->from($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('source', $qb->createNamedParameter(TimeCalendar::LIST)))
+			->andWhere($qb->expr()->eq('deleted', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)))
+			->orderBy('uid');
+		$res = $qb->executeQuery();
+		$out = [];
+		while ($row = $res->fetch()) {
+			$out[] = (string)$row['uid'];
+		}
+		$res->closeCursor();
+		return $out;
+	}
+
+	/**
+	 * The texts of the live entries of one source, in event UID order.
+	 *
+	 * @return list<string>
+	 */
+	public function icsBySource(int $tenantId, string $uid, string $source): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('ics')->from($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('uid', $qb->createNamedParameter($uid)))
+			->andWhere($qb->expr()->eq('source', $qb->createNamedParameter($source)))
+			->andWhere($qb->expr()->eq('deleted', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('kept', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)))
+			->orderBy('event_uid');
+		$res = $qb->executeQuery();
+		$out = [];
+		while ($row = $res->fetch()) {
+			if ((string)$row['ics'] !== '') {
+				$out[] = (string)$row['ics'];
+			}
 		}
 		$res->closeCursor();
 		return $out;

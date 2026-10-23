@@ -42,6 +42,8 @@ use OCP\DB\Types;
 final class TimeCalendar extends Entity {
 	public const CALENDAR = 'calendar';
 	public const FEED = 'feed';
+	/** 0.28.0: entries of an external person written by a Team Admin (`POST /entries/list`) - the book is their source, no row. */
+	public const LIST = 'list';
 
 	protected int $tenantId = 0;
 	protected string $uid = '';

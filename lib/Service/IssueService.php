@@ -112,14 +112,15 @@ final class IssueService {
 		RecordValidator::checkAddress(InvoiceRules::KIND, $key);
 		$now = $this->time->getTime();
 		$issuedOn = IssueRules::issuedOn($body->issued_on ?? null, $now);
-		$dueDays = IssueRules::dueDays($body->due_days ?? null);
+		// 0.27.0: without `due_days` the customer's payment term counts, then the default.
+		$dueDays = IssueRules::dueDaysGiven($body->due_days ?? null);
 		$out = $this->transaction(fn (): array => $this->issueWithin($m, $key, $issuedOn, $dueDays, $now));
 		$this->renderAfter($m, $key, $now);
 		return $out;
 	}
 
 	/** @return array<string,mixed> */
-	private function issueWithin(Membership $m, string $key, string $issuedOn, int $dueDays, int $now): array {
+	private function issueWithin(Membership $m, string $key, string $issuedOn, ?int $dueDays, int $now): array {
 		$tid = $m->tenantId;
 		if ($this->invoices->findByKey($tid, $key) !== null) {
 			throw ApiException::issued();
@@ -137,7 +138,7 @@ final class IssueService {
 		$sums = $r['sums'];
 		$hours = $r['hours'];
 		$customerBlock = $r['customerBlock'];
-		$dueOn = IssueRules::dueOn($issuedOn, $dueDays);
+		$dueOn = IssueRules::dueOn($issuedOn, $dueDays ?? CustomerRules::paymentDays($r['customer']) ?? IssueRules::DUE_DAYS);
 
 		// The team lock first: one issue at a time, the revision for the marks and the record.
 		$receipts = $r['receipts'];
@@ -333,7 +334,8 @@ final class IssueService {
 		$issuedOn = IssueRules::issuedOn($body->issued_on ?? null, $now);
 		$given = $body->positions ?? null;
 		if ($given !== null) {
-			InvoiceRules::checkPositions($given);
+			// A credit note's own lines are negated lines: the advance signs mirror (0.27.0).
+			InvoiceRules::checkPositions($given, true);
 		}
 		$given = is_array($given) ? array_values(array_filter($given, static fn (mixed $x): bool => $x instanceof \stdClass)) : null;
 		$out = $this->transaction(fn (): array => $this->reverseWithin($m, $key, $kind, $reason, $issuedOn, $kind === IssueRules::CREDIT ? $given : null, $now));
@@ -492,7 +494,14 @@ final class IssueService {
 
 	// --------------------------------------------------------------- paid
 
-	/** `POST /invoices/{key}/paid` and `/unpaid`. @return array<string,mixed> the record plus `ledger` */
+	/**
+	 * `POST /invoices/{key}/paid` and `/unpaid`. 0.27.0: `amount` records a
+	 * payment (a part or, missing, the open rest) in `payments`; the invoice
+	 * is paid once the payments reach its amount, `paid_on` is then the day
+	 * of the last payment. `/unpaid` takes all payments back.
+	 *
+	 * @return array<string,mixed> the record plus `ledger`
+	 */
 	public function paid(Membership $m, string $key, \stdClass $body, bool $paid): array {
 		$this->requireOn($m);
 		$this->requireAdmin($m);
@@ -500,11 +509,12 @@ final class IssueService {
 		$now = $this->time->getTime();
 		$paidOn = $paid ? IssueRules::paidOn($body->paid_on ?? null) : null;
 		$note = IssueRules::shortText($body->note ?? null, 'note');
-		return $this->transaction(fn (): array => $this->paidWithin($m, $key, $paidOn, $note, $now));
+		$amount = $paid ? IssueRules::paymentAmount($body->amount ?? null) : null;
+		return $this->transaction(fn (): array => $this->paidWithin($m, $key, $paidOn, $note, $amount, $now));
 	}
 
 	/** @return array<string,mixed> */
-	private function paidWithin(Membership $m, string $key, ?string $paidOn, ?string $note, int $now): array {
+	private function paidWithin(Membership $m, string $key, ?string $paidOn, ?string $note, ?float $amount, int $now): array {
 		$tid = $m->tenantId;
 		[$cur, $d] = $this->invoiceRecord($tid, $key);
 		$row = $this->invoices->findByKey($tid, $key);
@@ -515,19 +525,79 @@ final class IssueService {
 			throw ApiException::invalid('This invoice is not marked paid.');
 		}
 		$top = $this->tenants->bumpRevision($tid, 1);
-		$row->setStatus($paidOn === null ? InvInvoice::ISSUED : InvInvoice::PAID);
-		$row->setPaidOn($paidOn);
-		$row->setPaidBy($paidOn === null ? null : $m->uid);
+		$payments = is_array($d->payments ?? null) ? $d->payments : [];
+		$total = is_int($d->amount ?? null) || is_float($d->amount ?? null) ? (float)$d->amount : null;
+		$full = true;
+		if ($paidOn === null) {
+			$payments = [];
+		} else {
+			// The payment: the given amount, else the open rest (a reversal's negative total settles at once).
+			$rest = $total === null ? null : round($total - InvoiceRules::paymentsSum($d), 2);
+			$sum = $amount ?? ($rest !== null && $rest > 0 ? $rest : null);
+			if ($sum !== null) {
+				$p = new \stdClass();
+				$p->date = $paidOn;
+				$p->amount = $sum;
+				$p->note = $note;
+				$payments[] = $p;
+				usort($payments, static fn (\stdClass $a, \stdClass $b): int => strcmp((string)$a->date, (string)$b->date));
+			}
+			$d->payments = $payments;
+			$full = $amount === null || $total === null || InvoiceRules::paymentsSum($d) + 0.005 >= $total;
+			if ($full) {
+				$paidOn = $payments === [] ? $paidOn : (string)end($payments)->date;
+			}
+		}
+		$d->payments = $payments;
+		$settled = $paidOn !== null && $full;
+		$row->setStatus($settled ? InvInvoice::PAID : InvInvoice::ISSUED);
+		$row->setPaidOn($settled ? $paidOn : null);
+		$row->setPaidBy($settled ? $m->uid : null);
 		$row->setModifiedAt($now);
 		$this->invoices->update($row);
-		$entry = $this->append($tid, $m->uid, $paidOn === null ? LedgerRules::UNPAID : LedgerRules::PAID, $row->getId(), $row->getNumber(),
-			LedgerRules::canonical(['key' => $key, 'number' => $row->getNumber(), 'paid_on' => $paidOn, 'note' => $note]), $now);
+		$action = $paidOn === null ? LedgerRules::UNPAID : ($full ? LedgerRules::PAID : LedgerRules::PAYMENT);
+		$payload = ['key' => $key, 'number' => $row->getNumber(), 'paid_on' => $settled ? $paidOn : null, 'note' => $note];
+		if ($amount !== null) {
+			$payload['amount'] = $amount;
+			$payload['date'] = $paidOn;
+		}
+		$entry = $this->append($tid, $m->uid, $action, $row->getId(), $row->getNumber(), LedgerRules::canonical($payload), $now);
 		$d->status = $row->getStatus();
-		$d->paid_on = $paidOn;
+		$d->paid_on = $settled ? $paidOn : null;
 		$written = $this->recordService->applyWithin($m, [$this->invoiceOp($key, $cur, $d)], false, $top, true);
 		$record = $written['records'][0];
 		$record['ledger'] = ['seq' => $entry->getSeq(), 'prev_hash' => $entry->getPrevHash(), 'hash' => $entry->getHash()];
 		return $record;
+	}
+
+	// ------------------------------------------------------------ dunning
+
+	/**
+	 * `POST /invoices/{key}/dunning {level, on?}` (0.27.0): the dunning level
+	 * 0–3 of an issued invoice with the day of the last reminder; no ledger
+	 * entry - a reminder is no step of the invoice. Team Admins.
+	 *
+	 * @return array<string,mixed> the record
+	 */
+	public function dunning(Membership $m, string $key, \stdClass $body): array {
+		$this->requireOn($m);
+		$this->requireAdmin($m);
+		RecordValidator::checkAddress(InvoiceRules::KIND, $key);
+		$now = $this->time->getTime();
+		$level = IssueRules::dunningLevel($body->level ?? null);
+		$on = $level === 0 ? null : IssueRules::dunnedOn($body->on ?? null, $now);
+		return $this->transaction(function () use ($m, $key, $level, $on): array {
+			$tid = $m->tenantId;
+			[$cur, $d] = $this->invoiceRecord($tid, $key);
+			$row = $this->invoices->findByKey($tid, $key);
+			if ($row === null || $row->getStatus() !== InvInvoice::ISSUED) {
+				throw ApiException::invalid('Only an issued invoice can be dunned.');
+			}
+			$d->dunning_level = $level;
+			$d->dunned_on = $on;
+			$written = $this->recordService->applyWithin($m, [$this->invoiceOp($key, $cur, $d)], false, null, true);
+			return $written['records'][0];
+		});
 	}
 
 	// ------------------------------------------------------------ reading

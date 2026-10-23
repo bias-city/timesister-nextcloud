@@ -30,6 +30,7 @@ import { vorlagen } from './teil-vorlagen.mjs'
 import { jobs } from './teil-jobs.mjs'
 import { wochen } from './teil-wochen.mjs'
 import { eintraege } from './teil-eintraege.mjs'
+import { listen } from './teil-listen.mjs'
 import { faktura } from './teil-faktura.mjs'
 import { dokumente } from './teil-dokumente.mjs'
 import { erechnung } from './teil-erechnung.mjs'
@@ -49,6 +50,7 @@ await vorlagen()
 await jobs()
 await wochen()
 await eintraege()
+await listen()
 await faktura()
 await dokumente()
 await erechnung()
