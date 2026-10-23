@@ -1,5 +1,153 @@
 # Changes
 
+## 0.28.0 – 2026-10-23
+
+Additive, `api: 2` unchanged; capability `entry_lists: 1`.
+
+- **Hours of external persons from a list** (2026-10-23). A subcontractor
+  delivers hours as a list; a Team Admin's app sends them per person with
+  `POST /entries/list` straight into the book (source `list`) – no account,
+  no calendar. `put` stores or replaces by event UID, `delete` tombstones;
+  billed or invoiced bookings stay (`locked`). They are corrected like any
+  booking (`POST /entries/correct` writes into the entry itself), and a
+  list sent again keeps the corrections. One call writes in one
+  transaction. When the person record is deleted, its list entries vanish.
+  They go into the team backup as `calendars/list-<uid>.ics` with
+  `list: true`, which an import writes back into the book – never onto a
+  member (`reason: member`). An object with several UIDs is refused.
+- **Delta for Leads in two steps.** `GET /entries` filters the rows by
+  role without their texts and reads the texts of the page only; a Lead's
+  delta no longer pulls the whole book through memory.
+- **Smaller.** A failed correction answers with a plain message, the cause
+  stays in the server log. The reading routes (`/entries`, `/records`,
+  `/team`, `/me`, receipt and expense report files) take at most 120
+  calls per minute and account. The entry reader, the weekly backup and
+  the chain head never run twice at once. Psalm is clean over the whole
+  app.
+
+## 0.27.0 – 2026-10-20
+
+Additive, `api: 2` unchanged; migration `Version1021` (a column, a table).
+
+- **Pipeline and receivables** (2026-10-21, PLAN-CONTROLLING C4). The
+  `quote` record takes `probability` (0–100) and `lost_reason`, the
+  `customer` record `type` (public, cooperative, private, company) and
+  `payment_days` (1–365; `POST /invoices/{key}/issue` without `due_days`
+  takes it), the `invoice` record `dunning_level` (0–3), `dunned_on` and
+  `payments` (a list of `{date, amount, note?}`). `POST /invoices/{key}/paid`
+  accepts `amount` for a partial payment: the invoice stays `issued` until
+  the payments reach its amount (ledger action `payment`, then `paid`);
+  `/unpaid` takes the payments back. New `POST /invoices/{key}/dunning
+  {level, on?}` sets the dunning level of an issued invoice (no ledger).
+  See API.md “Pipeline and receivables fields”.
+
+- **Office costs and liquidity** (2026-10-21, PLAN-CONTROLLING C5). A
+  fourth setting record `setting/office_costs`: the team's fixed costs
+  (`costs[]` with rhythm, due day, validity, kind, 13th salary month,
+  percentage for social insurance and VAT), the account balances as a
+  history (`balances[]`) and the minimum `reserve` – the data behind the
+  Mac app's cashflow forecast. Team Admins write and read it; Leads and
+  members never read it (403, also in the changes feed and the history).
+  Validation 422 per field. See API.md “The record `setting/office_costs`”.
+
+- **Corrections of bookings** (2026-10-21). `POST /entries/correct` lets a
+  Team Admin or the Lead of the project change title, code, billable and
+  level of one or more bookings `{uid, event_uid}`; the app rewrites the
+  event in the person's time calendar through the dav backend – the one
+  exception to «the server never writes into a named calendar» – and
+  stores it in the book at once. Date, start and duration never change.
+  A booking in an issued invoice or with a billing mark is `locked`; a Lead
+  needs the old and the new project; each booking answers for itself
+  (`ok`, `locked`, `forbidden`, `not_found`, `failed`). The level is the
+  property `X-TIMESISTER-LEVEL:<id>` (never a rate), billable the category
+  `non-billable`. `GET /entries` adds `level`; `GET /entries/corrections`
+  is the protocol (who, when, what). Capability `corrections: 1`. The Mac
+  app no longer writes `billable` marks; the kind stays for old clients.
+
+- **Corrections as records, offline and per occurrence** (2026-10-21,
+  `corrections: 2`, migration `Version1022`). The record `correction` (key:
+  person `+` 32 hex digits of the SHA-256 of the event UID, with a
+  recurrence `UID\nrecurrence`) carries the target state of a booking's
+  corrected fields and is applied as it is written – rights and lock as
+  `POST /entries/correct`, the outcome (`status`, `message`, `by`, `at`,
+  `etag`, `codes`) in the record; idempotent. With `recurrence`
+  (`YYYYMMDDTHHMMSS`/`YYYYMMDD`) only that occurrence's exception changes
+  (created from the master when there is none). A corrected field is the
+  lead's: when the book reads the event and a corrected field was changed
+  elsewhere, the server writes the correction back, notes `reapplied`,
+  counts it on the record and notifies the person. Protocol rows add
+  `recurrence` and `kind`. See API.md “Corrections as records”.
+
+- **Work package: `progress_log`** (2026-10-21). The log of how far a
+  package is (`done`, a whole percent) and the remaining effort in hours
+  (`remaining`), per day and person (`by`); `progress` stays the newest
+  `done` for old clients. Checked on write (at most 500 entries, a day,
+  at least one value). On a project write the server joins the stored
+  entries into the incoming list – same `date` and `by` is the same entry,
+  the incoming one wins – so no client drops another's; a package sent
+  without the field keeps its log, a changed bare `progress` becomes an
+  entry of today. `ProgressLog`, see API.md “Work package: `progress_log`”.
+- **Levels.** The team setting `levels` lists the levels of the work
+  (`id`, `name`, default `rates` with `from`); a person carries one as
+  `levels: [{from, level}]`; a project overrides the rate per level in
+  `level_rates: {id: rate}`. Members read the setting without the rates
+  and never a person's level; Team Admins and Leads read both. Checked and
+  stored only – the clients value the hours. (`billing_rates`, a rate per
+  person, was dropped before this version shipped.)
+- **Project: `currency`.** `null` or three letters, stored upper case: the
+  one currency of the project; `level_rates` and the budgets count in it.
+  With a currency on the project every `budgets[].currency` is set to it on
+  write – older clients keep reading it there; without one a budget keeps
+  its own. Sums across projects are per currency, there is no exchange
+  rate. Never in the booking catalog. Checked and stored only.
+- **Person: `company`.** `null` or up to 80 characters names a
+  subcontractor's company; it is part of the name card Leads read.
+  Checked and stored only.
+- **Budget: `addenda`.** A list of at most 200 orders after the quote:
+  `no` (≥ 1, unique), `date`, `status` (`open`, `approved`, `rejected`),
+  `title`, and exactly one target – `package` (a work package's `no`, with
+  `hours` ≥ 0) or `cost` (a cost position's `no`, with `amount` ≥ 0);
+  optional `reference` and `description`. The client counts approved ones
+  in the phase of their date. Checked and stored only.
+- **Work package: `progress`.** `null` or a whole percent 0–100, set by the
+  Lead: how far the package is. Without it the client estimates from done
+  jobs. Checked and stored only.
+- **Invoice: `review`.** The approval mark on a draft: `null` or
+  `{state: requested|returned, by, at, note, changed_at, returned_by,
+  returned_at, returned_note}`. A Lead submits (`requested`) or withdraws
+  (`null`) the drafts of their projects; only a Team Admin sets `returned`
+  and the `returned_*` block – a Lead's write that does is `403`. Issuing
+  stays `POST /invoices/{key}/issue`, Team Admins only. Checked and stored
+  only.
+
+- **Reversal of an invoice with an advance deduction** (2026-10-21). A
+  final invoice that deducts an advance could not be reversed or credited:
+  the negated lines failed the check “An advance deduction has an amount
+  ≤ 0”. On a reversal or credit note (`reverses`/`credits` set) the signs
+  of `advance` and `advance_deduction` now mirror (≤ 0 and ≥ 0); the
+  ledger and the chain are unchanged. `InvoiceRules::checkPositions` takes
+  `$negated`; a credit note's own `positions` are checked as negated lines.
+
+- **Quote as a subtree** (2026-10-21, capability `quotes: 3`). A quote
+  holds `budgets` (1–50, each checked as a project's budget, ids unique),
+  a target – `project` or a `project_draft` (`code` proposal, `name`; the
+  draft lives only in the quote and is no project record; never both) –
+  and after acceptance `budget_ids`. New statuses `negotiation` and
+  `verbal`, open like `quoted`. The old `budget` and `budget_id` stay
+  accepted; `hours` and `amount` sum over all budgets. The invoice's
+  customer is found through `budget_ids` as well.
+
+## 0.26.3 – 2026-10-20
+
+Additive, `api: 2` unchanged, no migration.
+
+- **A work package with packages below has no hours of its own**: `hours`
+  of such a package must be all zero (or absent); its figure is the sum of
+  the packages below. A package's `rate` is the default for the packages
+  below without one. Refused with 422 otherwise.
+- **A cost position may carry a `code`** (`null` or 1–60 characters): the
+  code of the work package its costs belong to. Stored and checked only.
+
 ## 0.26.2 – 2026-10-19
 
 Additive, `api: 2` unchanged, no migration.

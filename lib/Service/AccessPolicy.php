@@ -13,6 +13,7 @@ namespace OCA\TimeSister\Service;
  * |                              | user   | lead              | admin       |
  * |------------------------------|--------|-------------------|-------------|
  * | setting, region, project     | read   | read              | read, write |
+ * | setting/office_costs         | –      | –                 | read, write |
  * | person, own                  | read   | read              | read, write |
  * | person, others'              | –      | name card         | read, write |
  * | customer                     | –      | of their projects | read, write |

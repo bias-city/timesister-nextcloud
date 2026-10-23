@@ -4,7 +4,8 @@ Server side of the TimeSister time tracker (macOS): master data as
 versioned records, separate teams via one Nextcloud group each (roles
 Team Admin, Lead and User; Team Admins are that group's group admins),
 the team's time entries read from the members' named calendars and feeds
-(0.17.0; no calendar shares), Jobs (shares of a project or work package
+(0.17.0; no calendar shares) – only the hours of external persons that a
+Team Admin imports from a list live in the app's database (0.28.0) –, Jobs (shares of a project or work package
 offered to people of the team), invoices issued on the server with an
 append-only ledger and a SHA-256 chain (0.18.0), permission checks on the
 server, history, calendar backups and status

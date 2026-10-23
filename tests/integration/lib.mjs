@@ -44,6 +44,12 @@ export const ACCOUNTS = [
 	['pblead', 'Lea Planer', 'pb', 'lead'],
 	['pbuser1', 'Mia Muster', 'pb', 'user'],
 	['pbuser2', 'Noah Beispiel', 'pb', 'user'],
+	// PLAN-TESTDATEN (21.10.2026): fuenf weitere Mitglieder fuer das SIA-Testprojekt.
+	['pbuser3', 'Sara Frei', 'pb', 'user'],
+	['pbuser4', 'Jonas Weber', 'pb', 'user'],
+	['pbuser5', 'Lea Graf', 'pb', 'user'],
+	['pbuser6', 'Thomas Baumann', 'pb', 'user'],
+	['pbuser7', 'Nina Kälin', 'pb', 'user'],
 	['atadmin', 'Anna Keller', 'at', 'admin'],
 	['atlead', 'Luca Leitner', 'at', 'lead'],
 	['atuser1', 'Tim Test', 'at', 'user'],

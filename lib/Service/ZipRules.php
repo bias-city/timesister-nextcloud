@@ -70,6 +70,12 @@ final class ZipRules {
 		return self::CALENDARS . $name . '.ics';
 	}
 
+	/** The hours of an external person from lists (0.28.0): never the path of a member's calendar of the same uid. */
+	public static function listPath(string $uid): string {
+		$name = preg_match('/^[A-Za-z0-9_@.-]{1,64}$/', $uid) ? $uid : 'h-' . hash('sha256', $uid);
+		return self::CALENDARS . 'list-' . $name . '.ics';
+	}
+
 	/**
 	 * @param array{id:int,name:string,slug:string,group:?string} $team
 	 * @param array<string,array<string,mixed>> $files path → {sha256, size, …}
@@ -98,7 +104,7 @@ final class ZipRules {
 	/**
 	 * The manifest as decoded: format known, team and files well-formed.
 	 *
-	 * @return array{format:int,app_version:string,api:int,team:array{id:int,name:string,slug:string,group:?string},taken_at:string,files:array<string,array{sha256:?string,size:?int,uid:?string,missing:bool}>}
+	 * @return array{format:int,app_version:string,api:int,team:array{id:int,name:string,slug:string,group:?string},taken_at:string,files:array<string,array{sha256:?string,size:?int,uid:?string,missing:bool,list:bool}>}
 	 */
 	public static function checkManifest(mixed $m): array {
 		if (!is_array($m) || ($m['format'] ?? null) !== self::FORMAT) {
@@ -128,6 +134,8 @@ final class ZipRules {
 				'size' => is_int($size) ? $size : null,
 				'uid' => is_string($uid) ? $uid : null,
 				'missing' => $missing,
+				// 0.28.0: the list entries of an external person, from the book.
+				'list' => ($e['list'] ?? false) === true,
 			];
 		}
 		return [
@@ -149,7 +157,7 @@ final class ZipRules {
 	 * Every listed file has the right size and checksum; nothing in the
 	 * ZIP is unlisted. The manifest itself is not listed.
 	 *
-	 * @param array<string,array{sha256:?string,size:?int,uid:?string,missing:bool}> $listed
+	 * @param array<string,array{sha256:?string,size:?int,uid:?string,missing:bool,list:bool}> $listed
 	 * @param array<string,int> $present path → size, without the manifest
 	 * @param callable(string):string $read
 	 */

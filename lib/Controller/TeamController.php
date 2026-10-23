@@ -33,6 +33,7 @@ final class TeamController extends BaseController {
 	/** GET /team – name, team group, members with role, including those who left. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/team')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function show(): DataResponse {
 		return $this->run(function () {
 			$m = $this->tenants->current();

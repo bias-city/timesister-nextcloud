@@ -35,6 +35,7 @@ final class RecordController extends BaseController {
 	/** GET /records?since=<revision> */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/records')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function index(): DataResponse {
 		return $this->run(function () {
 			$m = $this->tenants->current();

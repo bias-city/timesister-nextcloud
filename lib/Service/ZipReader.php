@@ -12,7 +12,7 @@ namespace OCA\TimeSister\Service;
  */
 final class ZipReader {
 	/**
-	 * @return array{manifest:array<string,mixed>,team:array<string,mixed>,records:list<array<string,mixed>>,status:array<string,array<string,mixed>>,absences:array<string,list<array{source_uid:string,kind:string,start:string,end:string}>>,calendars:list<array{uid:string,path:string,size:int,missing:bool}>,template:?array{meta:array{name:string,size:int,sha256:string,modified_at:string,modified_by:string},path:string}}
+	 * @return array{manifest:array<string,mixed>,team:array<string,mixed>,records:list<array<string,mixed>>,status:array<string,array<string,mixed>>,absences:array<string,list<array{source_uid:string,kind:string,start:string,end:string}>>,calendars:list<array{uid:string,path:string,size:int,missing:bool,list:bool}>,template:?array{meta:array{name:string,size:int,sha256:string,modified_at:string,modified_by:string},path:string}}
 	 */
 	public static function read(ZipFile $zip): array {
 		$present = $zip->entries();
@@ -39,7 +39,7 @@ final class ZipReader {
 		foreach ($manifest['files'] as $p => $e) {
 			if (str_starts_with($p, ZipRules::CALENDARS)) {
 				$uid = $e['uid'] ?? substr($p, strlen(ZipRules::CALENDARS), -4);
-				$calendars[] = ['uid' => $uid, 'path' => $p, 'size' => $e['size'] ?? 0, 'missing' => $e['missing']];
+				$calendars[] = ['uid' => $uid, 'path' => $p, 'size' => $e['size'] ?? 0, 'missing' => $e['missing'], 'list' => $e['list'] ?? false];
 			}
 		}
 		return [

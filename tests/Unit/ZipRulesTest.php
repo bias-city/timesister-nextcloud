@@ -63,6 +63,25 @@ class ZipRulesTest extends TestCase {
 		$this->assertSame('422 invalid', self::code(fn () => ZipRules::verify($v['files'], ['team.json' => strlen($team)], static fn () => 'other')));
 	}
 
+	/** 0.28.0: the hours of an external person from lists – own path, `list: true` in the manifest. */
+	public function testListPathAndManifest(): void {
+		$this->assertSame('calendars/list-ext-max.ics', ZipRules::listPath('ext-max'));
+		$this->assertNotSame(ZipRules::calendarPath('ext-max'), ZipRules::listPath('ext-max'), 'never the path of a member\'s calendar');
+		$odd = ZipRules::listPath('a b/../c');
+		$this->assertMatchesRegularExpression('#^calendars/list-h-[0-9a-f]{64}\\.ics$#', $odd);
+		$this->assertTrue(ZipRules::isSafePath($odd));
+		$ics = "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n";
+		$m = self::manifest(['calendars/list-ext-max.ics' => ZipRules::fileEntry($ics, ['uid' => 'ext-max', 'list' => true]), 'calendars/x.ics' => ZipRules::fileEntry($ics, ['uid' => 'x'])]);
+		$v = ZipRules::checkManifest(json_decode(json_encode($m), true));
+		$this->assertTrue($v['files']['calendars/list-ext-max.ics']['list']);
+		$this->assertSame('ext-max', $v['files']['calendars/list-ext-max.ics']['uid']);
+		$this->assertFalse($v['files']['calendars/x.ics']['list'], 'a member\'s calendar');
+		// Only `true` counts; an older manifest has no field at all.
+		$loose = json_decode(json_encode($m), true);
+		$loose['files']['calendars/x.ics']['list'] = 1;
+		$this->assertFalse(ZipRules::checkManifest($loose)['files']['calendars/x.ics']['list']);
+	}
+
 	public function testManifestRejected(): void {
 		$this->assertSame('422 invalid', self::code(fn () => ZipRules::checkManifest(null)));
 		$this->assertSame('422 invalid', self::code(fn () => ZipRules::checkManifest(['format' => 2])));

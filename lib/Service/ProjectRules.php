@@ -28,6 +28,8 @@ final class ProjectRules {
 	public const TEAM_ROLES = ['member', 'sparring', 'support', 'qa'];
 	public const MAX_TEAM = 100;
 	public const CURRENCY_PATTERN = '/^[A-Za-z]{3}$/';
+	/** 0.27.0: the project's currency – one per project, its budgets inherit it. */
+	public const CURRENCY = 'currency';
 	/** 0.25.0: what the budgets are called («Phasen»), from the template the project came from. */
 	public const BUDGET_LABEL = 'budget_label';
 	public const BUDGET_LABEL_MAX = 60;
@@ -62,6 +64,18 @@ final class ProjectRules {
 				|| preg_match('/[\x00-\x1F\x7F]/', $label) === 1 || !mb_check_encoding($label, 'UTF-8'))) {
 			throw ApiException::invalid(Message::of('“{field}” must be text of 1 to {max} characters.', ['field' => self::BUDGET_LABEL, 'max' => self::BUDGET_LABEL_MAX]));
 		}
+		// 0.27.0: the rates of the levels in this project ({@see LevelRules}).
+		LevelRules::validateProject($data->{LevelRules::PROJECT_FIELD} ?? null);
+		// 0.27.0: the project's currency (null or three letters, stored upper case);
+		// a budget's `currency` stays for older clients and follows the project's.
+		$currency = $data->{self::CURRENCY} ?? null;
+		if ($currency !== null) {
+			if (!is_string($currency) || preg_match(self::CURRENCY_PATTERN, $currency) !== 1) {
+				throw ApiException::invalid('“currency” must be three letters, for example CHF.');
+			}
+			$currency = strtoupper($currency);
+			$data->{self::CURRENCY} = $currency;
+		}
 		$budgets = $data->budgets ?? null;
 		if (!is_array($budgets)) {
 			return;
@@ -69,6 +83,9 @@ final class ProjectRules {
 		foreach ($budgets as $b) {
 			if ($b instanceof \stdClass) {
 				self::checkBudget($b);
+				if ($currency !== null) {
+					$b->currency = $currency;
+				}
 			}
 		}
 	}
@@ -215,6 +232,7 @@ final class ProjectRules {
 		self::checkBillingPlan($b->{self::BILLING_PLAN} ?? null);
 		// 0.21.0: the cost positions beside the work packages (module «costs»).
 		CostRules::check($b->{CostRules::FIELD} ?? null);
+		self::checkAddenda($b);
 		$wps = $b->work_packages ?? null;
 		if (!is_array($wps)) {
 			return;
@@ -226,9 +244,34 @@ final class ProjectRules {
 				$nos[] = mb_strtolower(trim((string)$wp->no));
 			}
 		}
+		// 0.26.3: a package with packages below has no hours of its own – only the sum.
+		$parents = [];
+		foreach ($wps as $wp) {
+			$parent = $wp instanceof \stdClass ? ($wp->parent ?? null) : null;
+			if (is_string($parent)) {
+				$parents[] = mb_strtolower(trim($parent));
+			}
+		}
 		foreach ($wps as $wp) {
 			if ($wp instanceof \stdClass && ($wp->rate ?? null) !== null && !self::isRate($wp->rate)) {
 				throw ApiException::invalid('“rate” must be a number ≥ 0.');
+			}
+			$hours = $wp instanceof \stdClass ? ($wp->hours ?? null) : null;
+			if ($wp instanceof \stdClass && is_array($hours)
+				&& in_array(mb_strtolower(trim((string)(is_string($wp->no ?? null) || is_int($wp->no ?? null) ? $wp->no : ''))), $parents, true)) {
+				foreach ($hours as $h) {
+					if (is_numeric($h) && (float)$h > 0) {
+						throw ApiException::invalid('A work package with packages below has no hours of its own – move them to a package below.');
+					}
+				}
+			}
+			// 0.27.0: how far the package is, a whole percent set by the Lead; null: estimated by the client.
+			if ($wp instanceof \stdClass && ($wp->progress ?? null) !== null && (!is_int($wp->progress) || $wp->progress < 0 || $wp->progress > 100)) {
+				throw ApiException::invalid('Work package “progress” must be null or a whole number from 0 to 100.');
+			}
+			// 0.27.0: the log of done and remaining effort per day and person ({@see ProgressLog}).
+			if ($wp instanceof \stdClass) {
+				ProgressLog::check($wp);
 			}
 			// 0.24.1: a work package added later (addendum), shown and counted as such.
 			if ($wp instanceof \stdClass && ($wp->addendum ?? null) !== null && !is_bool($wp->addendum)) {
@@ -236,6 +279,87 @@ final class ProjectRules {
 			}
 			if ($wp instanceof \stdClass) {
 				self::checkParentAndTags($wp, $nos);
+			}
+		}
+	}
+
+	/** 0.27.0: at most this many addenda per budget. */
+	public const ADDENDA_MAX = 200;
+	public const ADDENDUM_STATUS = ['open', 'approved', 'rejected'];
+
+	/**
+	 * 0.27.0: `addenda` null or a list of at most 200 objects – an order after
+	 * the quote. Each has an integer `no` ≥ 1 (unique), a day `date`, a
+	 * `status` from the list, a `title` (≤ 200), and exactly one target:
+	 * `package` (the `no` of a work package of this budget, with `hours` ≥ 0)
+	 * or `cost` (the `no` of a cost position, with `amount` ≥ 0). `reference`
+	 * ≤ 200 and `description` ≤ 1000 characters, both optional.
+	 *
+	 * @throws ApiException 422
+	 */
+	private static function checkAddenda(\stdClass $b): void {
+		$list = $b->addenda ?? null;
+		if ($list === null) {
+			return;
+		}
+		if (!is_array($list) || !array_is_list($list) || count($list) > self::ADDENDA_MAX) {
+			throw ApiException::invalid(Message::of('“{field}” must be a list of at most {limit} entries.', ['field' => 'addenda', 'limit' => self::ADDENDA_MAX]));
+		}
+		$packages = [];
+		foreach ($b->work_packages ?? [] as $wp) {
+			if ($wp instanceof \stdClass && (is_string($wp->no ?? null) || is_int($wp->no ?? null))) {
+				$packages[] = mb_strtolower(trim((string)$wp->no));
+			}
+		}
+		$costs = [];
+		foreach ($b->{CostRules::FIELD} ?? [] as $c) {
+			if ($c instanceof \stdClass && is_int($c->no ?? null)) {
+				$costs[] = $c->no;
+			}
+		}
+		$seen = [];
+		foreach ($list as $i => $a) {
+			$n = $i + 1;
+			if (!($a instanceof \stdClass)) {
+				throw ApiException::invalid(Message::of('Addendum {n}: must be a JSON object.', ['n' => $n]));
+			}
+			$no = $a->no ?? null;
+			if (!is_int($no) || $no < 1 || isset($seen[$no])) {
+				throw ApiException::invalid(Message::of('Addendum {n}: “no” must be an integer ≥ 1, unique within the budget.', ['n' => $n]));
+			}
+			$seen[$no] = true;
+			$date = $a->date ?? null;
+			if (!is_string($date) || !Time::isDay($date)) {
+				throw ApiException::invalid(Message::of('Addendum {n}: “date” must be a day (YYYY-MM-DD).', ['n' => $n]));
+			}
+			if (!in_array($a->status ?? 'open', self::ADDENDUM_STATUS, true)) {
+				throw ApiException::invalid(Message::of('Addendum {n}: “status” must be open, approved or rejected.', ['n' => $n]));
+			}
+			foreach ([['title', 200], ['reference', 200], ['description', 1000]] as [$f, $max]) {
+				$v = $a->{$f} ?? null;
+				if ($v !== null && (!is_string($v) || mb_strlen($v) > $max || preg_match(self::CONTROL, $v) || !mb_check_encoding($v, 'UTF-8'))) {
+					throw ApiException::invalid(Message::of('Addendum {n}: “{field}” must be null or text of at most {max} characters.', ['n' => $n, 'field' => $f, 'max' => $max]));
+				}
+			}
+			$package = $a->package ?? null;
+			$cost = $a->cost ?? null;
+			if (($package === null) === ($cost === null)) {
+				throw ApiException::invalid(Message::of('Addendum {n}: exactly one of “package” and “cost”.', ['n' => $n]));
+			}
+			if ($package !== null) {
+				if ((!is_string($package) && !is_int($package)) || !in_array(mb_strtolower(trim((string)$package)), $packages, true)) {
+					throw ApiException::invalid(Message::of('Addendum {n}: “package” must be the “no” of a work package of this budget.', ['n' => $n]));
+				}
+				if (!self::isRate($a->hours ?? null) || ($a->amount ?? null) !== null) {
+					throw ApiException::invalid(Message::of('Addendum {n}: a work package addendum needs “hours” ≥ 0 and no “amount”.', ['n' => $n]));
+				}
+			} else {
+				if (!is_int($cost) || !in_array($cost, $costs, true)) {
+					throw ApiException::invalid(Message::of('Addendum {n}: “cost” must be the “no” of a cost position of this budget.', ['n' => $n]));
+				}
+				if (!self::isRate($a->amount ?? null) || ($a->hours ?? null) !== null) {
+					throw ApiException::invalid(Message::of('Addendum {n}: a cost position addendum needs “amount” ≥ 0 and no “hours”.', ['n' => $n]));
+				}
 			}
 		}
 	}

@@ -13,6 +13,13 @@ namespace OCA\TimeSister\Service;
  * sets the quote `accepted` – two ordinary record writes. Pure: content and
  * the Lead's rule.
  *
+ * Since 0.27.0 (`quotes: 3`) a quote is a subtree: `budgets` (1–n, each as
+ * the old `budget`), a target – `project` or a `project_draft` (code
+ * proposal and name of the project the acceptance creates; it lives only
+ * in the quote) – and after acceptance `budget_ids`. The statuses
+ * `negotiation` and `verbal` count as open like `quoted`. The old
+ * `budget` and `budget_id` stay accepted; the client reads them as one.
+ *
  * Team Admins read and write every quote. A Lead reads a quote whose
  * `leads` name them (as a project's `leads` do) or that belongs to a project
  * they lead, and writes only such quotes – before and after the write.
@@ -21,7 +28,10 @@ namespace OCA\TimeSister\Service;
 final class QuoteRules {
 	public const KIND = 'quote';
 	public const ACCEPTED = 'accepted';
-	public const STATUSES = ['draft', 'quoted', self::ACCEPTED, 'declined'];
+	public const STATUSES = ['draft', 'quoted', 'negotiation', 'verbal', self::ACCEPTED, 'declined'];
+	/** 0.27.0: at most this many budgets in one quote. */
+	public const BUDGETS_MAX = 50;
+	public const DRAFT_CODE_MAX = 64;
 	public const KEY_PATTERN = '/^q-[0-9a-f]{8}$/';
 	/** A budget with many work packages may need more than the usual 256 KB. */
 	public const MAX_BYTES = 786432;
@@ -36,6 +46,8 @@ final class QuoteRules {
 	public const BUDGET_ID_MAX = 128;
 	public const BY_MAX = 64;
 	public const DAYS = ['date', 'valid_until', 'accepted_on', 'created_on'];
+	public const PROBABILITY_MAX = 100;
+	public const LOST_REASON_MAX = 500;
 
 	private const CONTROL = '/[\x00-\x1F\x7F]/';
 	private const CONTROL_NOTE = '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/';
@@ -84,16 +96,51 @@ final class QuoteRules {
 		if ($pdf !== null && (!is_string($pdf) || mb_strlen($pdf) > self::PDF_MAX || preg_match(self::PDF_URL, $pdf) !== 1)) {
 			throw ApiException::invalid(Message::of('“pdf” must be null or an http:// or https:// address of at most {max} characters.', ['max' => self::PDF_MAX]));
 		}
-		$budget = $d->budget ?? null;
-		if ($budget !== null) {
-			$id = $budget instanceof \stdClass ? ($budget->id ?? null) : null;
-			if (!is_string($id) || trim($id) === '' || mb_strlen($id) > self::BUDGET_ID_MAX || preg_match(self::CONTROL, $id) || !mb_check_encoding($id, 'UTF-8')) {
-				throw ApiException::invalid(Message::of('“budget” must be null or an object with an “id” of 1 to {max} characters.', ['max' => self::BUDGET_ID_MAX]));
+		self::budget($d->budget ?? null, 'budget');
+		// 0.27.0: the budgets of the subtree, each as `budget`, ids unique.
+		$budgets = $d->budgets ?? null;
+		if ($budgets !== null) {
+			if (!is_array($budgets) || !array_is_list($budgets) || count($budgets) > self::BUDGETS_MAX) {
+				throw ApiException::invalid(Message::of('“budgets” must be null or a list of at most {max} budgets.', ['max' => self::BUDGETS_MAX]));
 			}
-			// The same rules as a project's budget: currency, cap, rates.
-			ProjectRules::checkBudget($budget);
+			$ids = [];
+			foreach ($budgets as $b) {
+				self::budget($b, 'budgets');
+				$ids[] = (string)$b->id;
+			}
+			if (count($ids) !== count(array_unique($ids))) {
+				throw ApiException::invalid('“budgets” must not hold the same “id” twice.');
+			}
 		}
 		self::nullableText($d->budget_id ?? null, 'budget_id', self::BUDGET_ID_MAX);
+		$ids = $d->budget_ids ?? null;
+		if ($ids !== null) {
+			$ok = is_array($ids) && array_is_list($ids) && count($ids) <= self::BUDGETS_MAX;
+			foreach ($ok ? $ids : [] as $id) {
+				if (!is_string($id) || trim($id) === '' || mb_strlen($id) > self::BUDGET_ID_MAX || preg_match(self::CONTROL, $id) || !mb_check_encoding($id, 'UTF-8')) {
+					$ok = false;
+					break;
+				}
+			}
+			if (!$ok) {
+				throw ApiException::invalid(Message::of('“budget_ids” must be null or a list of at most {max} budget ids of 1 to {chars} characters.', ['max' => self::BUDGETS_MAX, 'chars' => self::BUDGET_ID_MAX]));
+			}
+		}
+		// 0.27.0: the project draft – the target when there is no project yet.
+		$draft = $d->project_draft ?? null;
+		if ($draft !== null) {
+			$name = $draft instanceof \stdClass ? ($draft->name ?? null) : null;
+			if (!is_string($name) || $name === '' || mb_strlen($name) > self::NAME_MAX || preg_match(self::CONTROL, $name) || !mb_check_encoding($name, 'UTF-8')) {
+				throw ApiException::invalid(Message::of('“project_draft” must be null or an object with a “name” of 1 to {max} characters.', ['max' => self::NAME_MAX]));
+			}
+			$code = $draft->code ?? null;
+			if ($code !== null && (!is_string($code) || $code === '' || mb_strlen($code) > self::DRAFT_CODE_MAX || preg_match('/[\s#.\x00-\x1F\x7F]/', $code) || !mb_check_encoding($code, 'UTF-8'))) {
+				throw ApiException::invalid(Message::of('“project_draft.code” must be null or a code of 1 to {max} characters without spaces, # or dots.', ['max' => self::DRAFT_CODE_MAX]));
+			}
+			if ($project !== null) {
+				throw ApiException::invalid('A quote has either “project” or “project_draft”, not both.');
+			}
+		}
 		// Frozen at acceptance: hours, amount and currency.
 		foreach (['hours', 'amount'] as $f) {
 			$v = $d->{$f} ?? null;
@@ -109,6 +156,27 @@ final class QuoteRules {
 			$d->currency = strtoupper($c);
 		}
 		self::text($d->created_by ?? null, 'created_by', self::BY_MAX, self::CONTROL);
+		// 0.27.0 (controlling): the probability to win in percent and the reason when lost.
+		$pr = $d->probability ?? null;
+		if ($pr !== null && (!is_int($pr) || $pr < 0 || $pr > self::PROBABILITY_MAX)) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or an integer from {min} to {max}.', ['field' => 'probability', 'min' => 0, 'max' => self::PROBABILITY_MAX]));
+		}
+		self::text($d->lost_reason ?? null, 'lost_reason', self::LOST_REASON_MAX, self::CONTROL_NOTE);
+	}
+
+	/** Null or a budget object with an `id`, checked as a project's budget (currency, cap, rates). */
+	private static function budget(mixed $budget, string $field): void {
+		if ($budget === null) {
+			return;
+		}
+		$id = null;
+		if ($budget instanceof \stdClass) {
+			$id = $budget->id ?? null;
+		}
+		if (!is_string($id) || trim($id) === '' || mb_strlen($id) > self::BUDGET_ID_MAX || preg_match(self::CONTROL, $id) || !mb_check_encoding($id, 'UTF-8')) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or an object with an “id” of 1 to {max} characters.', ['field' => $field, 'max' => self::BUDGET_ID_MAX]));
+		}
+		ProjectRules::checkBudget($budget);
 	}
 
 	/** Missing, null or a list of at most 20 accounts or person keys. */

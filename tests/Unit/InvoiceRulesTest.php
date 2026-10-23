@@ -54,6 +54,24 @@ class InvoiceRulesTest extends TestCase {
 		return self::outcome(fn () => RecordValidator::validate('invoice', 'inv-1a2b3c4d', self::data($over, $drop)));
 	}
 
+	/** 0.27.0 (controlling): the dunning level, the day of the last reminder and the payments. */
+	public function testPaymentsAndDunning(): void {
+		$this->assertSame('ok', self::check(['dunning_level' => 2, 'dunned_on' => '2026-10-20']));
+		$this->assertSame('ok', self::check(['dunning_level' => null, 'dunned_on' => null, 'payments' => null]));
+		$this->assertSame('ok', self::check(['payments' => [['date' => '2026-10-01', 'amount' => 300], ['date' => '2026-10-15', 'amount' => 700.5, 'note' => 'rest']]]));
+		$this->assertSame('422 “dunning_level” must be null or an integer from 0 to 3.', self::check(['dunning_level' => 4]));
+		$this->assertSame('422 “dunning_level” must be null or an integer from 0 to 3.', self::check(['dunning_level' => '1']));
+		$this->assertSame('422 “dunned_on” must be a day in the format YYYY-MM-DD.', self::check(['dunned_on' => '20.10.2026']));
+		$bad = '422 “payments” must be null or a list of at most 200 payments, each with a day “date”, an “amount” above 0 and an optional “note”.';
+		$this->assertSame($bad, self::check(['payments' => 'x']));
+		$this->assertSame($bad, self::check(['payments' => [['date' => '2026-10-01', 'amount' => 0]]]));
+		$this->assertSame($bad, self::check(['payments' => [['date' => '2026-10-1', 'amount' => 1]]]));
+		$this->assertSame($bad, self::check(['payments' => [['date' => '2026-10-01', 'amount' => 1, 'note' => str_repeat('n', 501)]]]));
+		$d = self::data(['payments' => [['date' => '2026-10-01', 'amount' => 300], ['date' => '2026-10-15', 'amount' => 700.5]]]);
+		$this->assertSame(1000.5, InvoiceRules::paymentsSum($d));
+		$this->assertSame(0.0, InvoiceRules::paymentsSum(self::data()));
+	}
+
 	public function testKindAndKey(): void {
 		$this->assertContains('invoice', RecordValidator::KINDS);
 		$this->assertTrue(RecordValidator::isKey('inv-1a2b3c4d'));
@@ -234,6 +252,18 @@ class InvoiceRulesTest extends TestCase {
 		$this->assertSame('422 Position 1: Only an advance deduction names an “invoice”.', self::check(['positions' => [array_merge($adv, ['invoice' => 'inv-0a1b2c3d'])]]));
 		$this->assertSame('422 Position 1: An advance belongs to the fee: no cost position, not pass-through.', self::check(['positions' => [array_merge($adv, ['cost' => 1])]]));
 		$this->assertSame('422 Position 1: An advance belongs to the fee: no cost position, not pass-through.', self::check(['positions' => [array_merge($ded, ['vat_mode' => 'pass_through'])]]));
+		// 0.27.0: a reversal or credit note carries the negated lines - the advance signs mirror (a final
+		// invoice with an advance deduction was not reversible before: «An advance deduction has an amount ≤ 0»).
+		$negAdv = array_merge($adv, ['amount' => -13500]);
+		$negDed = array_merge($ded, ['amount' => 13500]);
+		foreach (['reverses', 'credits'] as $link) {
+			$this->assertSame('ok', self::check([$link => 'inv-0a1b2c3d', 'status' => 'issued', 'number' => 'RE-2', 'positions' => [$negAdv]]), "a reversed advance invoice ($link)");
+			$this->assertSame('ok', self::check([$link => 'inv-0a1b2c3d', 'status' => 'issued', 'number' => 'RE-2', 'positions' => [['kind' => 'hours', 'text' => 'Planung', 'hours' => 300, 'rate' => 150, 'amount' => -45000], $negDed]]), "a reversed final invoice ($link)");
+			$this->assertSame('422 Position 1: A reversed advance has an amount ≤ 0.', self::check([$link => 'inv-0a1b2c3d', 'status' => 'issued', 'number' => 'RE-2', 'positions' => [$adv]]));
+			$this->assertSame('422 Position 1: A reversed advance deduction has an amount ≥ 0.', self::check([$link => 'inv-0a1b2c3d', 'status' => 'issued', 'number' => 'RE-2', 'positions' => [$ded]]));
+		}
+		$this->assertSame('422 Position 1: An advance deduction has an amount ≤ 0.', self::check(['positions' => [$negDed]]), 'without a link the plain rule');
+		$this->assertSame('ok', self::outcome(fn () => InvoiceRules::checkPositions([(object)$negDed], true)), 'the public check for a credit note’s own lines');
 		$this->assertTrue(InvoiceRules::isAdvance([$adv]));
 		$this->assertTrue(InvoiceRules::isAdvance([(object)$adv]));
 		$this->assertFalse(InvoiceRules::isAdvance([$ded]));
@@ -293,6 +323,43 @@ class InvoiceRulesTest extends TestCase {
 		$r->setData(Json::encode($d));
 		$r->setDeleted($tombstone ? 1 : 0);
 		return $r;
+	}
+
+	/** 0.27.0: the approval mark – content, and what a Lead may do with it. */
+	public function testReview(): void {
+		$ok = ['state' => 'requested', 'by' => 'lea', 'at' => '2026-10-21T14:05:00', 'note' => 'please check'];
+		$this->assertSame('ok', self::check(['review' => $ok]));
+		$this->assertSame('ok', self::check(['review' => null]));
+		$this->assertSame('ok', self::check(['review' => ['state' => 'returned', 'by' => 'lea', 'at' => '2026-10-21', 'returned_by' => 'petra', 'returned_at' => '2026-10-22T09:00:00', 'returned_note' => 'rate?']]));
+		$this->assertStringStartsWith('422', self::check(['review' => 'requested']), 'not an object');
+		$this->assertStringStartsWith('422', self::check(['review' => ['state' => 'approved']]), 'unknown state');
+		$this->assertStringStartsWith('422', self::check(['review' => $ok + ['changed_at' => '21.10.2026']]), 'time format');
+		$this->assertStringStartsWith('422', self::check(['review' => ['state' => 'requested', 'note' => str_repeat('x', 2001)]]), 'note too long');
+		$this->assertStringStartsWith('422', self::check(['review' => ['state' => 'requested', 'by' => str_repeat('b', 65)]]), 'by too long');
+		// Normalised: only the known members, missing ones null.
+		$d = self::data(['review' => ['state' => 'requested', 'by' => 'lea', 'extra' => 1]]);
+		InvoiceRules::validate($d);
+		$this->assertSame(['state' => 'requested', 'by' => null, 'returned_by' => null, 'at' => null, 'changed_at' => null, 'returned_at' => null, 'note' => null, 'returned_note' => null],
+			array_merge(get_object_vars($d->review), ['by' => null]));
+		$this->assertSame('lea', $d->review->by);
+
+		// A Lead submits and withdraws, never returns; the return block is the Team Admin's.
+		$led = ['d200' => true];
+		$r = static fn (?\stdClass $before, ?\stdClass $after): string => self::outcome(fn () => InvoiceRules::requireLeadWrite($before, $after, $led));
+		$plain = self::data();
+		$requested = self::data(['review' => $ok]);
+		$returned = self::data(['review' => ['state' => 'returned', 'by' => 'lea', 'at' => '2026-10-21', 'returned_by' => 'petra', 'returned_at' => '2026-10-22', 'returned_note' => 'rate?']]);
+		$resubmitted = self::data(['review' => ['state' => 'requested', 'by' => 'lea', 'at' => '2026-10-23', 'returned_by' => 'petra', 'returned_at' => '2026-10-22', 'returned_note' => 'rate?']]);
+		$this->assertSame('ok', $r($plain, $requested), 'submit');
+		$this->assertSame('ok', $r($requested, $plain), 'withdraw');
+		$this->assertSame('ok', $r($requested, null), 'delete');
+		$this->assertSame('ok', $r($returned, $resubmitted), 'submit again, the return stays as history');
+		$this->assertSame('ok', $r($returned, $plain), 'withdraw after a return');
+		$msg = '403 Only Team Admins return a draft submitted for approval; a Lead submits or withdraws it.';
+		$this->assertSame($msg, $r($requested, $returned), 'a Lead cannot return');
+		$this->assertSame($msg, $r(null, $returned));
+		$this->assertSame($msg, $r($returned, self::data(['review' => ['state' => 'requested', 'by' => 'lea']])), 'dropping the return block');
+		$this->assertSame($msg, $r($returned, self::data(['review' => ['state' => 'returned', 'returned_by' => 'petra', 'returned_at' => '2026-10-22', 'returned_note' => 'changed']])), 'changing the note');
 	}
 
 	public function testRightsPerRole(): void {

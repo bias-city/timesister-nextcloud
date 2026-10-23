@@ -644,7 +644,12 @@ final class TeamImportService {
 			$day = gmdate('Y-m-d', $this->time->getTime());
 		}
 		$out = [];
+		$members = $this->tenants->memberRoles($tid);
 		foreach ($b['calendars'] as $cal) {
+			if (($cal['list'] ?? false) === true) {
+				$out[] = $this->storeList($tid, $zip, $cal, $mapping, $members);
+				continue;
+			}
 			$uid = ZipRules::mapUid((string)$cal['uid'], $mapping);
 			$missing = $cal['missing'] === true;
 			if ($missing || $uid === null) {
@@ -665,6 +670,37 @@ final class TeamImportService {
 			}
 		}
 		return $out;
+	}
+
+	/**
+	 * 0.28.0: the list entries of an external person, back into the book.
+	 * Never onto a member (`member`): their hours come from the calendar.
+	 *
+	 * @param array<string,mixed> $cal
+	 * @param array<string,?string> $mapping
+	 * @param array<string,string> $members uid → role
+	 * @return array<string,mixed>
+	 */
+	private function storeList(int $tid, ZipFile $zip, array $cal, array $mapping, array $members): array {
+		$uid = ZipRules::keepUid((string)$cal['uid'], $mapping);
+		if ($cal['missing'] === true) {
+			return ['uid' => $uid, 'stored' => false, 'reason' => 'missing'];
+		}
+		if (isset($members[$uid])) {
+			return ['uid' => $uid, 'stored' => false, 'reason' => 'member'];
+		}
+		try {
+			$ics = $zip->read($cal['path']);
+			if (!BackupRules::isCalendar($ics)) {
+				return ['uid' => $uid, 'stored' => false, 'reason' => 'not_a_calendar'];
+			}
+			$objects = array_values(EntryRules::splitFeed($ics));
+			$this->entries->putListAll($tid, $uid, $objects);
+			return ['uid' => $uid, 'stored' => true, 'entries' => count($objects)];
+		} catch (\Throwable $e) {
+			$this->logger->error('TimeSister: list entries of {uid} not stored', ['app' => 'timesister', 'uid' => $uid, 'exception' => $e]);
+			return ['uid' => $uid, 'stored' => false, 'reason' => 'failed'];
+		}
 	}
 
 	/**

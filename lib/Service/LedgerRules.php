@@ -23,6 +23,8 @@ final class LedgerRules {
 	public const CANCELLED = 'cancelled';
 	public const PAID = 'paid';
 	public const UNPAID = 'unpaid';
+	/** 0.27.0: a partial payment that does not settle the invoice. */
+	public const PAYMENT = 'payment';
 	/** Expense reports (0.23.0): fixed, its PDF, paid, reversed – in the same chain; `invoice` is 0. */
 	public const EXPENSE_FIXED = 'expense_fixed';
 	public const EXPENSE_DOCUMENT = 'expense_document';

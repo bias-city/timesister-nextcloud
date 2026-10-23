@@ -147,6 +147,21 @@ class ProjectRulesTest extends TestCase {
 		}
 	}
 
+	/** 0.27.0: the project's currency – upper case, its budgets follow it; a budget keeps its own only without one on the project. */
+	public function testProjectCurrency(): void {
+		$d = self::obj('{"id":"p","status":"draft","currency":"eur","budgets":[{"currency":"chf"},{"currency":null},{}]}');
+		ProjectRules::validate($d);
+		$this->assertSame('EUR', $d->currency, 'upper case');
+		$this->assertSame(['EUR', 'EUR', 'EUR'], array_map(static fn ($b) => $b->currency, $d->budgets), 'the budgets inherit it');
+		$d = self::obj('{"id":"p","status":"draft","currency":null,"budgets":[{"currency":"chf"}]}');
+		ProjectRules::validate($d);
+		$this->assertNull($d->currency);
+		$this->assertSame('CHF', $d->budgets[0]->currency, 'without one on the project the budget keeps its own');
+		foreach (['"CH"', '"CHFR"', '"CH1"', '"€"', '7', '["CHF"]'] as $bad) {
+			$this->assertSame('422 “currency” must be three letters, for example CHF.', self::validate('{"id":"p","status":"draft","currency":' . $bad . '}'), $bad);
+		}
+	}
+
 	public function testRates(): void {
 		$this->assertSame('', self::validate('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":1,"rate":180},{"no":2,"rate":null},{"no":3}]}]}'));
 		// Rates per person are the person's cost_rates now: a client's empty default passes, content is refused.
@@ -186,6 +201,46 @@ class ProjectRulesTest extends TestCase {
 		// Things the app does not compute with pass: budgets that are no objects.
 		$this->assertSame('', self::validate('{"id":"p","status":"draft","budgets":"old","work_packages":7}'));
 		$this->assertSame('', self::validate('{"id":"p","status":"draft","budgets":[7,"x",null,{"work_packages":"none"}]}'));
+	}
+
+	/** 0.26.3: a package with packages below has no hours of its own. */
+	public function testParentHasNoHours(): void {
+		$wp = static fn (string $hours): string => self::validate('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":"3","hours":' . $hours . '},{"no":"31","parent":"3","hours":[5,0]}]}]}');
+		$this->assertSame('', $wp('[0,0]'));
+		$this->assertSame('', $wp('[]'));
+		$this->assertSame('', $wp('null'));
+		$this->assertSame('422 A work package with packages below has no hours of its own – move them to a package below.', $wp('[0,18]'));
+		// A leaf keeps its hours.
+		$this->assertSame('', self::validate('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":"3","hours":[18]}]}]}'));
+	}
+
+	/** 0.27.0: a work package's progress, a whole percent 0–100 or null. */
+	public function testWorkPackageProgress(): void {
+		$wp = static fn (string $p): string => self::validate('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":"3","hours":[18],"progress":' . $p . '}]}]}');
+		$this->assertSame('', $wp('40'));
+		$this->assertSame('', $wp('null'));
+		$this->assertStringContainsString('“progress”', $wp('101'));
+		$this->assertStringContainsString('“progress”', $wp('12.5'));
+	}
+
+	/** 0.27.0: addenda – an order after the quote to a work package (hours) or a cost position (amount). */
+	public function testAddenda(): void {
+		$bud = static fn (string $addenda): string => self::validate('{"id":"p","status":"draft","budgets":[{"work_packages":[{"no":"3","hours":[18]}],"costs":[{"no":1,"name":"Druck","kind":"expense","rule":"receipts","cap":500}],"addenda":' . $addenda . '}]}');
+		$this->assertSame('', $bud('null'));
+		$this->assertSame('', $bud('[]'));
+		$this->assertSame('', $bud('[{"no":1,"date":"2026-10-20","package":"3","hours":18,"status":"approved","title":"Abänderung","reference":"Mail"}]'));
+		$this->assertSame('', $bud('[{"no":2,"date":"2026-10-20","cost":1,"amount":250}]'));
+		$this->assertStringContainsString('“no”', $bud('[{"no":0,"date":"2026-10-20","package":"3","hours":1}]'));
+		$this->assertStringContainsString('unique', $bud('[{"no":1,"date":"2026-10-20","package":"3","hours":1},{"no":1,"date":"2026-10-21","package":"3","hours":1}]'));
+		$this->assertStringContainsString('“date”', $bud('[{"no":1,"date":"gestern","package":"3","hours":1}]'));
+		$this->assertStringContainsString('“status”', $bud('[{"no":1,"date":"2026-10-20","package":"3","hours":1,"status":"maybe"}]'));
+		$this->assertStringContainsString('exactly one', $bud('[{"no":1,"date":"2026-10-20","hours":1}]'));
+		$this->assertStringContainsString('exactly one', $bud('[{"no":1,"date":"2026-10-20","package":"3","cost":1,"hours":1}]'));
+		$this->assertStringContainsString('“package”', $bud('[{"no":1,"date":"2026-10-20","package":"9","hours":1}]'));
+		$this->assertStringContainsString('“hours”', $bud('[{"no":1,"date":"2026-10-20","package":"3","amount":5}]'));
+		$this->assertStringContainsString('“cost”', $bud('[{"no":1,"date":"2026-10-20","cost":7,"amount":5}]'));
+		$this->assertStringContainsString('“amount”', $bud('[{"no":1,"date":"2026-10-20","cost":1,"hours":5}]'));
+		$this->assertStringContainsString('“title”', $bud('[{"no":1,"date":"2026-10-20","package":"3","hours":1,"title":"' . str_repeat('x', 201) . '"}]'));
 	}
 
 	/** 0.26.0: a work package's level (`parent`) and tags, instead of group and role. */

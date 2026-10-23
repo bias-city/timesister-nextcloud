@@ -111,7 +111,7 @@ class DocumentRulesTest extends TestCase {
 		$apps->method('getAppVersion')->willReturn('0.19.0');
 		$caps = (new Capabilities($apps))->getCapabilities()['timesister'];
 		$this->assertSame(1, $caps['invoice_documents']);
-		$this->assertSame([1, 1], [$caps['receipts'], $caps['document_tree']], '0.22.0');
+		$this->assertSame([2, 1], [$caps['receipts'], $caps['document_tree']], '0.22.0; receipts 2 since 0.27.0 (reopen)');
 		$this->assertSame(1, $caps['expense_fixing'], '0.23.0');
 		$this->assertArrayNotHasKey('expense_reports', $caps, 'replaced by expense_fixing');
 	}

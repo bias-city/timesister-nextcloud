@@ -15,12 +15,13 @@ namespace OCA\TimeSister\Service;
  */
 final class RecordValidator {
 	public const KINDS = ['person', 'region', 'project', 'customer', 'setting', 'job', 'billing', BookingRules::REPORT, BookingRules::MARK, InvoiceRules::KIND, QuoteRules::KIND,
-		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND, TemplateRules::KIND];
+		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND, TemplateRules::KIND, CorrectionRules::KIND];
 	/** Jobs (0.6.0): readable as records, written only through /jobs. */
 	public const JOB = 'job';
 	/** Billing marks (0.7.6): rights per person, see {@see BillingRules}. */
 	public const BILLING = BillingRules::KIND;
-	public const SETTING_KEYS = ['targethours', 'settings', PrivacyRules::KEY];
+	/** 0.27.0: `office_costs` – fixed costs, balances and reserve for the cashflow; Team Admins only. */
+	public const SETTING_KEYS = ['targethours', 'settings', PrivacyRules::KEY, OfficeCostRules::KEY];
 	/** Every Nextcloud account name is a key, also with spaces and apostrophes (0.26.2). */
 	public const KEY_PATTERN = "/^(?! )[A-Za-z0-9@._+' -]{1,128}(?<! )$/";
 	public const MAX_DATA_BYTES = 262144; // 256 KB
@@ -68,10 +69,13 @@ final class RecordValidator {
 			throw ApiException::invalid('“data” must be a JSON object.');
 		}
 		if ($kind === 'setting' && !in_array($key, self::SETTING_KEYS, true)) {
-			throw ApiException::invalid('Settings are called “targethours”, “settings” or “privacy”.');
+			throw ApiException::invalid('Settings are called “targethours”, “settings”, “privacy” or “office_costs”.');
 		}
 		if ($kind === 'setting' && $key === PrivacyRules::KEY) {
 			PrivacyRules::validate($data);
+		}
+		if ($kind === 'setting' && $key === OfficeCostRules::KEY) {
+			OfficeCostRules::validate($data);
 		}
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, InvoiceNumbering::FIELD)) {
 			InvoiceNumbering::validate($data->{InvoiceNumbering::FIELD});
@@ -94,6 +98,10 @@ final class RecordValidator {
 		// 0.21.0: the module switches (costs among them) are booleans.
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, ModuleRules::FIELD)) {
 			ModuleRules::validate($data->{ModuleRules::FIELD});
+		}
+		// 0.27.0: the team's levels with their default rates.
+		if ($kind === 'setting' && $key === 'settings' && property_exists($data, LevelRules::FIELD)) {
+			LevelRules::validateSettings($data->{LevelRules::FIELD});
 		}
 		if ($kind === 'person') {
 			if (!isset($data->login) || !is_string($data->login) || $data->login !== $key) {
@@ -130,6 +138,9 @@ final class RecordValidator {
 		} elseif ($kind === TemplateRules::KIND) {
 			// 0.25.0: the team's own project templates (format, key, no person fields).
 			TemplateRules::validate($key, $data);
+		} elseif ($kind === CorrectionRules::KIND) {
+			// 0.27.0 (K-Offline): the target state of a booking's corrected fields; the server's fields are set on write.
+			CorrectionRules::validateRecord($key, $data);
 		}
 		$accounts = [];
 		if ($kind === 'person' && property_exists($data, 'accounts') && $data->accounts !== null) {

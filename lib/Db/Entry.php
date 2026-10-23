@@ -36,6 +36,8 @@ use OCP\DB\Types;
  * @method void setFirstStart(?string $firstStart)
  * @method string|null getLastEnd()
  * @method void setLastEnd(?string $lastEnd)
+ * @method string|null getLevel()
+ * @method void setLevel(?string $level)
  * @method int getCancelled()
  * @method void setCancelled(int $cancelled)
  * @method int getKept()
@@ -59,6 +61,7 @@ final class Entry extends Entity {
 	protected ?string $codes = null;
 	protected ?string $firstStart = null;
 	protected ?string $lastEnd = null;
+	protected ?string $level = null;
 	protected int $cancelled = 0;
 	protected int $kept = 0;
 	protected int $deleted = 0;
@@ -77,6 +80,7 @@ final class Entry extends Entity {
 		$this->addType('codes', Types::STRING);
 		$this->addType('firstStart', Types::STRING);
 		$this->addType('lastEnd', Types::STRING);
+		$this->addType('level', Types::STRING);
 		$this->addType('cancelled', Types::SMALLINT);
 		$this->addType('kept', Types::SMALLINT);
 		$this->addType('deleted', Types::SMALLINT);
@@ -110,6 +114,7 @@ final class Entry extends Entity {
 			'ics' => $this->getDeleted() === 1 ? '' : (string)$this->getIcs(),
 			'codes' => $this->codeList(),
 			'cancelled' => $this->getCancelled() === 1,
+			'level' => $this->getLevel(),
 			'kept' => $this->getKept() === 1,
 			'deleted' => $this->getDeleted() === 1,
 			'revision' => $this->getRevision(),

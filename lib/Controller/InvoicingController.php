@@ -79,6 +79,15 @@ final class InvoicingController extends BaseController {
 		return $this->run(fn () => $this->issues->paid($this->tenants->current(), $key, $this->body(self::MAX_BODY), false));
 	}
 
+	/** POST /invoices/{key}/dunning {"level", "on"?} – the dunning level 0–3 with the day of the last reminder (0.27.0). */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/invoices/{key}/dunning')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function dunning(string $key): DataResponse {
+		return $this->run(fn () => $this->issues->dunning($this->tenants->current(), $key, $this->body(self::MAX_BODY)));
+	}
+
 	/** GET /invoices/{key}/fixed – the frozen content; Team Admins and the project's Leads. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/invoices/{key}/fixed')]
 	#[NoAdminRequired]

@@ -39,6 +39,7 @@ final class MeController extends BaseController {
 	/** GET /me – team, role, team group, settings, own person, revision, time calendar. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/me')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function show(): DataResponse {
 		return $this->run(function () {
 			$m = $this->tenants->current();

@@ -31,4 +31,17 @@ class CustomerRulesTest extends TestCase {
 		$this->assertSame('422 “datev_account” must be up to 9 digits.', self::check('{"id":"k1","datev_account":10001}'));
 		$this->assertSame('422 “datev_account” must be up to 9 digits.', self::check('{"id":"k1","datev_account":"1000x"}'));
 	}
+
+	/** 0.27.0 (controlling): the customer's type and payment term. */
+	public function testTypeAndPaymentDays(): void {
+		$this->assertSame('ok', self::check('{"id":"k1","name":"Kunde","type":"public","payment_days":45}'));
+		$this->assertSame('ok', self::check('{"id":"k1","name":"Kunde","type":null,"payment_days":null}'));
+		$this->assertSame('422 “type” of a customer is one of public, cooperative, private, company.', self::check('{"id":"k1","type":"club"}'));
+		$this->assertSame('422 “payment_days” must be null or an integer from 1 to 365.', self::check('{"id":"k1","payment_days":0}'));
+		$this->assertSame('422 “payment_days” must be null or an integer from 1 to 365.', self::check('{"id":"k1","payment_days":"30"}'));
+		$d = json_decode('{"id":"k1","payment_days":45}');
+		$this->assertSame(45, \OCA\TimeSister\Service\CustomerRules::paymentDays($d));
+		$this->assertNull(\OCA\TimeSister\Service\CustomerRules::paymentDays(json_decode('{"id":"k1"}')));
+		$this->assertNull(\OCA\TimeSister\Service\CustomerRules::paymentDays(null));
+	}
 }

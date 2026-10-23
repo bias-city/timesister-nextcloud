@@ -564,21 +564,24 @@ final class JobRules {
 		// place among the recipients, no one who declined, names only for
 		// themselves and the sender.
 		$keep = static fn (mixed $v): array => is_array($v) ? array_values(array_filter($v, static fn (mixed $u): bool => $u === $uid)) : [];
-		if (is_array($j->recipients ?? null)) {
+		$recipients = $j->recipients ?? null;
+		if (is_array($recipients)) {
 			// Only that it is a market (whoever accepts first), never who else.
-			if (count($j->recipients) > 1) {
+			if (count($recipients) > 1) {
 				$j->market = true;
 			}
-			$j->recipients = $keep($j->recipients);
+			$j->recipients = $keep($recipients);
 		}
-		if (is_array($j->declined_by ?? null)) {
-			$j->declined_by = $keep($j->declined_by);
+		$declined = $j->declined_by ?? null;
+		if (is_array($declined)) {
+			$j->declined_by = $keep($declined);
 		}
-		if (($j->names ?? null) instanceof \stdClass) {
+		$all = $j->names ?? null;
+		if ($all instanceof \stdClass) {
 			$names = new \stdClass();
 			foreach ([$uid, (string)($j->sender ?? '')] as $who) {
-				if ($who !== '' && property_exists($j->names, $who)) {
-					$names->{$who} = $j->names->{$who};
+				if ($who !== '' && property_exists($all, $who)) {
+					$names->{$who} = $all->{$who};
 				}
 			}
 			$j->names = $names;

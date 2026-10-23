@@ -12,6 +12,7 @@ use OCA\TimeSister\Db\InvInvoiceMapper;
 use OCA\TimeSister\Db\Record;
 use OCA\TimeSister\Db\RecordMapper;
 use OCA\TimeSister\Db\TenantMapper;
+use OCA\TimeSister\Db\TimeCalendar;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\DB\Exception as DbException;
 use OCP\IDBConnection;
@@ -39,8 +40,13 @@ final class RecordService {
 		private TenantService $team,
 		private InvInvoiceMapper $invoices,
 		private CostWrites $costs,
+		private CorrectionService $corrections,
+		private EntryService $entries,
 	) {
 	}
+
+	/** Persons tombstoned in the running write: their list entries vanish after the commit (0.28.0). */
+	private array $listTombstones = [];
 
 	/** `setting/settings`: a vacation calendar only in a Team Admin's own account – the job writes there without rights checks. */
 	private function checkSettings(Membership $m, string $kind, string $key, mixed $data): void {
@@ -412,12 +418,17 @@ final class RecordService {
 			$out = $this->applyWithin($m, $ops, $batch);
 			$this->db->commit();
 			$this->costs->afterCommit();
+			foreach (array_unique($this->listTombstones) as $key) {
+				$this->entries->vanishAll($m->tenantId, $key, TimeCalendar::LIST);
+			}
+			$this->listTombstones = [];
 			return $out;
 		} catch (\Throwable $e) {
 			if ($this->db->inTransaction()) {
 				$this->db->rollBack();
 			}
 			$this->costs->discard();
+			$this->listTombstones = [];
 			throw $e;
 		}
 	}
@@ -452,6 +463,9 @@ final class RecordService {
 				$problems[] = ['op' => $op, 'outcome' => $outcome, 'current' => $cur === null ? null : $this->present($cur)];
 				continue;
 			}
+			if ($op['kind'] === 'person' && $op['json'] === null) {
+				$this->listTombstones[] = $op['key'];
+			}
 			if ($op['kind'] === TemplateRules::KIND) {
 				// 0.25.0: a Lead's template against the stored one, under the team lock.
 				try {
@@ -461,6 +475,10 @@ final class RecordService {
 				}
 				// 0.25.1: the owner is the server's field; the stamped data is what gets stored.
 				$op['json'] = self::stampTemplate($cur, $op['json'], $m->uid);
+			}
+			if ($op['kind'] === 'project') {
+				// 0.27.0: the progress log per work package is never lost - stored entries join the incoming ones.
+				$op['json'] = ProgressLog::merge($cur, $op['json'], $m->uid, gmdate('Y-m-d', $now));
 			}
 			if ($op['kind'] === QuoteRules::KIND || $op['kind'] === InvoiceRules::KIND) {
 				// A Lead's invoice or quote against the stored state, under the team lock.
@@ -478,6 +496,17 @@ final class RecordService {
 				// 0.22.0: receipts, expense rules and reports against the stored record; the server's fields kept.
 				try {
 					$op['json'] = $this->costs->prepare($m, $op, $cur, $costs);
+				} catch (ApiException $e) {
+					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+				}
+			}
+			if ($op['kind'] === CorrectionRules::KIND && !$system && $op['json'] !== null) {
+				// 0.27.0 (K-Offline): the correction is applied as the record is written; the outcome goes into the record.
+				try {
+					$d = Json::decode($op['json']);
+					if ($d instanceof \stdClass) {
+						$op['json'] = Json::encode($this->corrections->prepare($m, $op['key'], $d));
+					}
 				} catch (ApiException $e) {
 					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
 				}

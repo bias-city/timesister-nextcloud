@@ -29,6 +29,8 @@ final class CostRules {
 	public const PER = ['invoice', 'budget'];
 	public const REBILL = 'rebill';
 	public const PASS_THROUGH = 'pass_through';
+	/** 0.26.3: the longest code of a cost position. */
+	public const CODE_MAX = 60;
 	/** 0.26.0: at most this many amounts in a forecast (one per milestone). */
 	public const FORECAST_MAX = 200;
 	public const MODES = [self::REBILL, self::PASS_THROUGH];
@@ -108,6 +110,11 @@ final class CostRules {
 				throw ApiException::invalid(Message::of('“{field}” applies only when “{other}” is “{value}”.', ['field' => $f, 'other' => 'mode', 'value' => self::REBILL]));
 			}
 			self::percent($c, $f, false);
+		}
+		// 0.26.3: the code of the work package the position belongs to (the client's code logic); null or short text.
+		$code = $c->code ?? null;
+		if ($code !== null && (!is_string($code) || trim($code) === '' || mb_strlen($code) > self::CODE_MAX || preg_match(self::CONTROL, $code) || !mb_check_encoding($code, 'UTF-8'))) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or text of 1 to {max} characters.', ['field' => 'code', 'max' => self::CODE_MAX]));
 		}
 		// 0.26.0: the forecast per milestone, at most 200 amounts ≥ 0 (its sum is the cap; the client sets both).
 		$f = $c->forecast ?? null;

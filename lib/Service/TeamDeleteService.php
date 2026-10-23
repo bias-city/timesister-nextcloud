@@ -13,6 +13,7 @@ use OCA\TimeSister\Db\BackupFileMapper;
 use OCA\TimeSister\Db\BackupMapper;
 use OCA\TimeSister\Db\ClientStatusMapper;
 use OCA\TimeSister\Db\CounterMapper;
+use OCA\TimeSister\Db\CorrectionMapper;
 use OCA\TimeSister\Db\EntryMapper;
 use OCA\TimeSister\Db\HistoryMapper;
 use OCA\TimeSister\Db\InvHourMapper;
@@ -56,6 +57,7 @@ class TeamDeleteService {
 		private CounterMapper $counters,
 		private TimeCalendarMapper $timeCalendars,
 		private EntryMapper $entries,
+		private CorrectionMapper $corrections,
 		private InvInvoiceMapper $invoices,
 		private InvHourMapper $invoiceHours,
 		private InvLedgerMapper $ledger,
@@ -132,6 +134,7 @@ class TeamDeleteService {
 				'counters' => $this->counters->deleteByTenant($id),
 				'time_calendars' => $this->timeCalendars->deleteByTenant($id),
 				'entries' => $this->entries->deleteByTenant($id),
+				'corrections' => $this->corrections->deleteByTenant($id),
 				// 0.18.0: the frozen invoices, their hours and the ledger go with the team (ZIP stored above).
 				'invoices' => $this->invoices->deleteByTenant($id),
 				'invoice_hours' => $this->invoiceHours->deleteByTenant($id),

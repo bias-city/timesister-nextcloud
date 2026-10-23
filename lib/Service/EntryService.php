@@ -8,6 +8,7 @@ namespace OCA\TimeSister\Service;
 
 use OCA\TimeSister\Db\Entry;
 use OCA\TimeSister\Db\EntryMapper;
+use OCA\TimeSister\Db\InvHourMapper;
 use OCA\TimeSister\Db\Tenant;
 use OCA\TimeSister\Db\TenantMapper;
 use OCA\TimeSister\Db\TimeCalendar;
@@ -39,6 +40,7 @@ final class EntryService {
 		private IDBConnection $db,
 		private ITimeFactory $time,
 		private DocumentService $documents,
+		private InvHourMapper $hours,
 	) {
 	}
 
@@ -314,39 +316,37 @@ final class EntryService {
 
 	/**
 	 * `GET /entries?since=&limit=`: in revision order, filtered by role.
-	 * The filter runs after the read, so the page is filled from as many
-	 * chunks as it takes.
+	 * Two steps (0.28.0): the rows come without `ics` and pass the role
+	 * filter chunk by chunk ({@see EntryRules::pageOf()}), then only the
+	 * texts of the page's hits are read - a Lead's delta no longer pulls
+	 * the whole book through memory.
 	 *
 	 * @return array{revision:int,entries:list<array<string,mixed>>,more:bool}
 	 */
 	public function page(Membership $m, int $since, int $limit): array {
 		$limit = max(1, min(self::PAGE, $limit));
 		$since = max(0, $since);
-		$led = $m->role === Role::LEAD ? $this->ledCodes($m) : [];
-		$out = [];
-		$more = false;
-		$cursor = $since;
-		while (count($out) < $limit) {
-			$chunk = $this->entries->findChanged($m->tenantId, $cursor, $limit);
-			foreach ($chunk as $e) {
-				$cursor = $e->getRevision();
-				if (EntryRules::visible($m->role, $m->uid, $led, $e->getUid(), $e->codeList())) {
-					$out[] = $e->present();
-				}
-			}
-			if (count($chunk) < $limit) {
-				break;
-			}
-			if (count($out) >= $limit) {
-				$more = true;
+		$led = $m->role === Role::LEAD ? $this->ledCodesOf($m) : [];
+		$page = EntryRules::pageOf(
+			fn (int $cursor): array => $this->entries->findChanged($m->tenantId, $cursor, $limit),
+			static fn (Entry $e): bool => EntryRules::visible($m->role, $m->uid, $led, $e->getUid(), $e->codeList()),
+			$since,
+			$limit,
+		);
+		$ids = [];
+		foreach ($page['entries'] as $e) {
+			if ($e->getDeleted() === 0) {
+				$ids[] = $e->getId();
 			}
 		}
-		if (count($out) > $limit) {
-			$more = true;
-			$out = array_slice($out, 0, $limit);
+		$texts = $ids === [] ? [] : $this->entries->icsByIds($ids);
+		$out = [];
+		foreach ($page['entries'] as $e) {
+			$e->setIcs($texts[$e->getId()] ?? '');
+			$out[] = $e->present();
 		}
 		// Two entries never share a revision, so a cut page continues cleanly with the highest one delivered.
-		return ['revision' => $this->tenants->entriesRevision($m->tenantId), 'entries' => $out, 'more' => $more];
+		return ['revision' => $this->tenants->entriesRevision($m->tenantId), 'entries' => $out, 'more' => $page['more']];
 	}
 
 	/**
@@ -354,7 +354,7 @@ final class EntryService {
 	 *
 	 * @return list<string>
 	 */
-	private function ledCodes(Membership $m): array {
+	public function ledCodesOf(Membership $m): array {
 		$data = [];
 		foreach ($this->team->leadOf($m->tenantId, $m->uid) as $p) {
 			$r = $this->records->findOne($m->tenantId, 'project', $p['key']);
@@ -369,6 +369,132 @@ final class EntryService {
 			}
 		}
 		return EntryRules::ledCodes($data);
+	}
+
+	// --------------------------------------------------------------- lists
+
+	/**
+	 * `POST /entries/list` (0.28.0, Team Admins): the entries of an external
+	 * person - no account, no calendar - written straight into the book.
+	 * `put` stores or replaces by event UID, `delete` tombstones. Billed or
+	 * locked entries stay as they are, like everywhere in the book; every
+	 * item gets its own result (`ok`, `locked`, `failed`).
+	 *
+	 * @return array{results:list<array<string,mixed>>}
+	 */
+	public function writeList(Membership $m, \stdClass $body): array {
+		$this->requireAdmin($m);
+		$p = EntryRules::parseListBody($body);
+		$uid = $p['uid'];
+		// External: a live person record that is no member and names no member as
+		// account (the Mac app lists the record's own key under `accounts`).
+		$person = $this->records->findOne($m->tenantId, 'person', $uid);
+		$members = $this->team->memberRoles($m->tenantId);
+		$named = $person === null ? [] : array_filter($person->accountList(), static fn (string $a): bool => isset($members[$a]));
+		if ($person === null || $person->isTombstone() || isset($members[$uid]) || $named !== []) {
+			throw ApiException::invalid(Message::of('{uid} is no external person of the team.', ['uid' => $uid]));
+		}
+		$results = [];
+		$corrections = $this->corrections();
+		// Everything the book takes goes in one apply (one transaction, one read of the rows);
+		// a billed or foreign booking answers for itself and stays out.
+		$objects = [];
+		$pending = [];
+		foreach ($p['put'] as $ics) {
+			$ev = EntryRules::parse($ics)['uid'] ?? '';
+			$r = ['event_uid' => $ev];
+			$other = $this->entries->findByEvent($m->tenantId, $uid, $ev);
+			if ($other !== null && $other->getSource() !== TimeCalendar::LIST) {
+				$results[] = $r + ['status' => 'failed', 'message' => Message::of('Booking {n} comes from a calendar or feed.', ['n' => $ev])->text()];
+				continue;
+			}
+			$lock = $this->lockOf($m->tenantId, $uid, $ev);
+			if ($lock !== null) {
+				$results[] = $r + ['status' => 'locked', 'message' => $lock];
+				continue;
+			}
+			// A corrected field is the lead's: a list sent again does not undo it.
+			if ($corrections !== null) {
+				$ics = $corrections->foldInto($m->tenantId, $uid, $ev, $ics);
+			}
+			$objects[] = $ics;
+			$pending[] = $ev;
+		}
+		if ($objects !== []) {
+			$this->putListAll($m->tenantId, $uid, $objects);
+		}
+		$rows = $this->entries->bySource($m->tenantId, $uid, TimeCalendar::LIST);
+		foreach ($pending as $ev) {
+			$results[] = ['event_uid' => $ev] + self::stateFrom($rows[$ev] ?? null);
+		}
+		foreach ($p['delete'] as $ev) {
+			$r = ['event_uid' => $ev];
+			$other = $this->entries->findByEvent($m->tenantId, $uid, $ev);
+			if ($other !== null && $other->getSource() !== TimeCalendar::LIST && $other->isLive()) {
+				$results[] = $r + ['status' => 'failed', 'message' => Message::of('Booking {n} comes from a calendar or feed.', ['n' => $ev])->text()];
+				continue;
+			}
+			$e = $rows[$ev] ?? null;
+			if ($e === null || !$e->isLive()) {
+				$results[] = $r + ['status' => 'ok', 'deleted' => true];
+				continue;
+			}
+			$lock = $this->lockOf($m->tenantId, $uid, $ev);
+			if ($lock !== null) {
+				$results[] = $r + ['status' => 'locked', 'message' => $lock];
+				continue;
+			}
+			$e->setDeleted(1);
+			$e->setIcs('');
+			$e->setModifiedAt($this->time->getTime());
+			$this->commit($m->tenantId, [[$e, false]]);
+			$results[] = $r + ['status' => 'ok', 'deleted' => true];
+		}
+		return ['results' => $results];
+	}
+
+	/** One object of an external person into the book - also for a correction ({@see CorrectionService}). */
+	public function putList(int $tenantId, string $uid, string $ics): void {
+		$this->putListAll($tenantId, $uid, [$ics]);
+	}
+
+	/**
+	 * Objects of an external person into the book, one transaction; the etag
+	 * is the hash of the text, so the same object sent again changes nothing.
+	 *
+	 * @param list<string> $icsList
+	 */
+	public function putListAll(int $tenantId, string $uid, array $icsList): void {
+		$t = $this->tenants->find($tenantId);
+		if ($t === null) {
+			throw ApiException::notFound('No such team.');
+		}
+		$src = new TimeCalendar();
+		$src->setTenantId($tenantId);
+		$src->setUid($uid);
+		$src->setSource(TimeCalendar::LIST);
+		$objects = array_map(static fn (string $ics): array => ['ics' => $ics, 'uri' => '', 'etag' => 'sha256:' . hash('sha256', $ics)], $icsList);
+		$this->apply($src, $objects, self::since($t), false, []);
+	}
+
+	/** Billed (a `billing` record) or on an invoice: the message, else null. */
+	private function lockOf(int $tenantId, string $uid, string $eventUid): ?string {
+		$e = $this->entries->findOne($tenantId, $uid, TimeCalendar::LIST, $eventUid);
+		$lock = CorrectionRules::lockedBy($this->hours->billingsOf($tenantId, $uid, $eventUid), $e !== null && $e->isLive() && $this->billed($e));
+		if ($lock === null) {
+			return null;
+		}
+		return ($lock === '' ? Message::of('Booking {n} is billed.', ['n' => $eventUid])
+			: Message::of('Booking {n} is billed by invoice {number}.', ['n' => $eventUid, 'number' => $lock]))->text();
+	}
+
+	/** @return array{status:string,etag:string,revision:int,deleted?:bool} */
+	private static function stateFrom(?Entry $e): array {
+		if ($e === null || !$e->isLive()) {
+			// Outside the cutoff: the book does not keep it.
+			return ['status' => 'ok', 'etag' => '', 'revision' => 0, 'deleted' => true];
+		}
+		return ['status' => 'ok', 'etag' => $e->getEtag(), 'revision' => $e->getRevision()];
 	}
 
 	// ------------------------------------------------------------- storing
@@ -475,6 +601,7 @@ final class EntryService {
 			$e->setFirstStart($p['first_start']);
 			$e->setLastEnd($p['last_end']);
 			$e->setCancelled($p['cancelled'] ? 1 : 0);
+			$e->setLevel($p['level']);
 			$e->setKept(0);
 			$e->setDeleted(0);
 			$e->setModifiedAt($now);
@@ -488,7 +615,25 @@ final class EntryService {
 			}
 		}
 		$this->commit($tenantId, $changes);
+		// A corrected field is the lead's (0.27.0): what the person changed elsewhere is set back.
+		if ($changes !== [] && $src->getSource() === TimeCalendar::CALENDAR) {
+			$corrections = $this->corrections();
+			foreach ($changes as [$c]) {
+				if ($corrections !== null && $c->isLive()) {
+					$corrections->reapply($src, $c);
+				}
+			}
+		}
 		return ['changed' => count($changes), 'skipped' => $skipped];
+	}
+
+	/** The correction service – fetched late: it depends on this one. */
+	private function corrections(): ?CorrectionService {
+		try {
+			return \OCP\Server::get(CorrectionService::class);
+		} catch (\Throwable) {
+			return null;
+		}
 	}
 
 	private function sameIcs(Entry $e, string $ics): bool {
@@ -509,7 +654,7 @@ final class EntryService {
 	}
 
 	/** A live `billing` record for this person and event UID? Checked at the moment the object vanishes. */
-	private function billed(Entry $e): bool {
+	public function billed(Entry $e): bool {
 		$persons = [$e->getUid()];
 		foreach ($this->records->findPersonsOf($e->getUid(), $e->getTenantId(), true) as $r) {
 			if (!in_array($r->getRkey(), $persons, true)) {
