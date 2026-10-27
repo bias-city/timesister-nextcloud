@@ -1,5 +1,18 @@
 # Changes
 
+## 0.29.0 – 2026-10-27
+
+Additive, `api: 2` unchanged; capability `customer_types: 1`.
+
+- **The team's own customer types** (2026-10-27). The team setting
+  `settings.customer_types` lists them as `[{id, name}]` (at most 50; `id`
+  1–40 lower-case letters, digits or dashes, unique; `name` 1–60 characters).
+  Missing or null: the four of the default (`public`, `cooperative`,
+  `private`, `company`). A customer's `type` is now any key of that form; the
+  server does not check it against the list, which may change while
+  customers keep theirs. The Mac app evaluates quotes, work in progress and
+  receivables per type.
+
 ## 0.28.0 – 2026-10-23
 
 Additive, `api: 2` unchanged; capability `entry_lists: 1`.

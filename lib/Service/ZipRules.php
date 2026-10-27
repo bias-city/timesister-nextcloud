@@ -239,6 +239,29 @@ final class ZipRules {
 		return self::mapUid($uid, $mapping) ?? $uid;
 	}
 
+	/**
+	 * 0.28.0: list entries (`calendars/list-<uid>.ics`) go into the book under
+	 * their person, so the target must be a live person record and no member,
+	 * like `POST /entries/list`. Checked before anything is written.
+	 *
+	 * @param list<array<string,mixed>> $calendars from {@see ZipReader::read}
+	 * @param array<string,?string> $mapping
+	 * @param array<string,bool> $persons keys of the person records live after the import
+	 * @param array<string,string> $members uid → role after the import
+	 * @throws ApiException 422
+	 */
+	public static function checkListTargets(array $calendars, array $mapping, array $persons, array $members): void {
+		foreach ($calendars as $cal) {
+			if (($cal['list'] ?? false) !== true || ($cal['missing'] ?? false) === true) {
+				continue;
+			}
+			$uid = self::keepUid((string)$cal['uid'], $mapping);
+			if (!isset($persons[$uid]) || isset($members[$uid])) {
+				throw ApiException::invalid(Message::of('The list entries of “{uid}” need a person record of the team that is no member. Change the mapping.', ['uid' => $uid]));
+			}
+		}
+	}
+
 	/** Person keys follow the account; billing keys carry the person in front of `+`, booking keys the account in front of the first `+`. */
 	public static function mapKey(string $kind, string $key, array $mapping): string {
 		if ($kind === 'person') {

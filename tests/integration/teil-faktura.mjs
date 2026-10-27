@@ -77,7 +77,7 @@ export async function faktura() {
 			check('/me.settings.invoicing true by default', (await me(A)).settings?.invoicing === true)
 			const s = await ocs(A, 'PUT', '/records/setting/settings', { version: settingsVersion, data: { ...base,
 				invoice_number: { pattern: `RF-${RUN}-{no:4}`, per_year: true, start: 1 },
-				issuer: { name: 'Muster sàrl', street: 'Musterstrasse 12', postcode: '4053', city: 'Basel', country: 'CH', vat_id: 'CHE-123.456.789 MWST', qr: true, accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }] } } })
+				issuer: { name: 'Muster sàrl', street: 'Musterstrasse 12', postcode: '4000', city: 'Basel', country: 'CH', vat_id: 'CHE-123.456.789 MWST', qr: true, accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }] } } })
 			expect('Team Admin sets pattern and issuer', s, 200)
 			settingsVersion = s.data?.version ?? settingsVersion
 			expect('customer', await ocs(A, 'PUT', `/records/customer/${CF}`, { version: 0, data: { schema: 1, id: CF, name: `Kunde ${RUN}`, street: 'Platz 1', postcode: '4001', city: 'Basel', country: 'CH', vat_id: 'CHE-999', note: 'secret', contacts: [{ id: 'c1', name: 'Lea Kontakt' }] } }), 200)

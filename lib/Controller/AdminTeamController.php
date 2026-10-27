@@ -43,6 +43,7 @@ final class AdminTeamController extends BaseController {
 
 	/** GET /admin/teams */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/admin/teams')]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function index(): DataResponse {
 		return $this->run(function () {
 			$this->requireAdmin();

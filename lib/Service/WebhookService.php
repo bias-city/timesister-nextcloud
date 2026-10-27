@@ -137,7 +137,9 @@ final class WebhookService {
 			$status = $r->getStatusCode();
 			return WebhookRules::delivered($status) ? null : 'HTTP ' . $status;
 		} catch (\Throwable $e) {
-			return $e->getMessage();
+			// The cause (address, TLS, timeout) stays in the log; the status shows a plain text.
+			$this->logger->warning('TimeSister: webhook not delivered to {url}', ['app' => 'timesister', 'url' => $q->getUrl(), 'exception' => $e]);
+			return Message::of('The delivery failed; see the server log.')->text();
 		}
 	}
 

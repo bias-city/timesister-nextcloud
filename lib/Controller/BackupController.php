@@ -54,6 +54,7 @@ final class BackupController extends BaseController {
 	/** GET /backups?uid=<uid> */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/backups')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function index(): DataResponse {
 		return $this->run(function () {
 			$m = $this->tenants->current();
@@ -68,6 +69,7 @@ final class BackupController extends BaseController {
 	/** GET /backups/{id} */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/backups/{id}', requirements: ['id' => '\d+'])]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function show(int $id): DataResponse {
 		return $this->run(fn () => $this->backups->get($this->tenants->current(), $id));
 	}
@@ -86,6 +88,7 @@ final class BackupController extends BaseController {
 	/** GET /backups/consent – the own consent. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/backups/consent')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function consent(): DataResponse {
 		return $this->run(fn () => $this->consent->get($this->tenants->current()));
 	}
@@ -106,6 +109,7 @@ final class BackupController extends BaseController {
 	/** GET /backups/own-copy – copy in the own folder, own account. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/backups/own-copy')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function ownCopy(): DataResponse {
 		return $this->run(fn () => $this->ownCopy->get($this->tenants->current()->uid));
 	}

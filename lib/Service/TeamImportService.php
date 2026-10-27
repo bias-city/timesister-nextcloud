@@ -322,7 +322,52 @@ final class TeamImportService {
 				}
 			}
 		}
+		$this->checkListTargets($tid, $b, $mapping, $mode, $current, $ops, $tombstones);
 		return ['ops' => $ops, 'tombstones' => $tombstones];
+	}
+
+	/**
+	 * The person of every list file as it stands after the import: live and no
+	 * member ({@see ZipRules::checkListTargets}); otherwise the import stops here.
+	 *
+	 * @param array<string,mixed> $b
+	 * @param array<string,?string> $mapping
+	 * @param array<string,Record> $current
+	 * @param list<array<string,mixed>> $ops
+	 * @param list<Record> $tombstones
+	 */
+	private function checkListTargets(int $tid, array $b, array $mapping, string $mode, array $current, array $ops, array $tombstones): void {
+		$persons = [];
+		foreach ($current as $r) {
+			if ($r->getKind() === 'person' && !$r->isTombstone()) {
+				$persons[$r->getRkey()] = true;
+			}
+		}
+		foreach ($tombstones as $r) {
+			unset($persons[$r->getRkey()]);
+		}
+		foreach ($ops as $op) {
+			if ($op['kind'] === 'person') {
+				if ($op['json'] === null) {
+					unset($persons[(string)$op['key']]);
+				} else {
+					$persons[(string)$op['key']] = true;
+				}
+			}
+		}
+		$members = $this->tenants->memberRoles($tid);
+		foreach ($b['team']['members'] as $m) {
+			$uid = ZipRules::mapUid($m['uid'], $mapping);
+			if ($uid === null || ($mode === ZipRules::MODE_MERGE && isset($members[$uid]))) {
+				continue;
+			}
+			if ($m['left_at'] === null) {
+				$members[$uid] = Role::USER;
+			} else {
+				unset($members[$uid]);
+			}
+		}
+		ZipRules::checkListTargets($b['calendars'], $mapping, $persons, $members);
 	}
 
 	/**

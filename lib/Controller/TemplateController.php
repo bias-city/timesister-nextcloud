@@ -33,6 +33,7 @@ final class TemplateController extends BaseController {
 	/** GET /templates/invoice/info – name, size, sha256, modified_at, modified_by; 404 when none. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/templates/invoice/info')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function info(): DataResponse {
 		return $this->run(fn () => $this->templates->info($this->tenants->current()));
 	}

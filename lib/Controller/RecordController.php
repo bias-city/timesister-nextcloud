@@ -53,6 +53,7 @@ final class RecordController extends BaseController {
 	/** GET /records/{kind}/{key} */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/records/{kind}/{key}')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function show(string $kind, string $key): DataResponse {
 		return $this->run(fn () => $this->records->get($this->tenants->current(), $kind, $key));
 	}
@@ -96,6 +97,7 @@ final class RecordController extends BaseController {
 	/** GET /records/{kind}/{key}/history */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/records/{kind}/{key}/history')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function history(string $kind, string $key): DataResponse {
 		return $this->run(fn () => $this->records->history($this->tenants->current(), $kind, $key));
 	}

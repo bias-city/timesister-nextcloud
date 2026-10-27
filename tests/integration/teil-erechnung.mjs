@@ -101,7 +101,7 @@ export async function erechnung() {
 	const teamBefore = (await ocs(A, 'GET', '/team')).data
 	const datevBefore = teamBefore?.settings?.datev || null
 	const webhooksBefore = teamBefore?.settings?.webhooks || []
-	const issuer = (country, more = {}) => ({ name: 'Muster sàrl', street: 'Musterstrasse 12', postcode: country === 'DE' ? '79539' : '4053', city: country === 'DE' ? 'Lörrach' : 'Basel', country, vat_id: country === 'DE' ? 'DE123456789' : 'CHE-123.456.789 MWST', email: 'mail@example.test', phone: '+41 61 000 00 00', qr: true,
+	const issuer = (country, more = {}) => ({ name: 'Muster sàrl', street: 'Musterstrasse 12', postcode: country === 'DE' ? '79539' : '4000', city: country === 'DE' ? 'Lörrach' : 'Basel', country, vat_id: country === 'DE' ? 'DE123456789' : 'CHE-123.456.789 MWST', email: 'mail@example.test', phone: '+41 61 000 00 00', qr: true,
 		accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }, { currency: 'EUR', iban: 'DE89370400440532013000', bic: 'COBADEFFXXX' }], ...more })
 	const setIssuer = async (country, more = {}, vat = 8.1) => {
 		const r = await ocs(A, 'PUT', '/records/setting/settings', { version: settingsVersion, data: { ...base, language: 'de', vat, invoice_number: { pattern: `RE-${RUN}-{no:4}`, per_year: true, start: 1 }, issuer: issuer(country, more) } })

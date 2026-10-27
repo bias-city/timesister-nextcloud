@@ -122,6 +122,30 @@ class ZipRulesTest extends TestCase {
 		$this->assertSame('400 invalid', self::code(fn () => ZipRules::checkMapping('x', $uids)));
 	}
 
+	/** 0.28.0: the person of a list file must be live and no member after the import; mapping counts. */
+	public function testListTargets(): void {
+		$cals = [
+			['uid' => 'pbuser1', 'path' => 'calendars/pbuser1.ics', 'size' => 1, 'missing' => false, 'list' => false],
+			['uid' => 'ext-max', 'path' => 'calendars/list-ext-max.ics', 'size' => 1, 'missing' => false, 'list' => true],
+			['uid' => 'ext-gone', 'path' => 'calendars/list-ext-gone.ics', 'size' => 0, 'missing' => true, 'list' => true],
+		];
+		$members = ['pbuser1' => 'admin'];
+		ZipRules::checkListTargets($cals, [], ['ext-max' => true], $members);
+		ZipRules::checkListTargets($cals, ['ext-max' => 'ext-moritz'], ['ext-moritz' => true], $members);
+		ZipRules::checkListTargets([], [], [], $members);
+		$this->assertSame('422 invalid', self::code(fn () => ZipRules::checkListTargets($cals, [], [], $members)), 'no person record');
+		$this->assertSame('422 invalid', self::code(fn () => ZipRules::checkListTargets($cals, [], ['ext-max' => true], $members + ['ext-max' => 'user'])), 'a member');
+		$this->assertSame('422 invalid', self::code(fn () => ZipRules::checkListTargets($cals, ['ext-max' => 'pbuser1'], ['pbuser1' => true], $members)), 'mapped onto a member');
+		$this->assertSame('422 invalid', self::code(fn () => ZipRules::checkListTargets($cals, ['ext-max' => 'ext-moritz'], ['ext-max' => true], $members)), 'mapped away from its record');
+		try {
+			ZipRules::checkListTargets($cals, [], [], $members);
+			$this->fail('no exception');
+		} catch (ApiException $e) {
+			$this->assertStringContainsString('“ext-max”', $e->getMessage());
+		}
+		$this->assertSame('ok', self::code(fn () => ZipRules::checkListTargets($cals, [], ['pbuser1' => true, 'ext-max' => true], $members)), 'a member calendar is no list');
+	}
+
 	public function testMapKeys(): void {
 		$m = ['old' => 'new', 'gone' => null];
 		$this->assertSame('new', ZipRules::mapKey('person', 'old', $m));

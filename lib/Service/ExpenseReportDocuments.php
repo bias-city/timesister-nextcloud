@@ -21,7 +21,6 @@ use Psr\Log\LoggerInterface;
  * `document_state: failed` for the retry job.
  */
 final class ExpenseReportDocuments {
-	private const ERROR_MAX = 1000;
 
 	public function __construct(
 		private RecordMapper $records,
@@ -62,13 +61,14 @@ final class ExpenseReportDocuments {
 				$x->document_tries = $tries;
 			}, $doc);
 		} catch (\Throwable $e) {
-			$this->logger->warning('TimeSister: document of expense report {key} not rendered (try {n}): {message}', [
-				'app' => 'timesister', 'key' => $key, 'n' => $tries, 'message' => $e->getMessage(),
+			// The cause stays in the log; the client gets a plain text.
+			$this->logger->warning('TimeSister: document of expense report {key} not rendered (try {n})', [
+				'app' => 'timesister', 'key' => $key, 'n' => $tries, 'exception' => $e,
 			]);
 			try {
-				$this->save($tid, $key, $actor, $now, static function (\stdClass $x) use ($e, $tries): void {
+				$this->save($tid, $key, $actor, $now, static function (\stdClass $x) use ($tries): void {
 					$x->document_state = ExpenseReportRules::DOCUMENT_FAILED;
-					$x->document_error = mb_substr($e->getMessage(), 0, self::ERROR_MAX);
+					$x->document_error = Message::of('The document could not be rendered; see the server log.')->text();
 					$x->document_tries = $tries;
 				}, null);
 			} catch (\Throwable) {

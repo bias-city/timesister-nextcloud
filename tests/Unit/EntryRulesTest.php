@@ -160,6 +160,15 @@ class EntryRulesTest extends TestCase {
 		$this->assertFalse(EntryRules::oneUid($two));
 		$this->assertFalse(EntryRules::oneUid(self::ics(self::event('', ['DTSTART:20260901T080000Z']))), 'an empty UID');
 		$this->assertFalse(EntryRules::oneUid(self::ics()), 'no event');
+		// Two objects with the same UID would silently become one entry.
+		$again = self::ics(self::event('e1', ['DTSTART:20260902T080000Z', 'DTEND:20260902T100000Z', 'SUMMARY:#D200 y']));
+		try {
+			EntryRules::parseListBody(Json::decode('{"uid":"ext-max","put":[' . json_encode($ics) . ',' . json_encode($again) . ']}'));
+			$this->fail('a UID twice in one list');
+		} catch (ApiException $e) {
+			$this->assertSame(422, $e->getStatus());
+			$this->assertStringContainsString('“e1” appears twice', $e->getMessage());
+		}
 		foreach (['{"uid":"../x","put":[]}', '{"put":[]}', '{"uid":"ext-max","put":["junk"]}', '{"uid":"ext-max","put":"x"}',
 			'{"uid":"ext-max","delete":[""]}', '{"uid":"ext-max","extra":1}', '{"uid":"ext-max","put":[' . json_encode($two) . ']}'] as $bad) {
 			try {

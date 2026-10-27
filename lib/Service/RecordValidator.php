@@ -103,6 +103,10 @@ final class RecordValidator {
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, LevelRules::FIELD)) {
 			LevelRules::validateSettings($data->{LevelRules::FIELD});
 		}
+		// 0.29.0: the team's own customer types.
+		if ($kind === 'setting' && $key === 'settings' && property_exists($data, CustomerRules::TYPES_FIELD)) {
+			CustomerRules::validateTypes($data->{CustomerRules::TYPES_FIELD});
+		}
 		if ($kind === 'person') {
 			if (!isset($data->login) || !is_string($data->login) || $data->login !== $key) {
 				throw ApiException::invalid('For a person, “login” must equal the key.');

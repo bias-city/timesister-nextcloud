@@ -91,6 +91,7 @@ final class InvoicingController extends BaseController {
 	/** GET /invoices/{key}/fixed – the frozen content; Team Admins and the project's Leads. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/invoices/{key}/fixed')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function fixed(string $key): DataResponse {
 		return $this->run(fn () => $this->issues->fixed($this->tenants->current(), $key));
 	}
@@ -98,6 +99,7 @@ final class InvoicingController extends BaseController {
 	/** GET /invoices/ledger?since=&limit= – the team's ledger in order; Team Admins. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/invoices/ledger')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 30, period: 60)]
 	public function ledger(): DataResponse {
 		return $this->run(fn () => $this->issues->ledger($this->tenants->current(), $this->request->getParam('since'), $this->request->getParam('limit')));
 	}
@@ -116,6 +118,7 @@ final class InvoicingController extends BaseController {
 	/** GET /invoices/{key}/document?kind=pdf|xml – the stored document as a download; 404 while it is not rendered. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/invoices/{key}/document')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function document(string $key): Response {
 		return $this->respond(function () use ($key): Response {
 			$r = $this->documents->document($this->tenants->current(), $key, $this->request->getParam('kind'));
@@ -135,6 +138,7 @@ final class InvoicingController extends BaseController {
 	/** GET /invoices/chain/head – the chain head `{ seq, hash, at, entries }`; Team Admins. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/invoices/chain/head')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function chainHead(): DataResponse {
 		return $this->run(fn () => $this->documents->chainHead($this->tenants->current()));
 	}
@@ -142,6 +146,7 @@ final class InvoicingController extends BaseController {
 	/** GET /invoices/chain/verify – recomputes every hash; Team Admins. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/invoices/chain/verify')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 30, period: 60)]
 	public function verify(): DataResponse {
 		return $this->run(fn () => $this->issues->verify($this->tenants->current()));
 	}

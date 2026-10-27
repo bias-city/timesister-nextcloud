@@ -84,6 +84,9 @@ use OCP\Capabilities\ICapability;
  * `invoice_layout: 1` since 0.26.1: an invoice's `layout` (grouping by
  * level, appended tables per level, per tag and the state of the budget),
  * `positions[].path` and `.tags`, frozen on issue and drawn in the PDF.
+ * `customer_types: 1` since 0.29.0: the team's own customer types in
+ * `settings.customer_types` (`[{id, name}]`); a customer's `type` is any key
+ * of that form, no longer only one of the four defaults.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -91,7 +94,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int}} */
+	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -126,6 +129,7 @@ final class Capabilities implements ICapability {
 				'invoice_layout' => 1,
 				'corrections' => 2,
 				'entry_lists' => 1,
+				'customer_types' => 1,
 			],
 		];
 	}

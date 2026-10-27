@@ -88,7 +88,7 @@ export async function dokumente() {
 			check('pb has a backup owner', typeof owner === 'string' && owner !== '', owner)
 			const s = await ocs(A, 'PUT', '/records/setting/settings', { version: settingsVersion, data: { ...base, language: 'de',
 				invoice_number: { pattern: `RD-${RUN}-{no:4}`, per_year: true, start: 1 },
-				issuer: { name: 'Muster sàrl', street: 'Musterstrasse 12', postcode: '4053', city: 'Basel', country: 'CH', vat_id: 'CHE-123.456.789 MWST', email: 'mail@example.test', qr: true, accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }] } } })
+				issuer: { name: 'Muster sàrl', street: 'Musterstrasse 12', postcode: '4000', city: 'Basel', country: 'CH', vat_id: 'CHE-123.456.789 MWST', email: 'mail@example.test', qr: true, accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }] } } })
 			expect('Team Admin sets language, pattern and issuer with a CHF account', s, 200)
 			settingsVersion = s.data?.version ?? settingsVersion
 			// 0.22.0: the document language is null, de or en when written.

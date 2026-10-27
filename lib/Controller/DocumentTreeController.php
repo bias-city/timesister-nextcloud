@@ -45,6 +45,7 @@ final class DocumentTreeController extends BaseController {
 	/** GET /quotes/{key}/document – the stored PDF. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/quotes/{key}/document')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function getQuote(string $key): Response {
 		return $this->respond(function () use ($key): Response {
 			$r = $this->quotes->get($this->tenants->current(), $key);

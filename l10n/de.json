@@ -3,7 +3,6 @@
 		"“{field}” must be null or a number.": "„{field}“ muss null oder eine Zahl sein.",
 		"“{field}” must be an integer from {min} to {max}.": "„{field}“ muss eine ganze Zahl von {min} bis {max} sein.",
 		"“{field}” must be null or an integer from {min} to {max}.": "„{field}“ muss null oder eine ganze Zahl von {min} bis {max} sein.",
-		"“type” of a customer is one of {types}.": "„type“ eines Kunden ist eines von {types}.",
 		"“payments” must be null or a list of at most {max} payments, each with a day “date”, an “amount” above 0 and an optional “note”.": "„payments“ muss null oder eine Liste von höchstens {max} Zahlungen sein, je mit einem Tag „date“, einem „amount“ über 0 und wahlweise „note“.",
 		"“amount” must be a number above 0.": "„amount“ muss eine Zahl über 0 sein.",
 		"Only an issued invoice can be dunned.": "Nur eine gestellte Rechnung kann gemahnt werden.",
@@ -513,6 +512,11 @@
 		"“{field}” must be null or a list of at most {n} levels { id, name, rates }.": "„{field}“ muss null oder eine Liste von höchstens {n} Stufen { id, name, rates } sein.",
 		"Each level needs an “id” of 1 to {max} lower-case letters, digits or dashes.": "Jede Stufe braucht eine „id“ aus 1 bis {max} Kleinbuchstaben, Ziffern oder Bindestrichen.",
 		"Each level needs a “name” of 1 to {max} characters.": "Jede Stufe braucht einen „name“ von 1 bis {max} Zeichen.",
+		"“type” of a customer must be null or a key of 1 to {max} lower-case letters, digits or dashes.": "„type“ eines Kunden muss null oder eine Kennung aus 1 bis {max} Kleinbuchstaben, Ziffern oder Bindestrichen sein.",
+		"“{field}” must be null or a list of at most {n} customer types { id, name }.": "„{field}“ muss null oder eine Liste von höchstens {n} Kundentypen { id, name } sein.",
+		"Each customer type needs an “id” of 1 to {max} lower-case letters, digits or dashes.": "Jeder Kundentyp braucht eine „id“ aus 1 bis {max} Kleinbuchstaben, Ziffern oder Bindestrichen.",
+		"Each customer type needs a “name” of 1 to {max} characters.": "Jeder Kundentyp braucht einen „name“ von 1 bis {max} Zeichen.",
+		"“{field}” names the customer type {id} twice.": "„{field}“ nennt den Kundentyp {id} zweimal.",
 		"“{field}” names the level {id} twice.": "„{field}“ nennt die Stufe {id} zweimal.",
 		"“{field}” must be a list of { from, level }.": "„{field}“ muss eine Liste von { from, level } sein.",
 		"Each entry of “{field}” needs a day “from” (YYYY-MM-DD) and a “level” id.": "Jeder Eintrag von „{field}“ braucht einen Tag „from“ (JJJJ-MM-TT) und eine „level“-Kennung.",
@@ -843,7 +847,12 @@
 		"{uid} is no external person of the team.": "{uid} ist keine externe Person des Teams.",
 		"Booking {n} comes from a calendar or feed.": "Buchung {n} stammt aus einem Kalender oder Feed.",
 		"No such team.": "Kein solches Team.",
-		"The correction could not be written; see the server log.": "Die Korrektur konnte nicht geschrieben werden; siehe das Server-Log."
+		"The correction could not be written; see the server log.": "Die Korrektur konnte nicht geschrieben werden; siehe das Server-Log.",
+		"The document could not be rendered; see the server log.": "Das Dokument konnte nicht erzeugt werden; siehe das Server-Log.",
+		"The delivery failed; see the server log.": "Die Zustellung ist fehlgeschlagen; siehe das Server-Log.",
+		"The calendar could not be read; see the server log.": "Der Kalender konnte nicht gelesen werden; siehe das Server-Log.",
+		"Event “{uid}” appears twice in “put”.": "Termin „{uid}“ kommt in „put“ zweimal vor.",
+		"The list entries of “{uid}” need a person record of the team that is no member. Change the mapping.": "Die Listeneinträge von „{uid}“ brauchen einen Personen-Datensatz des Teams, der kein Mitglied ist. Ändere die Zuordnung."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

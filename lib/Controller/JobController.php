@@ -167,6 +167,7 @@ final class JobController extends BaseController {
 	/** GET /jobs/weeks?uid= – the weekly numbers the caller may read. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/jobs/weeks')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 30, period: 60)]
 	public function weeks(?string $uid = null): DataResponse {
 		return $this->run(fn () => $this->weeks->list($this->tenants->current(), $uid));
 	}
@@ -183,6 +184,7 @@ final class JobController extends BaseController {
 	/** GET /jobs/{key}/capacity?by= – does the counter-proposal fit its person? */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/jobs/{key}/capacity')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 30, period: 60)]
 	public function capacity(string $key, ?string $by = null): DataResponse {
 		return $this->run(fn () => $this->jobs->capacity($this->tenants->current(), $key, $by === '' ? null : $by));
 	}

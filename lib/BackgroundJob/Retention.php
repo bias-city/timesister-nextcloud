@@ -30,6 +30,8 @@ final class Retention extends TimedJob {
 		parent::__construct($time);
 		$this->setInterval(24 * 3600);
 		$this->setTimeSensitivity(IJob::TIME_INSENSITIVE);
+		// One run at a time: a second cron would only double the work.
+		$this->setAllowParallelRuns(false);
 	}
 
 	protected function run(mixed $argument): void {
