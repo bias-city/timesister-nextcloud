@@ -76,8 +76,8 @@ class InvoiceLayoutTest extends TestCase {
 		$d = new InvoiceDocument();
 		$d->lang = DocumentRules::DE;
 		$d->number = 'RE-2026-0009';
-		$d->issuer = ['name' => 'Denkstatt', 'country' => 'CH'];
-		$d->customer = ['name' => 'Stadt Basel', 'country' => 'CH'];
+		$d->issuer = ['name' => 'Muster', 'country' => 'CH'];
+		$d->customer = ['name' => 'Gemeinde Muster', 'country' => 'CH'];
 		$d->issuedOn = '2026-12-31';
 		$d->dueOn = '2027-01-30';
 		$d->positions = [

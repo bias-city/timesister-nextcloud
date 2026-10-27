@@ -1969,7 +1969,7 @@ Who issues the team's invoices – for the sender block, the note on invoices
 abroad and the payment part with a QR code:
 
 ```json
-"issuer": { "name": "Denkstatt sàrl", "street": "Dornacherstrasse 192", "postcode": "4053", "city": "Basel",
+"issuer": { "name": "Muster sàrl", "street": "Musterstrasse 12", "postcode": "4000", "city": "Basel",
             "country": "CH", "email": "info@example.org", "phone": "+41 61 000 00 00", "vat_id": "CHE-123.456.789 MWST",
             "foreign_note": "…", "qr": true,
             "accounts": [{ "currency": "CHF", "iban": "CH9300762011623852957", "bic": "" },

@@ -723,9 +723,8 @@ final class EntryService {
 		}
 	}
 
-	/** The error text kept on a source: short, one line. */
-	public static function errorText(\Throwable $e): string {
-		$text = trim(preg_replace('/\s+/', ' ', $e->getMessage()) ?? $e->getMessage());
-		return mb_substr($text === '' ? get_class($e) : $text, 0, 500);
+	/** `last_error` of a source that could not be read; the cause is only in the server log. */
+	public static function readFailed(): string {
+		return Message::of('The calendar could not be read; see the server log.')->text();
 	}
 }

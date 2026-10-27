@@ -36,12 +36,37 @@ class CustomerRulesTest extends TestCase {
 	public function testTypeAndPaymentDays(): void {
 		$this->assertSame('ok', self::check('{"id":"k1","name":"Kunde","type":"public","payment_days":45}'));
 		$this->assertSame('ok', self::check('{"id":"k1","name":"Kunde","type":null,"payment_days":null}'));
-		$this->assertSame('422 “type” of a customer is one of public, cooperative, private, company.', self::check('{"id":"k1","type":"club"}'));
+		// 0.29.0: a key of the team's list – the server checks the form, not the list.
+		$this->assertSame('ok', self::check('{"id":"k1","type":"wohnbau-genossenschaft"}'));
+		$this->assertSame('422 “type” of a customer must be null or a key of 1 to 40 lower-case letters, digits or dashes.', self::check('{"id":"k1","type":"Club"}'));
+		$this->assertSame('422 “type” of a customer must be null or a key of 1 to 40 lower-case letters, digits or dashes.', self::check('{"id":"k1","type":"-club"}'));
+		$this->assertSame('422 “type” of a customer must be null or a key of 1 to 40 lower-case letters, digits or dashes.', self::check('{"id":"k1","type":5}'));
 		$this->assertSame('422 “payment_days” must be null or an integer from 1 to 365.', self::check('{"id":"k1","payment_days":0}'));
 		$this->assertSame('422 “payment_days” must be null or an integer from 1 to 365.', self::check('{"id":"k1","payment_days":"30"}'));
 		$d = json_decode('{"id":"k1","payment_days":45}');
 		$this->assertSame(45, \OCA\TimeSister\Service\CustomerRules::paymentDays($d));
 		$this->assertNull(\OCA\TimeSister\Service\CustomerRules::paymentDays(json_decode('{"id":"k1"}')));
 		$this->assertNull(\OCA\TimeSister\Service\CustomerRules::paymentDays(null));
+	}
+
+	/** 0.29.0: the team's own customer types in `settings.customer_types`. */
+	public function testTeamTypes(): void {
+		$check = static function (string $json): string {
+			try {
+				RecordValidator::validate('setting', 'settings', json_decode($json));
+			} catch (ApiException $e) {
+				return $e->getStatus() . ' ' . $e->getMessage();
+			}
+			return 'ok';
+		};
+		$this->assertSame('ok', $check('{"customer_types":null}'));
+		$this->assertSame('ok', $check('{"customer_types":[{"id":"public","name":"Öffentliche Hand"},{"id":"wohnbau","name":"Wohnbau"}]}'));
+		$this->assertSame('422 “customer_types” must be null or a list of at most 50 customer types { id, name }.', $check('{"customer_types":{"id":"public"}}'));
+		$this->assertSame('422 “customer_types” must be null or a list of at most 50 customer types { id, name }.',
+			$check('{"customer_types":[' . implode(',', array_map(static fn ($i) => '{"id":"t' . $i . '","name":"T"}', range(1, 51))) . ']}'));
+		$this->assertSame('422 Each customer type needs an “id” of 1 to 40 lower-case letters, digits or dashes.', $check('{"customer_types":[{"id":"Gross","name":"A"}]}'));
+		$this->assertSame('422 Each customer type needs a “name” of 1 to 60 characters.', $check('{"customer_types":[{"id":"a","name":" "}]}'));
+		$this->assertSame('422 Each customer type needs a “name” of 1 to 60 characters.', $check('{"customer_types":[{"id":"a","name":"' . str_repeat('x', 61) . '"}]}'));
+		$this->assertSame('422 “customer_types” names the customer type a twice.', $check('{"customer_types":[{"id":"a","name":"A"},{"id":"a","name":"B"}]}'));
 	}
 }

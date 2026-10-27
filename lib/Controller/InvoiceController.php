@@ -33,6 +33,7 @@ final class InvoiceController extends BaseController {
 	/** GET /invoices/next-number?year=2026 – the number the next POST would give. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/invoices/next-number')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function preview(): DataResponse {
 		return $this->run(fn () => $this->invoices->nextNumber($this->tenants->current(), $this->request->getParam('year'), false));
 	}

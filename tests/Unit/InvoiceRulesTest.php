@@ -195,7 +195,7 @@ class InvoiceRulesTest extends TestCase {
 	/** 0.18.0: the document's texts, the positions and the hours per booking. */
 	public function testTextsPositionsAndHours(): void {
 		$pos = static fn (array $over = []): array => array_merge(['kind' => 'hours', 'text' => 'Planning', 'work_package' => 2, 'person' => 'alice', 'hours' => 12.5, 'rate' => 150, 'amount' => 1875], $over);
-		$this->assertSame('ok', self::check(['greeting' => "Dear Sir or Madam\n\nFor the work in September:", 'body' => "Payable within 30 days.\tThank you.", 'footer' => 'Denkstatt · Basel', 'due_on' => '2026-11-14']));
+		$this->assertSame('ok', self::check(['greeting' => "Dear Sir or Madam\n\nFor the work in September:", 'body' => "Payable within 30 days.\tThank you.", 'footer' => 'Muster · Basel', 'due_on' => '2026-11-14']));
 		$this->assertSame('ok', self::check(['greeting' => null, 'body' => null, 'footer' => null, 'positions' => null]));
 		$this->assertSame('ok', self::check(['positions' => [$pos(), $pos(['kind' => 'flat', 'amount' => 500.5]), $pos(['kind' => 'discount', 'amount' => -50]), $pos(['kind' => 'text', 'amount' => 0, 'hours' => null, 'rate' => null, 'person' => null, 'work_package' => null])]]));
 		$this->assertSame('ok', self::check(['positions' => []]));

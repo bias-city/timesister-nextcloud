@@ -40,6 +40,7 @@ final class EntryController extends BaseController {
 	/** GET /entries/status – Team Admins: every named calendar and feed. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/entries/status')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function status(): DataResponse {
 		return $this->run(fn () => $this->entries->statusList($this->tenants->current()));
 	}
@@ -65,6 +66,7 @@ final class EntryController extends BaseController {
 	/** GET /entries/corrections?uid=&event_uid=&limit= – Team Admins and Leads: the protocol of corrections (0.27.0). */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/entries/corrections')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function corrections(?string $uid = null, ?string $event_uid = null, int $limit = CorrectionService::PAGE): DataResponse {
 		return $this->run(fn () => $this->corrections->list($this->tenants->current(), $uid, $event_uid, $limit));
 	}

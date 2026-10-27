@@ -11,6 +11,7 @@ use OCA\TimeSister\Service\ApiException;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\Attribute\BruteForceProtection;
+use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\IL10N;
 use OCP\IRequest;
@@ -57,5 +58,34 @@ class BaseControllerTest extends TestCase {
 			}
 		}
 		$this->assertGreaterThan(25, $checked);
+	}
+
+	/** Every read route is rate-limited per user; the heavy ones (ledger, verify, weeks, capacity) tighter. */
+	public function testEveryReadRouteHasUserRateLimit(): void {
+		$checked = 0;
+		foreach (glob(__DIR__ . '/../../lib/Controller/*Controller.php') ?: [] as $file) {
+			$class = 'OCA\\TimeSister\\Controller\\' . basename($file, '.php');
+			foreach ((new \ReflectionClass($class))->getMethods() as $m) {
+				foreach ($m->getAttributes(ApiRoute::class) as $a) {
+					if (($a->getArguments()['verb'] ?? '') !== 'GET') {
+						continue;
+					}
+					$rl = $m->getAttributes(UserRateLimit::class);
+					$this->assertCount(1, $rl, "$class::{$m->getName()}");
+					$args = $rl[0]->getArguments();
+					$this->assertSame(60, $args['period'] ?? null, "$class::{$m->getName()}");
+					$limit = $args['limit'] ?? 0;
+					$this->assertIsInt($limit, "$class::{$m->getName()}");
+					$this->assertTrue($limit > 0 && $limit <= 300, "$class::{$m->getName()}: $limit");
+					$checked++;
+				}
+			}
+		}
+		$this->assertGreaterThan(30, $checked);
+		foreach (['InvoicingController::ledger', 'InvoicingController::verify', 'JobController::weeks', 'JobController::capacity'] as $heavy) {
+			[$class, $method] = explode('::', $heavy);
+			$rl = (new \ReflectionMethod('OCA\\TimeSister\\Controller\\' . $class, $method))->getAttributes(UserRateLimit::class);
+			$this->assertSame(30, $rl[0]->getArguments()['limit'] ?? null, $heavy);
+		}
 	}
 }

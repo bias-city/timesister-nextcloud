@@ -66,7 +66,7 @@ export async function faktura() {
 			{ kind: 'discount', text: 'Goodwill', amount: -50 },
 			{ kind: 'text', text: 'Thank you', amount: 0 },
 		],
-		greeting: 'Dear team', body: 'Payable within 30 days.', footer: 'Denkstatt · Basel', vat: 8.1, contact: 'c1',
+		greeting: 'Dear team', body: 'Payable within 30 days.', footer: 'Muster · Basel', vat: 8.1, contact: 'c1',
 		note: null, created_by: 'pbadmin', created_on: '2026-10-15', issued_on: null, paid_on: null, ...more,
 	})
 	try {
@@ -77,7 +77,7 @@ export async function faktura() {
 			check('/me.settings.invoicing true by default', (await me(A)).settings?.invoicing === true)
 			const s = await ocs(A, 'PUT', '/records/setting/settings', { version: settingsVersion, data: { ...base,
 				invoice_number: { pattern: `RF-${RUN}-{no:4}`, per_year: true, start: 1 },
-				issuer: { name: 'Denkstatt sàrl', street: 'Dornacherstrasse 192', postcode: '4053', city: 'Basel', country: 'CH', vat_id: 'CHE-123.456.789 MWST', qr: true, accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }] } } })
+				issuer: { name: 'Muster sàrl', street: 'Musterstrasse 12', postcode: '4000', city: 'Basel', country: 'CH', vat_id: 'CHE-123.456.789 MWST', qr: true, accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }] } } })
 			expect('Team Admin sets pattern and issuer', s, 200)
 			settingsVersion = s.data?.version ?? settingsVersion
 			expect('customer', await ocs(A, 'PUT', `/records/customer/${CF}`, { version: 0, data: { schema: 1, id: CF, name: `Kunde ${RUN}`, street: 'Platz 1', postcode: '4001', city: 'Basel', country: 'CH', vat_id: 'CHE-999', note: 'secret', contacts: [{ id: 'c1', name: 'Lea Kontakt' }] } }), 200)
@@ -144,9 +144,9 @@ export async function faktura() {
 			expect('Team Admin reads fixed', f, 200)
 			const x = f.data
 			check('fixed: number, status, sums, currency, vat', x?.number === number && x?.status === 'issued' && x?.net === 200 && x?.vat_amount === 16.2 && x?.gross === 216.2 && x?.currency === 'CHF' && x?.vat === 8.1, x)
-			check('fixed: issuer and customer frozen, contact resolved, note left out', x?.issuer?.name === 'Denkstatt sàrl' && x?.customer?.name === `Kunde ${RUN}` && x?.customer?.vat_id === 'CHE-999' && x?.customer?.contact?.name === 'Lea Kontakt' && x?.customer?.note === undefined, x?.customer)
+			check('fixed: issuer and customer frozen, contact resolved, note left out', x?.issuer?.name === 'Muster sàrl' && x?.customer?.name === `Kunde ${RUN}` && x?.customer?.vat_id === 'CHE-999' && x?.customer?.contact?.name === 'Lea Kontakt' && x?.customer?.note === undefined, x?.customer)
 			check('fixed: positions as sent, hours with amount = hours × rate and code', x?.positions?.length === 4 && x?.positions?.[2]?.amount === -50 && x?.hours?.length === 1 && x?.hours?.[0]?.amount === 150 && x?.hours?.[0]?.code === CODE && x?.hours?.[0]?.start === '2026-10-12T08:00:00', [x?.positions, x?.hours])
-			check('fixed: texts, chain, period, issued_by', x?.greeting === 'Dear team' && x?.footer === 'Denkstatt · Basel' && x?.chain?.seq === seq && x?.chain?.hash === hash && x?.period?.from === '2026-10-01' && x?.issued_by === 'pbadmin' && x?.reverses === null && x?.reversed_by === null, x)
+			check('fixed: texts, chain, period, issued_by', x?.greeting === 'Dear team' && x?.footer === 'Muster · Basel' && x?.chain?.seq === seq && x?.chain?.hash === hash && x?.period?.from === '2026-10-01' && x?.issued_by === 'pbadmin' && x?.reverses === null && x?.reversed_by === null, x)
 			expect('Lead of the project reads fixed', await ocs(L, 'GET', `${ipath(K1)}/fixed`), 200)
 			expect('Member reads fixed', await ocs(U1, 'GET', `${ipath(K1)}/fixed`), 403, 'forbidden')
 			expect('Lead reads the ledger', await ocs(L, 'GET', '/invoices/ledger'), 403, 'forbidden')

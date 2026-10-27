@@ -30,7 +30,7 @@ class EInvoiceXmlTest extends TestCase {
 		$d = new InvoiceDocument();
 		$d->lang = 'de';
 		$d->number = 'RE-2026-0007';
-		$d->issuer = ['name' => 'Denkstatt sàrl', 'street' => 'Dornacherstrasse 192', 'postcode' => '4053', 'city' => 'Basel', 'country' => 'CH', 'vat_id' => 'CHE-123.456.789 MWST', 'email' => 'mail@example.test', 'phone' => '+41 61 000 00 00'];
+		$d->issuer = ['name' => 'Muster sàrl', 'street' => 'Musterstrasse 12', 'postcode' => '4000', 'city' => 'Basel', 'country' => 'CH', 'vat_id' => 'CHE-123.456.789 MWST', 'email' => 'mail@example.test', 'phone' => '+41 61 000 00 00'];
 		$d->customer = ['id' => 'k1', 'name' => 'Müller AG', 'street' => 'Platz 1', 'postcode' => '4001', 'city' => 'Basel', 'country' => 'CH', 'email' => 'buchhaltung@example.test', 'tax_case' => 'domestic'];
 		$d->customerKey = 'k1';
 		$d->issuedOn = '2026-10-15';

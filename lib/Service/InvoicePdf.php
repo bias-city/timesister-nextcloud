@@ -445,7 +445,7 @@ final class InvoicePdf {
 		if ($street === '') {
 			return StructuredAddress::createWithoutStreet($name, $postcode, $city, $country);
 		}
-		// “Dornacherstrasse 192” → street and building number.
+		// “Musterstrasse 12” → street and building number.
 		$number = null;
 		if (preg_match('/^(.*\S)\s+(\d+[a-zA-Z]?)$/u', $street, $m)) {
 			$street = $m[1];

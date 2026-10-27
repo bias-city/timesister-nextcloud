@@ -67,7 +67,7 @@ export async function dokumente() {
 		schema: 1, project: PF, budget: 'b1', from: '2026-10-01', to: '2026-10-31', status: 'draft', number: null,
 		bookings: [{ person: 'pbuser1', uid: EV1, start: '2026-10-13T08:00:00', hours: 2, rate: 150, code: CODE }],
 		positions: [{ kind: 'hours', text: 'Site visit', person: 'pbuser1', work_package: 0, hours: 2, rate: 150, amount: 300 }, { kind: 'flat', text: 'Travel', amount: 100 }],
-		greeting: 'Dear team', body: 'Payable within 30 days.', footer: 'Denkstatt · Basel', vat: 8.1, contact: 'c1',
+		greeting: 'Dear team', body: 'Payable within 30 days.', footer: 'Muster · Basel', vat: 8.1, contact: 'c1',
 		note: null, created_by: 'pbadmin', created_on: '2026-10-15', issued_on: null, paid_on: null, ...more,
 	})
 	try {
@@ -88,7 +88,7 @@ export async function dokumente() {
 			check('pb has a backup owner', typeof owner === 'string' && owner !== '', owner)
 			const s = await ocs(A, 'PUT', '/records/setting/settings', { version: settingsVersion, data: { ...base, language: 'de',
 				invoice_number: { pattern: `RD-${RUN}-{no:4}`, per_year: true, start: 1 },
-				issuer: { name: 'Denkstatt sàrl', street: 'Dornacherstrasse 192', postcode: '4053', city: 'Basel', country: 'CH', vat_id: 'CHE-123.456.789 MWST', email: 'mail@example.test', qr: true, accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }] } } })
+				issuer: { name: 'Muster sàrl', street: 'Musterstrasse 12', postcode: '4000', city: 'Basel', country: 'CH', vat_id: 'CHE-123.456.789 MWST', email: 'mail@example.test', qr: true, accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }] } } })
 			expect('Team Admin sets language, pattern and issuer with a CHF account', s, 200)
 			settingsVersion = s.data?.version ?? settingsVersion
 			// 0.22.0: the document language is null, de or en when written.

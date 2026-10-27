@@ -74,7 +74,7 @@ final class EntryFetcher {
 					$n['changed'] += $changed;
 				} catch (\Throwable $e) {
 					$n['failed']++;
-					$src->setLastError(EntryService::errorText($e));
+					$src->setLastError(EntryService::readFailed());
 					$this->calendars->update($src);
 					$this->logger->warning('TimeSister: time entries of team {team} ({source}) not read', [
 						'app' => 'timesister', 'team' => $t->getId(), 'source' => $src->getSource(), 'exception' => $e,
@@ -157,7 +157,7 @@ final class EntryFetcher {
 					}
 				}
 			} catch (\Throwable $e) {
-				$src->setLastError(EntryService::errorText($e));
+				$src->setLastError(EntryService::readFailed());
 				$this->calendars->update($src);
 				$this->logger->warning('TimeSister: time calendar of {uid} not read after naming', ['app' => 'timesister', 'uid' => $src->getUid(), 'exception' => $e]);
 			}

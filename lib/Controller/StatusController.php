@@ -46,6 +46,7 @@ final class StatusController extends BaseController {
 	/** GET /status */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/status')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function index(): DataResponse {
 		return $this->run(fn () => $this->status->list($this->tenants->current()));
 	}

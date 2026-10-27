@@ -33,7 +33,6 @@ use Psr\Log\LoggerInterface;
  */
 final class DocumentService {
 	public const ACTOR_SYSTEM = 'system';
-	private const ERROR_MAX = 1000;
 
 	public function __construct(
 		private IDBConnection $db,
@@ -144,15 +143,16 @@ final class DocumentService {
 			}
 		} catch (\Throwable $e) {
 			$row->setDocumentState(InvInvoice::DOCUMENT_FAILED);
-			$row->setDocumentError(mb_substr($e->getMessage(), 0, self::ERROR_MAX));
+			// The cause stays in the log; the client gets a plain text.
+			$row->setDocumentError(Message::of('The document could not be rendered; see the server log.')->text());
 			$row->setModifiedAt($now);
 			try {
 				$this->invoices->update($row);
 			} catch (\Throwable) {
 				// The state could not be written either; the next try will tell.
 			}
-			$this->logger->warning('TimeSister: document of invoice {number} not rendered (try {n}): {message}', [
-				'app' => 'timesister', 'number' => $row->getNumber(), 'n' => $row->getDocumentTries(), 'message' => $e->getMessage(),
+			$this->logger->warning('TimeSister: document of invoice {number} not rendered (try {n})', [
+				'app' => 'timesister', 'number' => $row->getNumber(), 'n' => $row->getDocumentTries(), 'exception' => $e,
 			]);
 		}
 	}

@@ -85,7 +85,7 @@ export async function kosten() {
 		settingsVersion = r.data?.version ?? settingsVersion
 		return r
 	}
-	const issuer = { name: 'Denkstatt sàrl', street: 'Dornacherstrasse 192', postcode: '4053', city: 'Basel', country: 'CH', vat_id: 'CHE-123.456.789 MWST', email: 'mail@example.test', qr: true, accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }] }
+	const issuer = { name: 'Muster sàrl', street: 'Musterstrasse 12', postcode: '4000', city: 'Basel', country: 'CH', vat_id: 'CHE-123.456.789 MWST', email: 'mail@example.test', qr: true, accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }] }
 	const costs = [
 		{ no: 1, name: 'Nebenkosten', kind: 'expense', rule: 'percent', percent: 3, mode: 'rebill', vat: 2.6 },
 		{ no: 2, name: 'Druck', kind: 'expense', rule: 'flat', amount: 200, per: 'invoice' },

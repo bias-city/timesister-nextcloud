@@ -23,7 +23,7 @@ class InvoicePdfTest extends TestCase {
 		$d = new InvoiceDocument();
 		$d->lang = 'de';
 		$d->number = 'RE-2026-0007';
-		$d->issuer = ['name' => 'Denkstatt sàrl', 'street' => 'Dornacherstrasse 192', 'postcode' => '4053', 'city' => 'Basel', 'country' => 'CH', 'vat_id' => 'CHE-123.456.789 MWST', 'email' => 'mail@example.test'];
+		$d->issuer = ['name' => 'Muster sàrl', 'street' => 'Musterstrasse 12', 'postcode' => '4000', 'city' => 'Basel', 'country' => 'CH', 'vat_id' => 'CHE-123.456.789 MWST', 'email' => 'mail@example.test'];
 		$d->customer = ['name' => 'Müller AG', 'street' => 'Platz 1', 'postcode' => '4001', 'city' => 'Basel', 'country' => 'CH', 'contact' => ['id' => 'c1', 'name' => 'Lea Kontakt']];
 		$d->issuedOn = '2026-10-15';
 		$d->dueOn = '2026-11-14';
@@ -33,7 +33,7 @@ class InvoicePdfTest extends TestCase {
 		$d->budget = 'Phase 1';
 		$d->greeting = 'Sehr geehrte Damen und Herren';
 		$d->body = 'Zahlbar innert 30 Tagen.';
-		$d->footer = 'Denkstatt sàrl · Basel';
+		$d->footer = 'Muster sàrl · Basel';
 		$d->positions = [['kind' => 'hours', 'text' => 'Planung', 'hours' => 12.5, 'rate' => 150, 'amount' => 1875], ['kind' => 'discount', 'text' => 'Rabatt', 'amount' => -50]];
 		$d->currency = 'CHF';
 		$d->vat = 8.1;

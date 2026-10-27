@@ -101,7 +101,7 @@ export async function erechnung() {
 	const teamBefore = (await ocs(A, 'GET', '/team')).data
 	const datevBefore = teamBefore?.settings?.datev || null
 	const webhooksBefore = teamBefore?.settings?.webhooks || []
-	const issuer = (country, more = {}) => ({ name: 'Denkstatt sàrl', street: 'Dornacherstrasse 192', postcode: country === 'DE' ? '79539' : '4053', city: country === 'DE' ? 'Lörrach' : 'Basel', country, vat_id: country === 'DE' ? 'DE123456789' : 'CHE-123.456.789 MWST', email: 'mail@example.test', phone: '+41 61 000 00 00', qr: true,
+	const issuer = (country, more = {}) => ({ name: 'Muster sàrl', street: 'Musterstrasse 12', postcode: country === 'DE' ? '79539' : '4000', city: country === 'DE' ? 'Lörrach' : 'Basel', country, vat_id: country === 'DE' ? 'DE123456789' : 'CHE-123.456.789 MWST', email: 'mail@example.test', phone: '+41 61 000 00 00', qr: true,
 		accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }, { currency: 'EUR', iban: 'DE89370400440532013000', bic: 'COBADEFFXXX' }], ...more })
 	const setIssuer = async (country, more = {}, vat = 8.1) => {
 		const r = await ocs(A, 'PUT', '/records/setting/settings', { version: settingsVersion, data: { ...base, language: 'de', vat, invoice_number: { pattern: `RE-${RUN}-{no:4}`, per_year: true, start: 1 }, issuer: issuer(country, more) } })
@@ -111,7 +111,7 @@ export async function erechnung() {
 	const draft = (customerKey, currency, more = {}) => ({
 		schema: 1, project: PF, budget: currency === 'EUR' ? 'b2' : 'b1', from: '2026-10-01', to: '2026-10-31', status: 'draft', number: null, bookings: [],
 		positions: [{ kind: 'hours', text: 'Planung', hours: 10, rate: 150, amount: 1500 }, { kind: 'flat', text: 'Spesen', amount: 100 }, { kind: 'discount', text: 'Rabatt', amount: -100 }],
-		greeting: 'Guten Tag', body: 'Zahlbar innert 30 Tagen.', footer: 'Denkstatt · Basel', note: null, created_by: 'pbadmin', created_on: '2026-10-15', issued_on: null, paid_on: null, ...more,
+		greeting: 'Guten Tag', body: 'Zahlbar innert 30 Tagen.', footer: 'Muster · Basel', note: null, created_by: 'pbadmin', created_on: '2026-10-15', issued_on: null, paid_on: null, ...more,
 	})
 	try {
 		head('E-invoices: setup')

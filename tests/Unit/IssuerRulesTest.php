@@ -24,7 +24,7 @@ class IssuerRulesTest extends TestCase {
 
 	public function testShape(): void {
 		$this->assertSame('ok', self::check('null'));
-		$this->assertSame('ok', self::check('{"name":"Denkstatt sàrl","street":"Dornacherstrasse 192","postcode":"4053","city":"Basel","country":"CH","email":"issuer@example.org","phone":"+41 61","vat_id":"CHE-123.456.789 MWST","foreign_note":"Nicht der MWST unterstellt.\nReverse Charge.","qr":true,'
+		$this->assertSame('ok', self::check('{"name":"Muster sàrl","street":"Musterstrasse 12","postcode":"4000","city":"Basel","country":"CH","email":"issuer@example.org","phone":"+41 61","vat_id":"CHE-123.456.789 MWST","foreign_note":"Nicht der MWST unterstellt.\nReverse Charge.","qr":true,'
 			. '"accounts":[{"currency":"CHF","iban":"CH9300762011623852957","bic":""},{"currency":"EUR","iban":"DE89370400440532013000","bic":"COBADEFFXXX"}]}'));
 		$this->assertSame('422 “issuer” must be an object.', self::check('"x"'));
 		$this->assertSame('422 “issuer.qr” must be true or false.', self::check('{"qr":"ja"}'));

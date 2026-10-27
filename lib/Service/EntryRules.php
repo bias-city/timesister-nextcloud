@@ -400,10 +400,17 @@ final class EntryRules {
 			|| count($put) + count($delete) > self::LIST_MAX) {
 			throw ApiException::invalid(Message::of('“put” and “delete” must be lists of at most {max} items together.', ['max' => self::LIST_MAX]));
 		}
+		$seen = [];
 		foreach ($put as $ics) {
-			if (!is_string($ics) || strlen($ics) > self::MAX_OBJECT || self::parse($ics) === null || !self::oneUid($ics)) {
+			$parsed = is_string($ics) && strlen($ics) <= self::MAX_OBJECT ? self::parse($ics) : null;
+			if (!is_string($ics) || $parsed === null || !self::oneUid($ics)) {
 				throw ApiException::invalid('Each item of “put” must be one event in iCalendar, at most 256 KB.');
 			}
+			// Two objects with one UID would silently become one entry.
+			if (isset($seen[$parsed['uid']])) {
+				throw ApiException::invalid(Message::of('Event “{uid}” appears twice in “put”.', ['uid' => $parsed['uid']]));
+			}
+			$seen[$parsed['uid']] = true;
 		}
 		foreach ($delete as $ev) {
 			if (!is_string($ev) || trim($ev) === '' || strlen($ev) > 255 || preg_match('/[\x00-\x1F\x7F]/', $ev) === 1) {

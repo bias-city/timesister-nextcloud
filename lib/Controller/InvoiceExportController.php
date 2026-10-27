@@ -104,6 +104,7 @@ final class InvoiceExportController extends BaseController {
 	/** GET /invoices/webhooks/status – per hook: waiting, delivered, failed, the last error. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/invoices/webhooks/status')]
 	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
 	public function webhookStatus(): DataResponse {
 		return $this->run(fn () => $this->webhooks->status($this->tenants->current()));
 	}

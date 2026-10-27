@@ -91,6 +91,7 @@ export async function listen() {
 		expect('a Lead may not send lists', await ocs(L, 'POST', '/entries/list', { uid: EXT, put: [object(e1, '20261005', 'x')] }), 403, 'forbidden')
 		const two = object(e1, '20261005', 'a').replace('END:VCALENDAR', `BEGIN:VEVENT\r\nUID:${e2}\r\nDTSTAMP:20261001T080000Z\r\nDTSTART:20261006T080000Z\r\nDTEND:20261006T090000Z\r\nSUMMARY:b\r\nEND:VEVENT\r\nEND:VCALENDAR`)
 		expect('an object with two UIDs is refused', await ocs(A, 'POST', '/entries/list', { uid: EXT, put: [two] }), 422, 'invalid')
+		expect('the same UID twice in one list is refused', await ocs(A, 'POST', '/entries/list', { uid: EXT, put: [object(e1, '20261005', 'a'), object(e1, '20261006', 'b')] }), 422, 'invalid')
 
 		head('Lists of hours: put and the role filter')
 		const before = (await entries(A)).revision

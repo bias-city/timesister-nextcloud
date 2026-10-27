@@ -152,8 +152,8 @@ class LedgerRulesTest extends TestCase {
 		$this->assertSame('EUR', IssueRules::currencyOf(IssueRules::budgetOf($project, 'b2') ?? new \stdClass(), (object)['currency' => 'EUR']), 'the draft’s when the budget has none');
 		$this->assertNull(IssueRules::currencyOf((object)[], (object)[]));
 		$this->assertNull(IssueRules::budgetOf($project, 'b3'));
-		$settings = (object)['issuer' => (object)['name' => 'Denkstatt'], 'vat' => 8.1];
-		$this->assertSame('Denkstatt', IssueRules::issuerOf($settings)?->name);
+		$settings = (object)['issuer' => (object)['name' => 'Muster'], 'vat' => 8.1];
+		$this->assertSame('Muster', IssueRules::issuerOf($settings)?->name);
 		$this->assertNull(IssueRules::issuerOf(null));
 		$this->assertSame(7.7, IssueRules::vatOf((object)['vat' => 7.7], $settings), 'the draft’s');
 		$this->assertSame(8.1, IssueRules::vatOf((object)[], $settings), 'the team’s default');
