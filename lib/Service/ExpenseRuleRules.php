@@ -8,9 +8,9 @@ namespace OCA\TimeSister\Service;
 
 /**
  * The rule of a recurring expense (0.22.0, record `expense_rule`, B4a),
- * pure: content, the periods it covers, its approval (cleared when amount,
- * rate or period change) and who reads and writes it. The client creates
- * the recurring receipt of each period; the server only checks it.
+ * pure: content, the periods it covers and who reads and writes it. Since
+ * 0.30.0 a rule applies from creation, without approval. The client
+ * creates the recurring receipt of each period; the server only checks it.
  */
 final class ExpenseRuleRules {
 	public const KIND = 'expense_rule';
@@ -18,9 +18,8 @@ final class ExpenseRuleRules {
 	public const QUARTERLY = 'quarterly';
 	public const YEARLY = 'yearly';
 	public const PERIODS = [self::MONTHLY, self::QUARTERLY, self::YEARLY];
+	/** The approval of rules before 0.30.0: kept as stored, never set any more. */
 	public const SERVER = ['approved_by', 'approved_on'];
-	/** A change of these clears the approval. */
-	public const APPROVAL_FIELDS = ['amount', 'vat_rate', 'period'];
 	public const TEXT_MAX = 300;
 
 	public static function validate(\stdClass $d): void {
@@ -67,20 +66,11 @@ final class ExpenseRuleRules {
 		}
 	}
 
-	/** The approval is kept from the stored rule unless amount, rate or period changed. */
+	/** The server's fields as stored: an old rule keeps its approval, a new one has none (0.30.0). */
 	public static function mergeServer(?\stdClass $before, \stdClass $after): void {
-		$keep = $before !== null && ($before->approved_by ?? null) !== null;
-		foreach (self::APPROVAL_FIELDS as $f) {
-			if ($before !== null && Json::encode([$before->{$f} ?? null]) !== Json::encode([$after->{$f} ?? null])) {
-				$keep = false;
-			}
+		foreach (self::SERVER as $f) {
+			$after->{$f} = Fields::str($before, $f);
 		}
-		$after->approved_by = $keep ? Fields::str($before, 'approved_by') : null;
-		$after->approved_on = $keep ? Fields::str($before, 'approved_on') : null;
-	}
-
-	public static function isApproved(?\stdClass $d): bool {
-		return is_string($d?->approved_by ?? null);
 	}
 
 	// ------------------------------------------------------------- rights
@@ -90,11 +80,8 @@ final class ExpenseRuleRules {
 		return $manages || ($d?->person ?? null) === $uid || ReceiptRules::ofLed($d, $led);
 	}
 
-	/** The person writes their own rules, Team Admins any; an approved rule is ended by `to`, not deleted. */
+	/** The person writes their own rules, Team Admins any. */
 	public static function requireWrite(bool $manages, string $uid, ?\stdClass $before, ?\stdClass $after): void {
-		if ($after === null && self::isApproved($before)) {
-			throw ApiException::conflict('An approved expense rule is not deleted; end it by setting “to”.');
-		}
 		if ($manages) {
 			return;
 		}
@@ -105,9 +92,11 @@ final class ExpenseRuleRules {
 		}
 	}
 
-	/** Team Admins; with a project also its Lead. @param array<string,true> $led */
-	public static function canApprove(bool $manages, array $led, \stdClass $d): bool {
-		return $manages || ReceiptRules::ofLed($d, $led);
+	/** A rule is deleted while no live receipt names it; with receipts it is ended by `to` (0.30.0). */
+	public static function requireDelete(bool $hasReceipts): void {
+		if ($hasReceipts) {
+			throw ApiException::conflict('An expense rule with receipts is not deleted; end it by setting “to”.');
+		}
 	}
 
 	// ------------------------------------------------------------ periods

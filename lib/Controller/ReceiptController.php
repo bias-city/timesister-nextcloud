@@ -8,7 +8,6 @@ namespace OCA\TimeSister\Controller;
 
 use OCA\TimeSister\Service\ExpenseExportService;
 use OCA\TimeSister\Service\ExpenseReportService;
-use OCA\TimeSister\Service\ExpenseService;
 use OCA\TimeSister\Service\Json;
 use OCA\TimeSister\Service\ReceiptRules;
 use OCA\TimeSister\Service\ReceiptService;
@@ -24,22 +23,21 @@ use OCP\IL10N;
 use OCP\IRequest;
 
 /**
- * Receipts, expense rules and expense reports: the receipt's file,
- * approving and rejecting, the rule's approval (0.22.0); the report's
- * ready, fix, paid, reverse and document (0.23.0); the export of
- * expenses. The records themselves are written through /records.
+ * Receipts and expense reports: the receipt's file, approving, rejecting
+ * and reopening (0.22.0, 0.27.0); settling, the app's files, reversing and
+ * reading a report (0.30.0); the export of expenses. The records
+ * themselves are written through /records.
  */
 final class ReceiptController extends BaseController {
 	private const MAX_BODY = 4 * 1024;
-	/** A fix may name up to 500 receipt keys. */
-	private const MAX_FIX_BODY = 96 * 1024;
+	/** A file of the app in Base64 (64 MB are 85.4 MB of Base64) and its name. */
+	private const MAX_DOCUMENT_BODY = 90 * 1024 * 1024;
 
 	public function __construct(
 		IRequest $request,
 		TenantService $tenants,
 		IL10N $l,
 		private ReceiptService $receipts,
-		private ExpenseService $expenses,
 		private ExpenseReportService $reports,
 		private ExpenseExportService $exports,
 	) {
@@ -90,37 +88,22 @@ final class ReceiptController extends BaseController {
 		return $this->run(fn () => $this->receipts->reopen($this->tenants->current(), $key));
 	}
 
-	/** POST /expense-rules/{key}/approve. */
-	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-rules/{key}/approve')]
-	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
-	#[NoAdminRequired]
-	public function approveRule(string $key): DataResponse {
-		return $this->run(fn () => $this->expenses->approveRule($this->tenants->current(), $key));
-	}
-
-	/** POST /expense-reports/ready `{ person }` – the person’s open report, ready to be fixed. */
-	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-reports/ready')]
-	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
-	#[NoAdminRequired]
-	public function ready(): DataResponse {
-		return $this->run(fn () => $this->reports->ready($this->tenants->current(), $this->body(self::MAX_BODY)));
-	}
-
-	/** POST /expense-reports/fix `{ person, receipts? }` – freezes, numbers, ledgers and renders. */
+	/** POST /expense-reports/fix `{ person, from, to }` – the person or Team Admins settle the open expenses of a period (0.30.0). */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-reports/fix')]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 30, period: 60)]
 	public function fix(): DataResponse {
-		return $this->run(fn () => $this->reports->fix($this->tenants->current(), $this->body(self::MAX_FIX_BODY)));
+		return $this->run(fn () => $this->reports->fix($this->tenants->current(), $this->body(self::MAX_BODY)));
 	}
 
-	/** POST /expense-reports/{key}/paid `{ date }`. */
-	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-reports/{key}/paid')]
+	/** POST /expense-reports/{key}/documents `{ name, content }` – a file of the app, Base64, at most 64 MB (0.30.0). */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-reports/{key}/documents')]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
-	public function paid(string $key): DataResponse {
-		return $this->run(fn () => $this->reports->paid($this->tenants->current(), $key, $this->optionalBody()));
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function storeDocument(string $key): DataResponse {
+		return $this->run(fn () => $this->reports->storeDocument($this->tenants->current(), $key, $this->body(self::MAX_DOCUMENT_BODY)));
 	}
 
 	/** POST /expense-reports/{key}/reverse `{ reason }` – only a fixed report. */
@@ -131,14 +114,14 @@ final class ReceiptController extends BaseController {
 		return $this->run(fn () => $this->reports->reverse($this->tenants->current(), $key, $this->optionalBody()));
 	}
 
-	/** GET /expense-reports/{key}/document – the PDF. */
+	/** GET /expense-reports/{key}/document?name= – a stored file; without name the first PDF (old reports: their PDF). */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/expense-reports/{key}/document')]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 120, period: 60)]
 	public function reportDocument(string $key): Response {
 		return $this->respond(function () use ($key): Response {
-			$r = $this->reports->document($this->tenants->current(), $key);
-			return new DataDownloadResponse($r['content'], $r['name'], 'application/pdf');
+			$r = $this->reports->document($this->tenants->current(), $key, $this->request->getParam('name'));
+			return new DataDownloadResponse($r['content'], $r['name'], $r['type']);
 		});
 	}
 

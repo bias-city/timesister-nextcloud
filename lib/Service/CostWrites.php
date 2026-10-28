@@ -15,8 +15,9 @@ use OCP\AppFramework\Utility\ITimeFactory;
  * against the stored record, inside the record transaction under the team
  * lock: the rights, the fields the server owns, what must exist (person,
  * project, budget, cost position, rule), the uniqueness of recurring
- * receipts per period; since 0.23.0 approval by assignment and one open
- * expense report per person. A quote keeps its
+ * receipts per period; since 0.23.0 approval by assignment; since 0.30.0
+ * what a settled receipt keeps, rules without approval and no client
+ * writes of expense reports. A quote keeps its
  * server-written `document`. Files of deleted receipts go to the trash
  * after the commit.
  */
@@ -53,8 +54,8 @@ final class CostWrites {
 		}
 		$after = match ($op['kind']) {
 			ReceiptRules::KIND => $this->receipt($m, $op['key'], $before, $after, $batch),
-			ExpenseRuleRules::KIND => $this->rule($m, $before, $after),
-			default => $this->report($m, $op['key'], $before, $after),
+			ExpenseRuleRules::KIND => $this->rule($m, $op['key'], $before, $after),
+			default => $this->report(),
 		};
 		return $after === null ? null : Json::encode($after);
 	}
@@ -76,11 +77,13 @@ final class CostWrites {
 
 	private function receipt(Membership $m, string $key, ?\stdClass $before, ?\stdClass $after, CostBatch $batch): ?\stdClass {
 		$led = $m->manages() ? [] : $this->rights->ledProjects($m);
+		// 0.30.0: on a fixed or paid expense report the receipt is settled.
+		$settled = $before !== null && $this->settled($m->tenantId, $before);
 		if ($after === null) {
 			if ($before === null) {
 				return null;
 			}
-			ReceiptRules::requireWrite($m->manages(), $m->uid, $led, $before, null);
+			ReceiptRules::requireWrite($m->manages(), $m->uid, $led, $before, null, $settled);
 			if (($before->status ?? null) !== ReceiptRules::OPEN && ($before->status ?? null) !== ReceiptRules::REJECTED) {
 				throw ApiException::conflict('A receipt is deleted only while open or rejected.');
 			}
@@ -107,13 +110,12 @@ final class CostWrites {
 		$budgetCurrency = ReceiptBooking::budgetCurrencyOf($project, $after, $team);
 		ReceiptBooking::requireBudgetCurrency($after, $team, $budgetCurrency, false);
 		$this->requireMember($tid, $after->person ?? null);
-		$ruleApproved = false;
 		if (($after->kind ?? null) === ReceiptRules::RECURRING
 			&& ($before === null || ($before->rule ?? null) !== $after->rule || ($before->period ?? null) !== $after->period)) {
-			$ruleApproved = $this->recurring($tid, $key, $after, $batch);
+			$this->recurring($tid, $key, $after, $batch);
 		}
-		ReceiptRules::mergeServer($before, $after, $m->uid, $this->today(), ReceiptRules::initialStatus($after, $ruleApproved));
-		ReceiptRules::requireWrite($m->manages(), $m->uid, $led, $before, $after);
+		ReceiptRules::mergeServer($before, $after, $m->uid, $this->today(), ReceiptRules::initialStatus($after));
+		ReceiptRules::requireWrite($m->manages(), $m->uid, $led, $before, $after, $settled);
 		if ($project !== null) {
 			ReceiptRules::requireCost($after, $project);
 		}
@@ -134,14 +136,11 @@ final class CostWrites {
 		return $after;
 	}
 
-	/** Rule of the same person, approved, period in its form and range, once per rule and period (409 duplicate). */
-	private function recurring(int $tid, string $key, \stdClass $after, CostBatch $batch): bool {
+	/** Rule of the same person (it applies from creation, 0.30.0), period in its form and range, once per rule and period (409 duplicate). */
+	private function recurring(int $tid, string $key, \stdClass $after, CostBatch $batch): void {
 		$rule = $this->live($tid, ExpenseRuleRules::KIND, (string)$after->rule) ?? throw ApiException::invalid('The expense rule of this receipt does not exist.');
 		if (($rule->person ?? null) !== ($after->person ?? null) || ($after->paid_by ?? null) !== ReceiptRules::PERSON) {
 			throw ApiException::invalid('A recurring receipt is paid by the person of its expense rule.');
-		}
-		if (!ExpenseRuleRules::isApproved($rule)) {
-			throw ApiException::invalid('The expense rule is not approved yet.');
 		}
 		$period = (string)$after->period;
 		if (!ExpenseRuleRules::covers($rule, $period)) {
@@ -161,14 +160,21 @@ final class CostWrites {
 			throw ApiException::duplicate(Message::of('The receipt {key} is already the one of this rule for {period}.', ['key' => $taken, 'period' => $period]));
 		}
 		$batch->recurring[$id] = $key;
-		return true;
+	}
+
+	/** Is the receipt on a fixed or paid expense report (0.30.0)? */
+	private function settled(int $tid, \stdClass $receipt): bool {
+		$report = $receipt->report ?? null;
+		return is_string($report) && ExpenseReportRules::holds($this->live($tid, ExpenseReportRules::KIND, $report));
 	}
 
 	// --------------------------------------------------------------- rule
 
-	private function rule(Membership $m, ?\stdClass $before, ?\stdClass $after): ?\stdClass {
+	private function rule(Membership $m, string $key, ?\stdClass $before, ?\stdClass $after): ?\stdClass {
 		ExpenseRuleRules::requireWrite($m->manages(), $m->uid, $before, $after);
 		if ($after === null) {
+			// 0.30.0: deleted only while no receipt names it.
+			ExpenseRuleRules::requireDelete($before !== null && $this->ruleHasReceipts($m->tenantId, $key));
 			return null;
 		}
 		$this->requireMember($m->tenantId, $after->person);
@@ -183,31 +189,22 @@ final class CostWrites {
 		return $after;
 	}
 
+	/** Does a live receipt name the rule? */
+	private function ruleHasReceipts(int $tid, string $rule): bool {
+		foreach ($this->records->findLiveByKind($tid, ReceiptRules::KIND) as $r) {
+			if ((InvoiceRules::decode($r->getData())?->rule ?? null) === $rule) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	// ------------------------------------------------------------- report
 
-	/**
-	 * A client's write of an expense report (0.23.0): only the open one, by
-	 * the person or a Team Admin, one open report per person; everything
-	 * else is the server's (ready, fix, paid, reverse).
-	 */
-	private function report(Membership $m, string $key, ?\stdClass $before, ?\stdClass $after): ?\stdClass {
-		ExpenseReportRules::requireWrite($m->manages(), $m->uid, $before, $after);
-		if ($after === null) {
-			return null;
-		}
-		$this->requireMember($m->tenantId, $after->person);
-		if ($before === null) {
-			$reports = [];
-			foreach ($this->records->findLiveByKind($m->tenantId, ExpenseReportRules::KIND) as $r) {
-				$reports[$r->getRkey()] = InvoiceRules::decode($r->getData());
-			}
-			$open = ExpenseReportRules::openOf($reports, (string)$after->person);
-			if ($open !== null && $open !== $key) {
-				throw ApiException::duplicate(Message::of('The expense report {key} is already the open one of this person.', ['key' => $open]));
-			}
-		}
-		ExpenseReportRules::mergeServer($before, $after);
-		return $after;
+	/** A client's write of an expense report: none since 0.30.0 – fix, documents and reverse make and change it. */
+	private function report(): ?\stdClass {
+		ExpenseReportRules::requireWrite();
+		return null;
 	}
 
 	// ------------------------------------------------------------ helpers

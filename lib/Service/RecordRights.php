@@ -17,9 +17,9 @@ use OCA\TimeSister\Db\RecordMapper;
  * leads are read once per request.
  */
 final class RecordRights {
-	/** Kinds with rights per record: a non-admin batch may hold only these. */
+	/** Kinds with rights per record: a non-admin batch may hold only these; each write of them is checked (0.30.0: exchange rates refused). */
 	public const PER_RECORD = [RecordValidator::BILLING, BookingRules::REPORT, BookingRules::MARK, InvoiceRules::KIND, QuoteRules::KIND,
-		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND, TemplateRules::KIND, CorrectionRules::KIND];
+		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND, TemplateRules::KIND, CorrectionRules::KIND, ExchangeRateRules::KIND];
 	/** Kinds whose Lead write is checked against the stored record, and whose tombstone keeps its last data for that. */
 	public const AGAINST_STORED = [InvoiceRules::KIND, QuoteRules::KIND, ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND];
 	/** 0.22.0: every member writes these; CostWrites checks each write against the stored record. */
@@ -83,6 +83,10 @@ final class RecordRights {
 		}
 		if (in_array($kind, self::COST_KINDS, true)) {
 			return $this->canReadCost($m, $kind, InvoiceRules::decode($record?->getData()));
+		}
+		if ($kind === ExchangeRateRules::KIND) {
+			// 0.30.0: the ECB rates are the team's, every member reads them.
+			return true;
 		}
 		if ($kind === InvoiceRules::KIND) {
 			// Team Admins; Leads those of the active projects they lead, also as a tombstone.
@@ -157,8 +161,11 @@ final class RecordRights {
 		};
 	}
 
-	/** The rights of a write: per record for billing and bookings, everything else Team Admins. */
+	/** The rights of a write: per record for billing and bookings, everything else Team Admins; exchange rates nobody (0.30.0). */
 	public function requireWrite(Membership $m, string $kind, string $key): void {
+		if ($kind === ExchangeRateRules::KIND) {
+			throw ApiException::forbidden('Exchange rates are written by the server only.');
+		}
 		if ($kind === RecordValidator::BILLING) {
 			BillingRules::requirePerson($key);
 			if (!BillingRules::canWrite($m->role)) {

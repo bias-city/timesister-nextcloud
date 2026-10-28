@@ -9,6 +9,7 @@ namespace OCA\TimeSister\Tests\Unit;
 use OCA\TimeSister\Service\DossierRules;
 use OCA\TimeSister\Service\ExpenseExportRules;
 use OCA\TimeSister\Service\ExpenseReportRules;
+use OCA\TimeSister\Service\ExpenseTable;
 use OCA\TimeSister\Service\ApiException;
 use PHPUnit\Framework\TestCase;
 
@@ -35,11 +36,24 @@ class DossierRulesTest extends TestCase {
 	public function testExpenseExport(): void {
 		// 0.23.0: rows are the frozen lines of fixed and paid reports; `report` is the number.
 		$report = (object)['schema' => 2, 'person' => 'alice', 'status' => 'paid', 'number' => 'SP-2026-0001'];
-		$receipt = (object)['kind' => 'trust', 'date' => '2026-10-02', 'supplier' => 'Parking', 'text' => 'Meter', 'project' => null, 'currency' => 'CHF', 'net' => 4.63, 'vat_rate' => 8.1, 'vat' => 0.37, 'gross' => 5.0];
-		$r = ExpenseReportRules::asReceipt(ExpenseReportRules::line('rc-1', $receipt));
+		// A line of 0.23.0 as stored: the receipt's own amounts.
+		$r = (object)['receipt' => 'rc-1', 'date' => '2026-10-02', 'supplier' => 'Parking', 'text' => 'Meter', 'project' => null, 'cost' => null,
+			'vat_lines' => [(object)['rate' => 8.1, 'net' => 4.63, 'vat' => 0.37]], 'net' => 4.63, 'vat' => 0.37, 'gross' => 5.0, 'currency' => 'CHF', 'booked' => null, 'without_file' => true];
 		$this->assertSame(['alice', 'Alice Example', 'SP-2026-0001', 'paid', '2026-10-02', 'Parking', 'Meter', '', 'CHF', '4.63', '8.1', '0.37', '5.00', '1'], ExpenseExportRules::csvRow('Alice Example', 'SP-2026-0001', $report, $r));
-		$this->assertSame(['5,00', 'S', 'CHF', '', '', '', '6300', '70001', '', '0210', 'SP-2026-0001', '', '', 'Parking Meter'], ExpenseExportRules::datevRow($r, 'SP-2026-0001', '6300', '70001'));
-		$this->assertSame('', ExpenseExportRules::csvRow('A', 'SP-1', $report, ExpenseReportRules::asReceipt(ExpenseReportRules::line('rc-2', (object)['kind' => 'receipt', 'date' => '2026-10-02', 'net' => 5, 'vat_rate' => null, 'vat' => 0, 'gross' => 5])))[10], 'no rate: empty');
+		$this->assertSame(['5,00', 'S', 'CHF', '', '', '', '6300', '70001', '', '0210', 'SP-2026-0001', '', '', 'Parking Meter'], ExpenseExportRules::datevRow($report, $r, 'SP-2026-0001', '6300', '70001'));
+		$none = (object)['receipt' => 'rc-2', 'date' => '2026-10-02', 'vat_lines' => [], 'net' => 5, 'vat' => 0, 'gross' => 5, 'currency' => 'CHF', 'booked' => null];
+		$this->assertSame('', ExpenseExportRules::csvRow('A', 'SP-1', $report, $none)[10], 'no rate: empty');
+		// 0.30.0: a line of the expense table counts with its amount and VAT in the team's currency.
+		$fixed = (object)['schema' => 2, 'person' => 'alice', 'status' => 'fixed', 'number' => 'SP-2026-0002', 'sums' => (object)['currency' => 'CHF']];
+		$half = ExpenseTable::line('rc-3', (object)['kind' => 'receipt', 'date' => '2026-10-05', 'supplier' => 'Telefon Muster', 'text' => 'Mobile', 'net' => 92.51, 'vat_rate' => 8.1,
+			'vat' => 7.49, 'gross' => 100.0, 'currency' => 'CHF', 'project' => null, 'invoice_effect' => 'none', 'category' => 'office', 'factor' => 0.5], 'CHF');
+		$line = json_decode(json_encode($half, JSON_PRESERVE_ZERO_FRACTION));
+		$this->assertTrue(ExpenseReportRules::isTableLine($line));
+		$this->assertSame(['CHF', '46.25', '8.1', '3.75', '50.00', '0'], array_slice(ExpenseExportRules::csvRow('Alice', 'SP-2026-0002', $fixed, $line), 8));
+		$this->assertSame(['50,00', 'S', 'CHF'], array_slice(ExpenseExportRules::datevRow($fixed, $line, 'SP-2026-0002', '6300', '70001'), 0, 3));
+		$usd = json_decode(json_encode(ExpenseTable::line('rc-4', (object)['kind' => 'trust', 'date' => '2026-10-06', 'supplier' => 'Cab', 'text' => '', 'net' => 20.0, 'vat_rate' => 10,
+			'vat' => 2.0, 'gross' => 22.0, 'currency' => 'USD', 'category' => 'travel', 'rate' => (object)['value' => 0.8, 'date' => '2026-10-05', 'source' => 'ecb']], 'CHF'), JSON_PRESERVE_ZERO_FRACTION));
+		$this->assertSame(['CHF', '17.60', '', '0.00', '17.60', '1'], array_slice(ExpenseExportRules::csvRow('Alice', 'SP-2026-0002', $fixed, $usd), 8), 'foreign VAT is no input tax');
 		$this->assertTrue(ExpenseExportRules::takes($report));
 		$this->assertTrue(ExpenseExportRules::takes((object)['schema' => 2, 'status' => 'fixed']));
 		$this->assertFalse(ExpenseExportRules::takes((object)['schema' => 2, 'status' => 'reversed']));

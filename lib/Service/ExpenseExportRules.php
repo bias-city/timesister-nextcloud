@@ -10,7 +10,9 @@ namespace OCA\TimeSister\Service;
  * The export of expenses (0.22.0), pure: one row per frozen line of a
  * fixed or paid expense report (0.23.0), as CSV for payroll or as a DATEV
  * Buchungsstapel (debit the expense account, credit the person's
- * creditor account).
+ * creditor account). A line of 0.30.0 counts with its `amount` and
+ * `vat_amounts` in the team's currency, an older one with the receipt's
+ * amounts (booked in the team's currency).
  */
 final class ExpenseExportRules {
 	public const CSV = 'csv';
@@ -34,17 +36,43 @@ final class ExpenseExportRules {
 		return ExpenseReportRules::holds($report);
 	}
 
-	/** One row of a frozen line (read as a receipt); `report` is the report's number. @return list<string> */
-	public static function csvRow(string $personName, string $reportNumber, \stdClass $report, \stdClass $r): array {
+	/**
+	 * How a frozen line counts: currency, net, the single VAT rate (null for
+	 * none or several), VAT and gross.
+	 *
+	 * @return array{currency:string,net:float,rate:?float,vat:float,gross:float}
+	 */
+	public static function counted(\stdClass $report, \stdClass $line): array {
+		if (ExpenseReportRules::isTableLine($line)) {
+			// 0.30.0: in the team's currency after the factor; VAT only of receipts in it.
+			$vat = 0.0;
+			$rates = [];
+			foreach (Fields::list($line, 'vat_amounts') as $x) {
+				if ($x instanceof \stdClass) {
+					$vat += (float)($x->vat ?? 0);
+					$rates[] = (float)($x->rate ?? 0);
+				}
+			}
+			$gross = (float)$line->amount;
+			$vat = ExpenseTable::round2($vat);
+			$currency = Fields::str(Fields::obj($report, 'sums'), 'currency') ?? (string)($line->currency ?? '');
+			return ['currency' => $currency, 'net' => ExpenseTable::round2($gross - $vat), 'rate' => count($rates) === 1 ? $rates[0] : null, 'vat' => $vat, 'gross' => $gross];
+		}
+		$r = ExpenseReportRules::asReceipt($line);
 		$rates = ExpenseReportRules::ratesOf($r);
-		$rate = count($rates) === 1 ? $rates[0] : null;
 		$e = ReceiptBooking::forExpenses($r, '');
-		$eff = $e['rates'];
+		return ['currency' => $e['currency'], 'net' => array_sum(array_column($e['rates'], 'net')), 'rate' => count($rates) === 1 ? $rates[0] : null,
+			'vat' => array_sum(array_column($e['rates'], 'vat')), 'gross' => $e['gross']];
+	}
+
+	/** One row of a frozen line; `report` is the report's number. @return list<string> */
+	public static function csvRow(string $personName, string $reportNumber, \stdClass $report, \stdClass $r): array {
+		$c = self::counted($report, $r);
 		return [
 			(string)$report->person, $personName, $reportNumber, (string)($report->status ?? ''), (string)($r->date ?? ''),
-			(string)($r->supplier ?? ''), (string)($r->text ?? ''), is_string($r->project ?? null) ? $r->project : '', $e['currency'],
-			ExportRules::amount(array_sum(array_column($eff, 'net'))), $rate === null ? '' : (string)$rate,
-			ExportRules::amount(array_sum(array_column($eff, 'vat'))), ExportRules::amount($e['gross']),
+			(string)($r->supplier ?? ''), (string)($r->text ?? ''), is_string($r->project ?? null) ? $r->project : '', $c['currency'],
+			ExportRules::amount($c['net']), $c['rate'] === null ? '' : (string)$c['rate'],
+			ExportRules::amount($c['vat']), ExportRules::amount($c['gross']),
 			($r->without_file ?? false) === true ? '1' : '0',
 		];
 	}
@@ -74,13 +102,13 @@ final class ExpenseExportRules {
 	 *
 	 * @return list<string>
 	 */
-	public static function datevRow(\stdClass $r, string $reportNumber, string $expenseAccount, string $creditor): array {
-		$e = ReceiptBooking::forExpenses($r, '');
-		$gross = $e['gross'];
+	public static function datevRow(\stdClass $report, \stdClass $r, string $reportNumber, string $expenseAccount, string $creditor): array {
+		$c = self::counted($report, $r);
+		$gross = $c['gross'];
 		$date = (string)($r->date ?? '');
 		$text = mb_substr(trim((string)($r->supplier ?? '') . ' ' . (string)($r->text ?? '')), 0, 60);
 		return [
-			number_format(abs($gross), 2, ',', ''), $gross < 0 ? 'H' : 'S', $e['currency'], '', '', '',
+			number_format(abs($gross), 2, ',', ''), $gross < 0 ? 'H' : 'S', $c['currency'], '', '', '',
 			$expenseAccount, $creditor, '', substr($date, 8, 2) . substr($date, 5, 2), ExportRules::belegfeld($reportNumber), '', '', $text,
 		];
 	}

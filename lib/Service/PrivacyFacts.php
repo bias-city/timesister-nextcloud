@@ -12,12 +12,14 @@ use OCA\TimeSister\Db\RecordMapper;
 use OCA\TimeSister\Db\Tenant;
 use OCP\App\IAppManager;
 use OCP\AppFramework\Utility\ITimeFactory;
+use OCP\IAppConfig;
 
 /**
  * What the privacy notice (0.10.2) says about a team, read live: members
  * and roles, Leads with their projects, backup owner,
  * consents, modules, absence categories, externals (count only, never a
- * feed address). {@see PrivacyDocument} turns this into the text.
+ * feed address), since 0.30.0 the exchange rates (service, currencies,
+ * days). {@see PrivacyDocument} turns this into the text.
  */
 final class PrivacyFacts {
 	public function __construct(
@@ -26,6 +28,7 @@ final class PrivacyFacts {
 		private ConsentService $consents,
 		private IAppManager $appManager,
 		private ITimeFactory $time,
+		private IAppConfig $config,
 	) {
 	}
 
@@ -79,7 +82,30 @@ final class PrivacyFacts {
 			'vacation_calendar' => AbsenceRules::vacationCalendar($settings) !== null,
 			'externals' => $this->externals($tid, $roles),
 			'customers' => count($this->records->findLiveByKind($tid, 'customer')),
+			'exchange_rates' => $this->exchangeRates($tid, $settings),
 		];
+	}
+
+	/**
+	 * The exchange rates (0.30.0): the switch, the service's host and the
+	 * currencies and days fetched so far.
+	 *
+	 * @return array{on:bool,service:string,currencies:list<string>,days:int}
+	 */
+	private function exchangeRates(int $tid, ?\stdClass $settings): array {
+		$currencies = [];
+		$days = 0;
+		foreach ($this->records->findLiveByKind($tid, ExchangeRateRules::KIND) as $r) {
+			$days++;
+			foreach (array_map('strval', array_keys(get_object_vars(Fields::obj(self::data($r), 'rates') ?? new \stdClass()))) as $c) {
+				$currencies[$c] = true;
+			}
+		}
+		$currencies = array_map('strval', array_keys($currencies));
+		sort($currencies, SORT_STRING);
+		$url = ExchangeRateRules::baseUrl($this->config->getValueString(Application::APP_ID, ExchangeRateRules::CONFIG_KEY, ExchangeRateRules::DEFAULT_URL));
+		$host = $url === null ? null : parse_url($url, PHP_URL_HOST);
+		return ['on' => ExchangeRateRules::on($settings), 'service' => is_string($host) ? $host : '', 'currencies' => $currencies, 'days' => $days];
 	}
 
 	/**

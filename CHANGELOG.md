@@ -1,5 +1,56 @@
 # Changes
 
+## 0.30.0 – 2026-10-28
+
+`api: 2` unchanged; capability `expense_table: 1`; no migration (`occ
+upgrade` registers the job `ExchangeRates`). Not additive for expenses:
+`ready`, `paid`, the server's expense report PDF and the approval of
+expense rules are gone (PLAN-SPESEN §9, development without transition).
+
+- **One expense table** (2026-10-28). A receipt takes `category`, `factor`,
+  `rate` `{ value, date, source }`, `template` and `quantity` (form only).
+  Category, factor and rate of a reimbursed receipt stay open in any status
+  for its person and Team Admins until it is settled; a settled receipt
+  changes only in its assignment and note (Team Admins, the project's
+  Leads) and is not deleted, rejected or given another file.
+- **The person settles** (2026-10-28). `POST /expense-reports/fix
+  { person, from, to }` by the person themselves or a Team Admin freezes the
+  open expenses of the period – open receipts too, no approval – into a new
+  report: lines in the team's currency (rate from the team's currency,
+  `booked` or the receipt's `rate`, then the factor), sums per category and
+  VAT rate, total and payout on 0.05, computed exactly as the Mac app
+  (`ExpenseTable`, the Mac's rounding, not PHP's `round()`). Number, ledger
+  `expense_fixed { key, number, person, from, to, fixed_on, fixed_by,
+  lines, sums }` and `report` on every receipt in one transaction.
+- **Documents of the app** (2026-10-28). `POST
+  /expense-reports/{key}/documents { name, content }` stores the app's PDF
+  and CSV (Base64, at most 64 MiB, at most five) beside the person's
+  receipts, with `documents[]` in the record and the ledger
+  `expense_document { key, number, name, sha256 }`; the same file again
+  changes nothing. `GET …/document?name=` serves them. The server renders
+  no expense report any more; clients write no report through `/records`.
+- **Rules without approval** (2026-10-28). A rule applies from creation; its
+  receipts are approved (internal) at once; a rule is deleted while no
+  receipt names it, otherwise ended by `to`. `POST
+  /expense-rules/{key}/approve`, `POST /expense-reports/ready` and `…/paid`
+  are gone.
+- **ECB rates** (2026-10-28). With the team setting
+  `settings.exchange_rates` on, an hourly job asks Frankfurter (app config
+  `exchange_rates_url`, default `https://api.frankfurter.dev`) for the
+  rates of the days on which reimbursed expenses in a foreign currency wait
+  for one – only the team's currency, the currencies and the day – and
+  stores them as records `exchange_rate` (`<currency>-<day>`, the team's
+  currency per unit), written by the server alone, read by every member.
+  The privacy notice names the service, the currencies and the days.
+- **Tags on customers** (2026-10-28). A customer's `tags` is `null` or a list
+  of at most 30 words of 1–40 characters without `#`, whitespace, comma or
+  control characters (`arealentwicklung`); the Mac app filters and sorts the
+  customer list by them. Earlier releases kept the field unchecked.
+- **No default customer types** (2026-10-28). A missing or null
+  `settings.customer_types` means the team has no list yet; the unused list
+  of four keys is gone. TimeSister fills a first list from the team's use
+  case, and every type stays the team's to rename or remove.
+
 ## 0.29.0 – 2026-10-27
 
 Additive, `api: 2` unchanged; capability `customer_types: 1`.

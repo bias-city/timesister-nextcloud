@@ -49,6 +49,21 @@ class CustomerRulesTest extends TestCase {
 		$this->assertNull(\OCA\TimeSister\Service\CustomerRules::paymentDays(null));
 	}
 
+	/** The customer's free tags: words without “#”, space or comma. */
+	public function testTags(): void {
+		$this->assertSame('ok', self::check('{"id":"k1","tags":["arealentwicklung","betreibermodelle"]}'));
+		$this->assertSame('ok', self::check('{"id":"k1","tags":null}'));
+		$this->assertSame('ok', self::check('{"id":"k1","tags":[]}'));
+		$list = '422 “tags” of a customer must be null or a list of at most 30 words.';
+		$this->assertSame($list, self::check('{"id":"k1","tags":"arealentwicklung"}'));
+		$this->assertSame($list, self::check('{"id":"k1","tags":{"a":"b"}}'));
+		$this->assertSame($list, self::check('{"id":"k1","tags":[' . implode(',', array_map(static fn ($i) => '"t' . $i . '"', range(1, 31))) . ']}'));
+		$word = '422 Each tag of a customer is one word of 1 to 40 characters without “#”, space or comma.';
+		foreach (['"zwei worte"', '"#areal"', '"a,b"', '""', '5', '"' . str_repeat('x', 41) . '"', '"a\u00a0b"', '"a\u0007"'] as $bad) {
+			$this->assertSame($word, self::check('{"id":"k1","tags":[' . $bad . ']}'), $bad);
+		}
+	}
+
 	/** 0.29.0: the team's own customer types in `settings.customer_types`. */
 	public function testTeamTypes(): void {
 		$check = static function (string $json): string {
