@@ -8,7 +8,7 @@ namespace OCA\TimeSister\Tests\Unit;
 
 use OCA\TimeSister\Service\ApiException;
 use OCA\TimeSister\Service\ExpenseExportRules;
-use OCA\TimeSister\Service\ExpenseReportRules;
+use OCA\TimeSister\Service\ExpenseTable;
 use OCA\TimeSister\Service\ReceiptBooking;
 use OCA\TimeSister\Service\ReceiptRules;
 use PHPUnit\Framework\TestCase;
@@ -70,8 +70,9 @@ class ReceiptBookingTest extends TestCase {
 		$e = ReceiptBooking::forExpenses($d, 'CHF');
 		$this->assertSame([['rate' => 7.7, 'net' => 212.07, 'vat' => 16.33]], $e['rates']);
 		$this->assertSame(['CHF', 228.4, true], [$e['currency'], $e['gross'], $e['converted']]);
-		$s = ExpenseReportRules::sums([$d], 'CHF');
-		$this->assertSame(['CHF', 212.07, 228.4], [$s['currency'], $s['net'], $s['gross']]);
+		// 0.30.0: in the expense table the amount paid counts, with its rate and no VAT (foreign VAT is no input tax).
+		$line = ExpenseTable::line('rc-1', $d, 'CHF');
+		$this->assertSame([228.4, ['value' => 0.906241, 'source' => 'booked', 'date' => null], []], [$line['amount'], $line['rate'], $line['vat_amounts']]);
 		$row = ExpenseExportRules::csvRow('Alice', 'sb-1', (object)['person' => 'alice', 'status' => 'approved'], $d);
 		$this->assertSame(['CHF', '212.07', '16.33', '228.40'], [$row[8], $row[9], $row[11], $row[12]]);
 		// Two rates: the booked gross split by their share.

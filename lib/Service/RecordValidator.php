@@ -15,7 +15,7 @@ namespace OCA\TimeSister\Service;
  */
 final class RecordValidator {
 	public const KINDS = ['person', 'region', 'project', 'customer', 'setting', 'job', 'billing', BookingRules::REPORT, BookingRules::MARK, InvoiceRules::KIND, QuoteRules::KIND,
-		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND, TemplateRules::KIND, CorrectionRules::KIND];
+		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND, TemplateRules::KIND, CorrectionRules::KIND, ExchangeRateRules::KIND];
 	/** Jobs (0.6.0): readable as records, written only through /jobs. */
 	public const JOB = 'job';
 	/** Billing marks (0.7.6): rights per person, see {@see BillingRules}. */
@@ -107,6 +107,10 @@ final class RecordValidator {
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, CustomerRules::TYPES_FIELD)) {
 			CustomerRules::validateTypes($data->{CustomerRules::TYPES_FIELD});
 		}
+		// 0.30.0: the switch for the ECB rates.
+		if ($kind === 'setting' && $key === 'settings' && property_exists($data, ExchangeRateRules::SETTING)) {
+			ExchangeRateRules::validateSetting($data->{ExchangeRateRules::SETTING});
+		}
 		if ($kind === 'person') {
 			if (!isset($data->login) || !is_string($data->login) || $data->login !== $key) {
 				throw ApiException::invalid('For a person, “login” must equal the key.');
@@ -145,6 +149,9 @@ final class RecordValidator {
 		} elseif ($kind === CorrectionRules::KIND) {
 			// 0.27.0 (K-Offline): the target state of a booking's corrected fields; the server's fields are set on write.
 			CorrectionRules::validateRecord($key, $data);
+		} elseif ($kind === ExchangeRateRules::KIND) {
+			// 0.30.0: the ECB rates of a day, written by the server only.
+			ExchangeRateRules::validate($key, $data);
 		}
 		$accounts = [];
 		if ($kind === 'person' && property_exists($data, 'accounts') && $data->accounts !== null) {
@@ -160,6 +167,7 @@ final class RecordValidator {
 			InvoiceRules::KIND => InvoiceRules::MAX_BYTES,
 			QuoteRules::KIND => QuoteRules::MAX_BYTES,
 			TemplateRules::KIND => TemplateRules::MAX_BYTES,
+			ExpenseReportRules::KIND => ExpenseReportRules::MAX_BYTES,
 			default => self::MAX_DATA_BYTES,
 		};
 		if (strlen($json) > $max) {
@@ -167,6 +175,7 @@ final class RecordValidator {
 				BookingRules::REPORT => ApiException::tooLarge('A booking report may be at most 768 KB.'),
 				InvoiceRules::KIND => ApiException::tooLarge('An invoice may be at most 768 KB.'),
 				QuoteRules::KIND => ApiException::tooLarge('A quote may be at most 768 KB.'),
+				ExpenseReportRules::KIND => ApiException::tooLarge('An expense report may be at most 768 KB.'),
 				TemplateRules::KIND => ApiException::tooLarge('A template may be at most 256 KB.'),
 				default => ApiException::tooLarge('A record may be at most 256 KB.'),
 			};

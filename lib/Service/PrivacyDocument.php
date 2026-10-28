@@ -161,7 +161,7 @@ final class PrivacyDocument {
 				$this->l->t('Team Admins and Leads'),
 				$this->l->t('App tables of the Nextcloud')],
 			...(self::costsOn($f) ? [[$this->l->t('Costs and expenses'),
-				$this->l->t('Cost positions of budgets; receipts (date, supplier, text, amounts and VAT, who paid, reimbursement, project, the file) with approval or rejection and its reason; rules of recurring expenses; expense reports per person with sums and the PDF'),
+				$this->l->t('Cost positions of budgets; receipts (date, supplier, text, amounts and VAT, who paid, reimbursement, project, the file) with approval or rejection and its reason; for expenses category, factor and exchange rate; rules of recurring expenses; expense reports per person with period, lines and sums, and the files the app stores with them (table as PDF and CSV, receipts as PDF)'),
 				$this->l->t('The person who records a receipt; approval: Leads and Team Admins'),
 				$this->l->t('App tables of the Nextcloud (record with history); files in the team’s document folder in the backup owner’s files')]] : []),
 			[$this->l->t('External persons'),
@@ -194,8 +194,22 @@ final class PrivacyDocument {
 				$this->l->t('Protected app storage of the Nextcloud for backups'),
 				$this->l->t('On every Mac a local copy: SQLite under ~/Library/Application Support/TimeSister, the app password in the keychain, backups in the folder “Backups”'),
 				$this->l->t('Transport only over https (plain text only to localhost)'),
+				...$this->exchangeRates($f),
 			]],
 		]];
+	}
+
+	/** 0.30.0: what the server asks the exchange rate service, when the team switched it on. @param array<string,mixed> $f @return list<string> */
+	private function exchangeRates(array $f): array {
+		$x = $f['exchange_rates'] ?? null;
+		if (!is_array($x) || ($x['on'] ?? false) !== true) {
+			return [];
+		}
+		/** @var list<string> $currencies */
+		$currencies = $x['currencies'] ?? [];
+		return [$this->fill($this->l->t('Exchange rates (switched on by the team): the server asks {service} for the reference rates of the European Central Bank on the days of reimbursed expenses in a foreign currency – the request names only the team’s currency, the foreign currencies and the day, no person, amount or receipt. So far {currencies} on {days} days.'), [
+			'service' => $this->value((string)($x['service'] ?? '')), 'currencies' => $this->join($currencies), 'days' => (int)($x['days'] ?? 0),
+		])];
 	}
 
 	/** @param array<string,mixed> $f */
@@ -210,7 +224,7 @@ final class PrivacyDocument {
 				$this->l->t('Nextcloud admins: everything, including the accounts and this notice'),
 				$this->fill($this->l->t('Team Admins (group admins of the team group): all master data, all time entries, backups, export, deletion. Currently: {names}'), ['names' => $this->join($admins)]),
 				$this->fill($this->l->t('Leads: their projects, the bookings on these projects as the people report them (date, time, person, code, duration, title, notes, billable, billed), the customers of these projects, names and initials of the people; no time calendars, master data, balances or vacation of others. Currently: {names}'), ['names' => $this->join(array_map(static fn (array $ld) => $ld['name'], $leads))]),
-				...(self::costsOn($f) ? [$this->l->t('Receipts and expenses: each person their own; Leads the receipts of the projects they lead; Team Admins all, and they fix the expense reports')] : []),
+				...(self::costsOn($f) ? [$this->l->t('Receipts and expenses: each person their own, and they settle their expenses; Leads the receipts of the projects they lead; Team Admins all, and they settle the expenses of anyone')] : []),
 				$this->l->t('Users: only their own data'),
 				$this->l->t('External persons: nothing – their feed is only read'),
 			]],

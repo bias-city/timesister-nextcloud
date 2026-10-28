@@ -141,9 +141,9 @@ class ReceiptRulesTest extends TestCase {
 		ReceiptRules::mergeServer(null, $new, 'alice', '2026-10-04', ReceiptRules::OPEN);
 		$this->assertSame(['open', null, 'alice', '2026-10-04', null, null], [$new->status, $new->invoice, $new->created_by, $new->created_on, $new->file, $new->approved_by], 'what the client sends is ignored');
 		$rec = self::receipt(['kind' => 'recurring', 'project' => null]);
-		$this->assertSame('internal', ReceiptRules::initialStatus($rec, true), 'a recurring general receipt of an approved rule');
-		$this->assertSame('approved', ReceiptRules::initialStatus(self::receipt(['kind' => 'recurring']), true));
-		$this->assertSame('open', ReceiptRules::initialStatus(self::receipt(), true));
+		$this->assertSame('internal', ReceiptRules::initialStatus($rec), 'a recurring general receipt: its rule applies from creation (0.30.0)');
+		$this->assertSame('approved', ReceiptRules::initialStatus(self::receipt(['kind' => 'recurring'])));
+		$this->assertSame('open', ReceiptRules::initialStatus(self::receipt()));
 		$stored = clone $new;
 		$stored->status = 'rejected';
 		$stored->reject_reason = 'no file';

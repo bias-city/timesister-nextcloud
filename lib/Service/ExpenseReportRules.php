@@ -8,10 +8,12 @@ namespace OCA\TimeSister\Service;
 
 /**
  * The expense report (record `expense_report`, schema 2 since 0.23.0),
- * pure: the person's expense list, the frozen lines and sums of a fixed
- * report, its ledger payload, the status `open` → `fixed` → `paid` /
- * `reversed`, and who reads and writes it. Reports of 0.22.0 (schema 1,
- * `submitted`/`approved`) are ignored: they hold no receipt any more.
+ * pure. Since 0.30.0 (PLAN-SPESEN 9) settling is fixing: the person's open
+ * expenses of a period, frozen as lines of the expense table
+ * ({@see ExpenseTable}), numbered and in the ledger; the files come from
+ * the app; a client writes no report. Status `fixed` → `reversed`; reports
+ * of 0.23.0 that are `open` or `paid` stay readable, paid ones keep their
+ * receipts. Reports of 0.22.0 (schema 1) are ignored: they hold no receipt.
  */
 final class ExpenseReportRules {
 	public const KIND = 'expense_report';
@@ -21,17 +23,16 @@ final class ExpenseReportRules {
 	public const PAID = 'paid';
 	public const REVERSED = 'reversed';
 	public const STATUSES = [self::OPEN, self::FIXED, self::PAID, self::REVERSED];
-	/** Owned by the server: ignored on a client's write, the stored value is kept. */
-	public const SERVER = ['status', 'number', 'lines', 'sums', 'fixed_on', 'fixed_by', 'paid_on', 'reversed_on', 'reverse_reason',
-		'document', 'document_state', 'document_error', 'document_tries', 'ledger_seq', 'hash'];
+	/** At most this many expenses in one report. */
 	public const MAX_RECEIPTS = 500;
-	/** A receipt is on the expense list when approved – general ones are approved to `internal` – or billed. */
-	public const ELIGIBLE = [ReceiptRules::APPROVED, ReceiptRules::INTERNAL, ReceiptRules::BILLED];
-	public const DOCUMENT_PENDING = 'pending';
-	public const DOCUMENT_DONE = 'done';
-	public const DOCUMENT_FAILED = 'failed';
+	/** The frozen lines make a report large, as an invoice. */
+	public const MAX_BYTES = 786432;
+	/** The app's files of a report (9 F): name, size, how many. */
+	public const DOCUMENT_NAME = '/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.(pdf|csv)$/';
+	public const DOCUMENT_MAX = 64 * 1024 * 1024;
+	public const DOCUMENTS_MAX = 5;
 
-	/** A client's content: `person`, `ready_on`; the rest is the server's. */
+	/** What every stored report carries: `person`, and `ready_on` of 0.23.0 when set; the rest is the server's. */
 	public static function validate(\stdClass $d): void {
 		$s = $d->schema ?? null;
 		if ($s !== null && (!is_int($s) || $s < 1 || $s > 1000)) {
@@ -49,7 +50,7 @@ final class ExpenseReportRules {
 
 	// ------------------------------------------------------------- status
 
-	/** A report of 0.23.0 (schema 2); older ones are ignored. */
+	/** A report of 0.23.0 or later (schema 2); older ones are ignored. */
 	public static function isCurrent(?\stdClass $d): bool {
 		return ($d?->schema ?? null) === self::SCHEMA && in_array($d?->status ?? null, self::STATUSES, true);
 	}
@@ -59,22 +60,10 @@ final class ExpenseReportRules {
 		return self::isCurrent($d) && in_array($d?->status ?? null, [self::FIXED, self::PAID], true);
 	}
 
-	/** The person's open report among the live reports (key → data), or null. @param array<string,?\stdClass> $reports */
-	public static function openOf(array $reports, string $person): ?string {
-		foreach ($reports as $key => $d) {
-			if (self::isCurrent($d) && $d?->status === self::OPEN && ($d->person ?? null) === $person) {
-				return (string)$key;
-			}
-		}
-		return null;
-	}
-
 	/** Is it a current report with this status? */
 	public static function is(?\stdClass $d, string $status): bool {
 		return self::isCurrent($d) && ($d?->status ?? null) === $status;
 	}
-
-	// -------------------------------------------------------- expense list
 
 	/** The report a receipt is in, when that report still holds it. @param array<string,?\stdClass> $reports */
 	public static function heldBy(\stdClass $r, array $reports): ?string {
@@ -82,143 +71,186 @@ final class ExpenseReportRules {
 		return is_string($k) && self::holds($reports[$k] ?? null) ? $k : null;
 	}
 
-	/** On the person's expense list: theirs, reimbursed, approved (or internal, billed), in no fixed report. @param array<string,?\stdClass> $reports */
-	public static function onList(\stdClass $r, string $person, array $reports): bool {
-		return ($r->person ?? null) === $person && ($r->reimburse ?? false) === true
-			&& in_array($r->status ?? null, self::ELIGIBLE, true) && self::heldBy($r, $reports) === null;
+	// ------------------------------------------------------------ settling
+
+	/** `from` and `to` of a settlement: days, `from` not after `to`; 422 otherwise. @return array{0:string,1:string} */
+	public static function period(mixed $from, mixed $to): array {
+		if (!is_string($from) || !Time::isDay($from) || !is_string($to) || !Time::isDay($to) || $from > $to) {
+			throw ApiException::invalid('“from” and “to” are days (YYYY-MM-DD), “from” not after “to”.');
+		}
+		return [$from, $to];
 	}
 
 	/**
-	 * The receipts to fix: the whole expense list of the person, or the
-	 * given part of it (each once, each on the list). Sorted by date and
-	 * key. 422 when none is left.
+	 * Is the receipt an open expense of the person in the period? Theirs,
+	 * reimbursed, not rejected – open ones too: expenses need no approval –,
+	 * on no fixed or paid report, dated from `from` to `to`.
+	 *
+	 * @param array<string,?\stdClass> $reports
+	 */
+	public static function settleable(\stdClass $r, string $person, string $from, string $to, array $reports): bool {
+		$date = $r->date ?? null;
+		return ($r->person ?? null) === $person && ($r->reimburse ?? false) === true
+			&& ($r->status ?? null) !== ReceiptRules::REJECTED && self::heldBy($r, $reports) === null
+			&& is_string($date) && $date >= $from && $date <= $to;
+	}
+
+	/**
+	 * The receipts to settle (9 C), by date and key. 422 when there are
+	 * none or too many, and for the first that lacks its category or an
+	 * amount in the team's currency.
 	 *
 	 * @param array<string,\stdClass> $receipts live receipts by key
 	 * @param array<string,?\stdClass> $reports live reports by key
 	 * @return list<string>
 	 */
-	public static function pick(array $receipts, array $reports, string $person, mixed $given): array {
-		if ($given === null) {
-			$keys = array_keys(array_filter($receipts, static fn (\stdClass $r): bool => self::onList($r, $person, $reports)));
-		} else {
-			if (!is_array($given) || !array_is_list($given) || $given === [] || count($given) > self::MAX_RECEIPTS) {
-				throw ApiException::invalid(Message::of('“receipts” must be a list of 1 to {max} receipt keys.', ['max' => self::MAX_RECEIPTS]));
+	public static function pick(array $receipts, array $reports, string $person, string $from, string $to, string $team): array {
+		$keys = [];
+		foreach ($receipts as $k => $r) {
+			if (self::settleable($r, $person, $from, $to, $reports)) {
+				$keys[] = $k;
 			}
-			$keys = [];
-			foreach ($given as $k) {
-				if (!is_string($k) || preg_match(ReceiptRules::KEY_PATTERN, $k) !== 1) {
-					throw ApiException::invalid(Message::of('“receipts” must be a list of 1 to {max} receipt keys.', ['max' => self::MAX_RECEIPTS]));
-				}
-				if (isset($keys[$k])) {
-					throw ApiException::invalid(Message::of('The receipt {key} is in the list twice.', ['key' => $k]));
-				}
-				$r = $receipts[$k] ?? null;
-				$held = $r === null ? null : self::heldBy($r, $reports);
-				if ($held !== null) {
-					throw ApiException::conflict(Message::of('The receipt {key} is in the expense report {report}.', ['key' => $k, 'report' => (string)($reports[$held]->number ?? $held)]));
-				}
-				if ($r === null || !self::onList($r, $person, $reports)) {
-					throw ApiException::invalid(Message::of('The receipt {key} is not on the expense list of this person.', ['key' => $k]));
-				}
-				$keys[$k] = true;
-			}
-			$keys = array_keys($keys);
 		}
-		$keys = array_map('strval', $keys);
 		if ($keys === []) {
-			throw ApiException::invalid('The expense list of this person holds no receipts.');
+			throw ApiException::invalid('No open expenses of this person in this period.');
 		}
-		usort($keys, static fn (string $a, string $b): int => [(string)($receipts[$a]->date ?? ''), $a] <=> [(string)($receipts[$b]->date ?? ''), $b]);
+		usort($keys, static fn (string $a, string $b): int => strcmp((string)($receipts[$a]->date ?? ''), (string)($receipts[$b]->date ?? '')) ?: strcmp($a, $b));
+		if (count($keys) > self::MAX_RECEIPTS) {
+			throw ApiException::invalid(Message::of('An expense report holds at most {max} expenses; choose a shorter period.', ['max' => self::MAX_RECEIPTS]));
+		}
+		foreach ($keys as $k) {
+			$p = ['key' => $k, 'date' => (string)($receipts[$k]->date ?? '')];
+			$lacks = ExpenseTable::lacks($receipts[$k], $team);
+			if ($lacks === 'category') {
+				throw ApiException::invalid(Message::of('The expense {key} of {date} has no category.', $p));
+			}
+			if ($lacks === 'rate') {
+				throw ApiException::invalid(Message::of('The expense {key} of {date} has no rate to {currency}.', $p + ['currency' => $team]));
+			}
+		}
 		return $keys;
 	}
 
-	// ------------------------------------------------------------ freezing
-
 	/**
-	 * The frozen line of a receipt: its own amounts (VAT per rate as a list:
-	 * its `vat_lines`, else one line of its rate, else none), `booked` as on
-	 * the receipt, and whether it has no file.
-	 *
-	 * @return array<string,mixed>
-	 */
-	public static function line(string $key, \stdClass $r): array {
-		$rate = $r->vat_rate ?? null;
-		$lines = ReceiptRecognition::hasLines($r)
-			? ReceiptRecognition::rates($r)
-			: (is_int($rate) || is_float($rate) ? [['rate' => (float)$rate, 'net' => (float)($r->net ?? 0), 'vat' => (float)($r->vat ?? 0)]] : []);
-		$booked = $r->booked ?? null;
-		return [
-			'receipt' => $key, 'date' => (string)($r->date ?? ''), 'supplier' => $r->supplier ?? null, 'text' => $r->text ?? null,
-			'project' => is_string($r->project ?? null) ? $r->project : null, 'cost' => is_int($r->cost ?? null) ? $r->cost : null,
-			'vat_lines' => $lines, 'net' => $r->net ?? 0, 'vat' => $r->vat ?? 0, 'gross' => $r->gross ?? 0,
-			'currency' => is_string($r->currency ?? null) ? $r->currency : null,
-			'booked' => $booked instanceof \stdClass ? ['gross' => $booked->gross ?? 0, 'currency' => $booked->currency ?? null] : null,
-			'without_file' => self::withoutReceipt($r),
-		];
-	}
-
-	/** The VAT rates of a frozen line (none, one or several). @param array<string,mixed>|\stdClass $line @return list<float> */
-	public static function ratesOf(array|\stdClass $line): array {
-		$l = $line instanceof \stdClass ? ($line->vat_lines ?? null) : ($line['vat_lines'] ?? null);
-		$out = [];
-		foreach (is_array($l) ? $l : [] as $x) {
-			$out[] = (float)($x instanceof \stdClass ? ($x->rate ?? 0) : (is_array($x) ? ($x['rate'] ?? 0) : 0));
-		}
-		return $out;
-	}
-
-	/** A frozen line read as a receipt, for {@see ReceiptBooking::forExpenses()}. @param array<string,mixed>|\stdClass $line */
-	public static function asReceipt(array|\stdClass $line): \stdClass {
-		$o = new \stdClass();
-		foreach ($line instanceof \stdClass ? get_object_vars($line) : $line as $k => $v) {
-			$o->{$k} = $v;
-		}
-		$b = $o->booked ?? null;
-		$o->booked = is_array($b) ? (object)$b : ($b instanceof \stdClass ? $b : null);
-		return $o;
-	}
-
-	/**
-	 * The sums with VatLines over the amounts for expenses (booked in the
-	 * team's currency): net per rate (none counts as 0, several once per
-	 * rate), VAT per rate, gross; all in one currency (422 otherwise).
-	 *
-	 * @param list<array<string,mixed>|\stdClass> $lines frozen lines (or receipts)
-	 * @return array{currency:string,net:float,vat_lines:list<array{rate:float,net:float,vat:float}>,gross:float}
-	 */
-	public static function sums(array $lines, string $fallbackCurrency): array {
-		$currency = null;
-		$vat = [];
-		foreach ($lines as $l) {
-			$e = ReceiptBooking::forExpenses(self::asReceipt($l), $fallbackCurrency);
-			if ($currency !== null && $e['currency'] !== $currency) {
-				throw ApiException::invalid('All receipts of an expense report are in one currency.');
-			}
-			$currency = $e['currency'];
-			foreach ($e['rates'] as $x) {
-				$vat[] = ['kind' => 'costs', 'amount' => $x['net'], 'vat' => $x['rate']];
-			}
-		}
-		$s = VatLines::of($vat, 0.0, TaxRules::DOMESTIC);
-		return ['currency' => $currency ?? $fallbackCurrency, 'net' => $s->net, 'vat_lines' => $s->lines, 'gross' => $s->gross];
-	}
-
-	/**
-	 * The ledger payload of `expense_fixed`: everything frozen, nothing
-	 * that changes later.
+	 * The ledger payload of `expense_fixed` (9 E): everything frozen,
+	 * nothing that changes later.
 	 *
 	 * @param list<array<string,mixed>> $lines
 	 * @param array<string,mixed> $sums
 	 * @return array<string,mixed>
 	 */
-	public static function payload(string $key, string $number, string $person, string $fixedOn, string $fixedBy, ?string $readyOn, array $lines, array $sums): array {
-		return ['key' => $key, 'number' => $number, 'person' => $person, 'fixed_on' => $fixedOn, 'fixed_by' => $fixedBy,
-			'ready_on' => $readyOn, 'lines' => $lines, 'sums' => $sums];
+	public static function payload(string $key, string $number, string $person, string $from, string $to, string $fixedOn, string $fixedBy, array $lines, array $sums): array {
+		return ['key' => $key, 'number' => $number, 'person' => $person, 'from' => $from, 'to' => $to,
+			'fixed_on' => $fixedOn, 'fixed_by' => $fixedBy, 'lines' => $lines, 'sums' => $sums];
 	}
 
 	/** The receipt has no file: trust and recurring receipts. */
 	public static function withoutReceipt(\stdClass $r): bool {
 		return in_array($r->kind ?? null, [ReceiptRules::TRUST, ReceiptRules::RECURRING], true);
+	}
+
+	// ---------------------------------------------------- lines of 0.23.0
+
+	/** A line of 0.30.0: `amount` in the team's currency; older lines carry the receipt's own amounts. */
+	public static function isTableLine(\stdClass $line): bool {
+		return ReceiptRules::isNumber($line->amount ?? null);
+	}
+
+	/** The VAT rates of a line of 0.23.0 (none, one or several). @return list<float> */
+	public static function ratesOf(\stdClass $line): array {
+		$out = [];
+		foreach (Fields::list($line, 'vat_lines') as $x) {
+			$out[] = (float)($x instanceof \stdClass ? ($x->rate ?? 0) : (is_array($x) ? ($x['rate'] ?? 0) : 0));
+		}
+		return $out;
+	}
+
+	/** A line of 0.23.0 read as a receipt, for {@see ReceiptBooking::forExpenses()}. */
+	public static function asReceipt(\stdClass $line): \stdClass {
+		$o = clone $line;
+		$b = $o->booked ?? null;
+		$o->booked = is_array($b) ? (object)$b : ($b instanceof \stdClass ? $b : null);
+		return $o;
+	}
+
+	// ------------------------------------------------------ files of the app
+
+	/** The name of a file of the app (9 F); 422 otherwise. */
+	public static function documentName(mixed $name): string {
+		if (!is_string($name) || preg_match(self::DOCUMENT_NAME, $name) !== 1) {
+			throw ApiException::invalid('“name” is a file name ending in .pdf or .csv.');
+		}
+		return $name;
+	}
+
+	/** The file from Base64: at most 64 MiB (413); a PDF begins with `%PDF-`, a CSV is UTF-8 (422). */
+	public static function documentContent(string $name, mixed $content): string {
+		if (!is_string($content)) {
+			throw ApiException::invalid('“content” is the file in Base64.');
+		}
+		if (strlen($content) > 4 * intdiv(self::DOCUMENT_MAX + 2, 3) + 1024) {
+			throw ApiException::tooLarge('A document may be at most 64 MiB.');
+		}
+		$bin = base64_decode($content, true);
+		if ($bin === false) {
+			throw ApiException::invalid('“content” is the file in Base64.');
+		}
+		if (strlen($bin) > self::DOCUMENT_MAX) {
+			throw ApiException::tooLarge('A document may be at most 64 MiB.');
+		}
+		if ((str_ends_with($name, '.pdf') && !str_starts_with($bin, '%PDF-')) || (str_ends_with($name, '.csv') && !mb_check_encoding($bin, 'UTF-8'))) {
+			throw ApiException::invalid('“content” does not fit its name (PDF or UTF-8 CSV, at most 64 MiB).');
+		}
+		return $bin;
+	}
+
+	/** The app's files of a report. @return list<\stdClass> */
+	public static function documents(?\stdClass $report): array {
+		return array_values(array_filter(Fields::list($report, 'documents'), static fn (mixed $x): bool => $x instanceof \stdClass));
+	}
+
+	/**
+	 * A file of this name stored before: the same content answers it
+	 * unchanged, other content is 409; a name beyond the fifth is 409 too.
+	 */
+	public static function documentAgain(\stdClass $report, string $name, string $sha256): ?\stdClass {
+		$docs = self::documents($report);
+		foreach ($docs as $doc) {
+			if (($doc->name ?? null) === $name) {
+				if (($doc->sha256 ?? null) !== $sha256) {
+					throw ApiException::conflict('A document of this name is stored already.');
+				}
+				return $doc;
+			}
+		}
+		if (count($docs) >= self::DOCUMENTS_MAX) {
+			throw ApiException::conflict(Message::of('An expense report holds at most {max} documents.', ['max' => self::DOCUMENTS_MAX]));
+		}
+		return null;
+	}
+
+	/** The path of a stored file: by name; without one the first PDF, else an old report's `document`. 404 otherwise. */
+	public static function documentPath(\stdClass $report, mixed $name): string {
+		$docs = self::documents($report);
+		if (is_string($name) && $name !== '') {
+			foreach ($docs as $doc) {
+				if (($doc->name ?? null) === $name && is_string($doc->path ?? null)) {
+					return $doc->path;
+				}
+			}
+			throw ApiException::notFound(Message::of('This expense report has no document “{name}”.', ['name' => $name]));
+		}
+		foreach ($docs as $doc) {
+			if (str_ends_with((string)($doc->name ?? ''), '.pdf') && is_string($doc->path ?? null)) {
+				return $doc->path;
+			}
+		}
+		return Fields::str(Fields::obj($report, 'document'), 'path') ?? throw ApiException::notFound('This expense report has no document yet.');
+	}
+
+	/** The type of a stored file by its name. */
+	public static function documentType(string $path): string {
+		return str_ends_with(strtolower($path), '.csv') ? 'text/csv; charset=utf-8' : 'application/pdf';
 	}
 
 	// ------------------------------------------------------------- rights
@@ -228,30 +260,8 @@ final class ExpenseReportRules {
 		return $manages || ($d?->person ?? null) === $uid;
 	}
 
-	/** A client writes only the open report, as its person or a Team Admin; the person stays. */
-	public static function requireWrite(bool $manages, string $uid, ?\stdClass $before, ?\stdClass $after): void {
-		if ($before !== null && !(self::isCurrent($before) && $before->status === self::OPEN)) {
-			throw ApiException::conflict('A fixed expense report changes only through its actions (paid, reverse).');
-		}
-		if ($before !== null && $after !== null && ($after->person ?? null) !== ($before->person ?? null)) {
-			throw ApiException::conflict('The person of an expense report does not change.');
-		}
-		if ($manages) {
-			return;
-		}
-		foreach ([$before, $after] as $d) {
-			if ($d !== null && ($d->person ?? null) !== $uid) {
-				throw ApiException::forbidden('An expense report is written by its person or by a Team Admin.');
-			}
-		}
-	}
-
-	/** The server's fields kept from the stored report; a new one is open. */
-	public static function mergeServer(?\stdClass $before, \stdClass $after): void {
-		foreach (self::SERVER as $f) {
-			$after->{$f} = $before?->{$f} ?? null;
-		}
-		$after->schema = self::SCHEMA;
-		$after->status = $before === null ? self::OPEN : $before->status;
+	/** A client never writes a report (0.30.0): it is made and changed only through its actions. */
+	public static function requireWrite(): void {
+		throw ApiException::conflict('An expense report changes only through its actions (fix, documents, reverse).');
 	}
 }

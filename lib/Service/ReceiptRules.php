@@ -9,7 +9,9 @@ namespace OCA\TimeSister\Service;
 /**
  * The receipt (0.22.0, record `receipt`, B3), pure: content and defaults,
  * the fields the server owns, the status, who reads and writes it and
- * what may change after approval; since 0.23.0 also when a write approves.
+ * what may change after approval; since 0.23.0 also when a write approves,
+ * since 0.30.0 the expense fields and what a settled receipt keeps
+ * ({@see ExpenseFields}).
  */
 final class ReceiptRules {
 	public const KIND = 'receipt';
@@ -76,6 +78,8 @@ final class ReceiptRules {
 			$d->currency = strtoupper($c);
 		}
 		ReceiptBooking::validate($d);
+		// 0.30.0: category, factor, rate, template, quantity – their form only.
+		ExpenseFields::validate($d);
 		self::position($d);
 		self::payer($d);
 		self::recurring($d);
@@ -206,12 +210,9 @@ final class ReceiptRules {
 
 	// ------------------------------------------------------------- status
 
-	/** The status of a new receipt: open; a recurring one of an approved rule approved at once (general: internal). */
-	public static function initialStatus(\stdClass $d, bool $ruleApproved): string {
-		if (($d->kind ?? null) === self::RECURRING && $ruleApproved) {
-			return self::approvedStatus($d);
-		}
-		return self::OPEN;
+	/** The status of a new receipt: open; a recurring one approved at once (general: internal) – its rule applies from creation (0.30.0). */
+	public static function initialStatus(\stdClass $d): string {
+		return ($d->kind ?? null) === self::RECURRING ? self::approvedStatus($d) : self::OPEN;
 	}
 
 	/** Approved with a project, internal without. */
@@ -477,20 +478,33 @@ final class ReceiptRules {
 	 * already merged into `$after`). Open or rejected: whoever reads it
 	 * before and after. Approved: Team Admins, or a Lead of the project
 	 * before and after, and only the correctable fields; billed: only the
-	 * note. Deleting only while open or rejected.
+	 * note. Deleting only while open or rejected. Since 0.30.0 category,
+	 * factor and rate of a reimbursed receipt are its person's and Team
+	 * Admins' in any status, and a settled receipt (`$settled`: on a fixed
+	 * or paid expense report) keeps everything but the correctable fields.
 	 *
 	 * @param array<string,true> $led
 	 */
-	public static function requireWrite(bool $manages, string $uid, array $led, ?\stdClass $before, ?\stdClass $after): void {
+	public static function requireWrite(bool $manages, string $uid, array $led, ?\stdClass $before, ?\stdClass $after, bool $settled = false): void {
+		if ($before !== null && $settled) {
+			ExpenseFields::requireSettled($manages, $led, $before, $after);
+			return;
+		}
+		$changed = $before !== null && $after !== null ? self::changed($before, $after) : [];
+		if ($before !== null && $after !== null) {
+			ExpenseFields::requireOwner($manages, $uid, $before, $after, $changed);
+		}
 		if ($before !== null && self::isApproved($before)) {
 			if ($after === null) {
 				throw ApiException::conflict('An approved receipt is not deleted.');
 			}
-			if (!$manages && !(self::ofLed($before, $led) && self::ofLed($after, $led))) {
+			// The person's own category, factor and rate need no Lead (checked above).
+			$other = array_values(array_diff($changed, ExpenseFields::openOn($before)));
+			if (($other !== [] || $changed === []) && !$manages && !(self::ofLed($before, $led) && self::ofLed($after, $led))) {
 				throw ApiException::forbidden('After approval only Team Admins and the project’s Leads change a receipt.');
 			}
 			$allowed = ($before->status ?? null) === self::BILLED ? ['note'] : self::CORRECTABLE;
-			foreach (self::changed($before, $after) as $f) {
+			foreach ($other as $f) {
 				if (in_array($f, $allowed, true)) {
 					continue;
 				}

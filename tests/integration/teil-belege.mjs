@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Receipts, expense reports and the document tree (0.22.0, 0.23.0): the
-// team's root, receipts with their three questions and server-owned
+// Receipts, expense reports and the document tree (0.22.0, 0.23.0, 0.30.0):
+// the team's root, receipts with their three questions and server-owned
 // fields, the file under Belege/ or Spesen/<person>/, approval by
 // assignment (with `missing`) and through the endpoint with the rename,
 // rejection, rights of members, Leads and Team Admins, recurring expenses
-// (rule, approval, one receipt per period), expense reports fixed like an
-// invoice (ready, fix with number, lines, sums, PDF and ledger, reverse,
-// paid, the chain) and the export (CSV, DATEV), invoicing from receipts
+// (rule without approval, one receipt per period), settling by the person
+// (fix with period, number, lines, sums and ledger, the app's file,
+// reverse, the chain) and the export (CSV, DATEV), invoicing from receipts
 // (lines, markup, expense percentage, billed on issue, released on
 // reversal, copies in the PDF), the quote document through the server, the
 // project dossier and the privacy notice. Leaves pb as it found it
@@ -113,7 +113,7 @@ export async function belege() {
 	const K2 = `inv-${RUN}b2`
 	const K3 = `inv-${RUN}b3`
 	const Q = `q-${sha256(RUN).slice(0, 8)}`
-	const records = [[ 'receipt', R1 ], ['receipt', R2], ['receipt', R3], ['receipt', R4], ['receipt', R5], ['receipt', R6], ['receipt', R7], ['receipt', R8], ['receipt', R9], ['receipt', RR], ['receipt', `rc-${RUN}-r2`], ['expense_rule', RULE], ['expense_report', `sb-${RUN}x`], ['quote', Q]]
+	const records = [[ 'receipt', R1 ], ['receipt', R2], ['receipt', R3], ['receipt', R4], ['receipt', R5], ['receipt', R6], ['receipt', R7], ['receipt', R8], ['receipt', R9], ['receipt', RR], ['receipt', `rc-${RUN}-r2`], ['expense_rule', RULE], ['expense_rule', `${RULE}s`], ['expense_report', `sb-${RUN}x`], ['quote', Q]]
 	const invoices = [K1, K2, K3]
 	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'pb'")
 	const settings = await ocs(A, 'GET', '/records/setting/settings')
@@ -145,7 +145,7 @@ export async function belege() {
 		head('Receipts: setup and the document tree')
 		{
 			const cap = (await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')).data?.capabilities?.timesister
-			check('capabilities receipts: 2, document_tree, expense_fixing: 1 (expense_reports gone)', cap?.receipts === 2 && cap?.document_tree === 1 && cap?.expense_fixing === 1 && cap?.expense_reports === undefined, cap)
+			check('capabilities receipts: 2, document_tree, expense_fixing: 1, expense_table: 1 (expense_reports gone)', cap?.receipts === 2 && cap?.document_tree === 1 && cap?.expense_fixing === 1 && cap?.expense_table === 1 && cap?.expense_reports === undefined, cap)
 			const set = await ocs(A, 'PUT', '/team/settings', { documents: { root: FOLDER } })
 			expect('Team Admin sets documents.root', set, 200)
 			check('… settings.documents is { root, chain_mail }', JSON.stringify(Object.keys(set.data?.documents || {}).sort()) === '["chain_mail","root"]' && set.data?.documents?.root === FOLDER, set.data)
@@ -298,84 +298,100 @@ export async function belege() {
 			check('the member writes a rule; approved_by ignored', r.status === 200 && r.data?.data?.approved_by === null, r.data)
 			expect('a rule for someone else', await ocs(U1, 'PUT', rec('expense_rule', `${RULE}x`), { version: 0, data: { ...rule, person: 'pbuser2' } }), 403, 'forbidden')
 			const recurring = (period, key = RR) => ocs(U1, 'PUT', rec('receipt', key), { version: 0, data: receipt({ kind: 'recurring', rule: RULE, period, date: `${Y}-02-28`, supplier: '', text: 'Mobile phone', net: 50, vat_rate: null, vat: 0, gross: 50, project: null, budget: null, cost: null }) })
-			expect('a recurring receipt of a rule not approved', await recurring(`${Y}-02`), 422, 'invalid')
-			expect('the member approves their general rule', await ocs(U1, 'POST', `/expense-rules/${RULE}/approve`, {}), 403, 'forbidden')
-			const ap = await ocs(A, 'POST', `/expense-rules/${RULE}/approve`, {})
-			check('Team Admin approves the rule', ap.status === 200 && ap.data?.data?.approved_by === 'pbadmin', ap.data)
+			// 0.30.0: a rule applies from creation; its approval is gone.
+			expect('approving a rule (endpoint gone)', await ocs(A, 'POST', `/expense-rules/${RULE}/approve`, {}), 404)
 			const rr = await recurring(`${Y}-02`)
-			check('the recurring receipt of February: internal at once (general)', rr.status === 200 && rr.data?.data?.status === 'internal' && rr.data?.data?.approved_by === 'pbuser1', rr.data?.data)
+			check('the recurring receipt of February: internal at once (general), the rule needs no approval', rr.status === 200 && rr.data?.data?.status === 'internal' && rr.data?.data?.approved_by === 'pbuser1', rr.data?.data)
 			const dup = await recurring(`${Y}-02`, `rc-${RUN}-r2`)
 			expect('a second one for February', dup, 409, 'duplicate')
 			expect('a period before the rule', await recurring(`${Y - 1}-12`, `rc-${RUN}-r2`), 422, 'invalid')
 			expect('a quarter for a monthly rule', await recurring(`${Y}-Q1`, `rc-${RUN}-r2`), 422, 'invalid')
 			const cr = await get('expense_rule', RULE)
 			const ch = await ocs(U1, 'PUT', rec('expense_rule', RULE), { version: cr.version, data: { ...cr.data, amount: 60 } })
-			check('a new amount clears the approval', ch.status === 200 && ch.data?.data?.approved_by === null, ch.data?.data)
+			check('a new amount: stored, no approval anywhere', ch.status === 200 && ch.data?.data?.amount === 60 && ch.data?.data?.approved_by === null, ch.data?.data)
+			const del = await ocs(U1, 'DELETE', `${rec('expense_rule', RULE)}?version=${ch.data?.version}`)
+			check('a rule with receipts is not deleted → 409', del.status === 409 && del.data?.message === 'An expense rule with receipts is not deleted; end it by setting “to”.', del.data)
+			const spare = await ocs(U1, 'PUT', rec('expense_rule', `${RULE}s`), { version: 0, data: rule })
+			expect('another member deletes a rule of pbuser1', await ocs(U2, 'DELETE', `${rec('expense_rule', `${RULE}s`)}?version=${spare.data?.version}`), 403, 'forbidden')
+			expect('… the person deletes one without receipts', await ocs(U1, 'DELETE', `${rec('expense_rule', `${RULE}s`)}?version=${spare.data?.version}`), 200)
 		}
 
-		head('Receipts: the expense report, fixed like an invoice')
+		head('Receipts: settling the expenses (0.30.0)')
 		let NUM = null
 		let FIRST = null
 		{
 			const today = new Date().toISOString().slice(0, 10)
 			const ty = today.slice(0, 4)
-			expect('another member says ready for pbuser1', await ocs(U2, 'POST', '/expense-reports/ready', { person: 'pbuser1' }), 403, 'forbidden')
-			const rd = await ocs(U1, 'POST', '/expense-reports/ready', { person: 'pbuser1' })
-			const SB = rd.data?.key
-			check('the person says ready: the open report, schema 2, ready_on today', rd.status === 200 && /^sb-[0-9a-f]{8}$/.test(SB ?? '') && rd.data?.data?.status === 'open' && rd.data?.data?.schema === 2 && rd.data?.data?.ready_on === today && rd.data?.data?.number === null, rd.data)
+			const period = { person: 'pbuser1', from: `${Y}-01-01`, to: `${Y}-12-31` }
+			expect('“ready” is gone', await ocs(U1, 'POST', '/expense-reports/ready', { person: 'pbuser1' }), 404)
+			expect('a report through /records', await ocs(U1, 'PUT', rec('expense_report', `sb-${RUN}x`), { version: 0, data: { schema: 2, person: 'pbuser1' } }), 409, 'conflict')
+			expect('another member settles for pbuser1', await ocs(U2, 'POST', '/expense-reports/fix', period), 403, 'forbidden')
+			expect('the Lead settles for pbuser1', await ocs(L, 'POST', '/expense-reports/fix', period), 403, 'forbidden')
+			expect('settling for an account outside the team', await ocs(A, 'POST', '/expense-reports/fix', { ...period, person: 'atuser1' }), 422, 'invalid')
+			const noCat = await ocs(U1, 'POST', '/expense-reports/fix', period)
+			check('the person settles: the first expense without a category → 422', noCat.status === 422 && noCat.data?.message === `The expense ${RR} of ${Y}-02-28 has no category.`, noCat.data)
+			// The person sets category and factor, also after approval (9 B 1).
+			for (const [k, category, factor] of [[RR, 'phone', 0.5], [R1, 'travel', null]]) {
+				const c = await get('receipt', k)
+				const w = await ocs(U1, 'PUT', rec('receipt', k), { version: c.version, data: { ...c.data, category, factor } })
+				check(`the person sets the category of ${k} (${c.data?.status})`, w.status === 200 && w.data?.data?.category === category && w.data?.data?.status === c.data?.status, w.data)
+			}
+			const fx = await ocs(U1, 'POST', '/expense-reports/fix', period)
+			const d = fx.data?.data
+			const SB = fx.data?.key
+			NUM = d?.number ?? null
 			if (SB) {
 				records.push(['expense_report', SB])
 			}
-			const rd2 = await ocs(A, 'POST', '/expense-reports/ready', { person: 'pbuser1' })
-			check('… again (Team Admin): the same open report', rd2.status === 200 && rd2.data?.key === SB, rd2.data)
-			expect('a second open report through /records', await ocs(U1, 'PUT', rec('expense_report', `sb-${RUN}x`), { version: 0, data: { schema: 2, person: 'pbuser1' } }), 409, 'duplicate')
-			const cw = await ocs(U1, 'PUT', rec('expense_report', SB), { version: rd2.data?.version, data: { ...rd2.data?.data, status: 'fixed', number: 'X-1', lines: [] } })
-			check('the person writes the open report: the server’s fields stay', cw.status === 200 && cw.data?.data?.status === 'open' && cw.data?.data?.number === null && cw.data?.data?.lines === null, cw.data)
-			expect('another member reads it', await ocs(U2, 'GET', rec('expense_report', SB)), 403, 'forbidden')
-			expect('the Lead reads it', await ocs(L, 'GET', rec('expense_report', SB)), 403, 'forbidden')
-			expect('the member fixes it', await ocs(U1, 'POST', '/expense-reports/fix', { person: 'pbuser1' }), 403, 'forbidden')
-			expect('fix with a receipt not on the list (not reimbursed)', await ocs(A, 'POST', '/expense-reports/fix', { person: 'pbuser1', receipts: [R2] }), 422, 'invalid')
-			expect('fix for an account outside the team', await ocs(A, 'POST', '/expense-reports/fix', { person: 'atuser1' }), 422, 'invalid')
-			const fx = await ocs(A, 'POST', '/expense-reports/fix', { person: 'pbuser1', receipts: [R1, RR] })
-			const d = fx.data?.data
-			NUM = d?.number ?? null
-			const docPath = `${FOLDER}/Buchhaltung/${ty}/Spesen/${person}/${today}_${NUM}_Spesenblatt.pdf`
-			check('Team Admin fixes: the open report, numbered, frozen lines by date, sums per rate (0 and 8.1), gross 158.10 CHF', fx.status === 200 && fx.data?.key === SB && d?.status === 'fixed' && new RegExp(`^SP-${RUN}-\\d{4}$`).test(NUM ?? '')
-				&& d?.fixed_by === 'pbadmin' && d?.fixed_on === today && d?.ready_on === today && JSON.stringify((d?.lines || []).map((l) => l.receipt)) === JSON.stringify([RR, R1])
-				&& near(d?.sums?.net, 150) && near(d?.sums?.gross, 158.1) && d?.sums?.currency === 'CHF' && JSON.stringify(d?.sums?.vat_lines) === '[{"rate":0,"net":50,"vat":0},{"rate":8.1,"net":100,"vat":8.1}]', fx.data)
-			check('… the lines: own amounts, VAT per rate, without_file for the recurring one', d?.lines?.[0]?.without_file === true && JSON.stringify(d?.lines?.[0]?.vat_lines) === '[]' && d?.lines?.[1]?.without_file === false
-				&& d?.lines?.[1]?.project === PB && d?.lines?.[1]?.cost === 1 && near(d?.lines?.[1]?.gross, 108.1) && d?.lines?.[1]?.booked === null, d?.lines)
-			check('… the PDF under Spesen/<person>/ with the number, document_state done', d?.document_state === 'done' && d?.document?.path === docPath && /^[0-9a-f]{64}$/.test(d?.document?.sha256 ?? '') && (await davGet(docPath)).status === 200, [d?.document, d?.document_error, docPath])
+			check('the person settles their own: a new report, fixed, numbered, the period, lines by date, no document', fx.status === 200 && /^sb-[0-9a-f]{8}$/.test(SB ?? '') && d?.status === 'fixed' && d?.schema === 2
+				&& new RegExp(`^SP-${RUN}-\\d{4}$`).test(NUM ?? '') && d?.from === period.from && d?.to === period.to && d?.fixed_by === 'pbuser1' && d?.fixed_on === today
+				&& JSON.stringify((d?.lines || []).map((l) => l.receipt)) === JSON.stringify([RR, R1]) && JSON.stringify(d?.documents) === '[]'
+				&& d?.document_state === undefined && d?.ready_on === undefined, fx.data)
+			check('… the lines in CHF: the half of the phone without file, the trip with VAT, charged to the project', d?.lines?.[0]?.amount === 25 && d?.lines?.[0]?.factor === 0.5 && d?.lines?.[0]?.without_file === true
+				&& d?.lines?.[0]?.rate?.source === 'team' && d?.lines?.[1]?.amount === 108.1 && d?.lines?.[1]?.charged === true && d?.lines?.[1]?.project === PB
+				&& JSON.stringify(d?.lines?.[1]?.vat_amounts) === '[{"rate":8.1,"vat":8.1}]', d?.lines)
+			check('… the sums: per category, VAT per rate, total and payout', JSON.stringify(d?.sums) === '{"currency":"CHF","categories":[{"id":"phone","amount":25},{"id":"travel","amount":108.1}],"vat":[{"rate":8.1,"vat":8.1}],"total":133.1,"payout":133.1}', d?.sums)
 			check('… the receipts note the report', (await get('receipt', R1))?.data?.report === SB && (await get('receipt', RR))?.data?.report === SB)
-			expect('fixing them again', await ocs(A, 'POST', '/expense-reports/fix', { person: 'pbuser1', receipts: [R1] }), 409, 'conflict')
+			expect('settling the same period again: nothing open', await ocs(U1, 'POST', '/expense-reports/fix', period), 422, 'invalid')
 			const led = await ocs(A, 'GET', `/invoices/ledger?since=${(d?.ledger_seq ?? 1) - 1}`)
-			const [ef, edoc] = led.data?.entries || []
-			check('the ledger: expense_fixed (invoice 0, its payload hashed) and expense_document with the PDF’s hash', led.status === 200 && ef?.action === 'expense_fixed' && ef?.number === NUM && ef?.invoice === 0 && ef?.hash === d?.hash
-				&& sha256(ef?.payload ?? '') === ef?.payload_hash && JSON.parse(ef?.payload ?? '{}')?.key === SB && JSON.parse(ef?.payload ?? '{}')?.lines?.length === 2
-				&& edoc?.action === 'expense_document' && JSON.parse(edoc?.payload ?? '{}')?.sha256 === d?.document?.sha256 && edoc?.prev_hash === ef?.hash, [led.status, ef, edoc])
-			const doc = await raw(U1, 'GET', `/expense-reports/${SB}/document`)
-			check('the person downloads the PDF; its hash is the record’s', doc.status === 200 && doc.buf.subarray(0, 5).toString() === '%PDF-' && sha256(doc.buf) === d?.document?.sha256, doc.status)
+			const ef = led.data?.entries?.[0]
+			const payload = JSON.parse(ef?.payload ?? '{}')
+			check('the ledger: expense_fixed with key, number, person, period, who, lines and sums', led.status === 200 && ef?.action === 'expense_fixed' && ef?.number === NUM && ef?.invoice === 0 && ef?.hash === d?.hash
+				&& sha256(ef?.payload ?? '') === ef?.payload_hash && JSON.stringify(Object.keys(payload)) === '["fixed_by","fixed_on","from","key","lines","number","person","sums","to"]'
+				&& payload.key === SB && payload.lines?.length === 2 && payload.sums?.payout === 133.1, [led.status, ef])
+			// Settled (9 B 2): the expense fields stay, the assignment goes on.
+			const c1 = await get('receipt', R1)
+			const st = await ocs(U1, 'PUT', rec('receipt', R1), { version: c1.version, data: { ...c1.data, category: 'food' } })
+			check('settled: the person’s category stays → 409', st.status === 409 && st.data?.message === 'This expense is settled; reverse the expense report first. “category” stays.', st.data)
+			expect('settled: the Lead corrects the note', await ocs(L, 'PUT', rec('receipt', R1), { version: c1.version, data: { ...c1.data, note: 'settled' } }), 200)
+			expect('settled: the approval is not taken back', await ocs(A, 'POST', `/receipts/${R1}/reopen`, {}), 409, 'conflict')
+			// The app's files (9 F).
+			const doc = pdf(`Spesenabrechnung ${NUM}`)
+			const name = `Spesenabrechnung_${NUM}.pdf`
+			const docPath = `${FOLDER}/Buchhaltung/${ty}/Spesen/${person}/${name}`
+			expect('another member stores a file', await ocs(U2, 'POST', `/expense-reports/${SB}/documents`, { name, content: doc.toString('base64') }), 403, 'forbidden')
+			const up = await ocs(U1, 'POST', `/expense-reports/${SB}/documents`, { name, content: doc.toString('base64') })
+			check('the person stores the PDF of the app: the record with documents, under Spesen/<person>/', up.status === 200 && up.data?.key === SB
+				&& JSON.stringify(up.data?.data?.documents) === JSON.stringify([{ name, path: docPath, sha256: sha256(doc), size: doc.length }]) && (await davGet(docPath)).status === 200, up.data)
+			const again = await ocs(U1, 'POST', `/expense-reports/${SB}/documents`, { name, content: doc.toString('base64') })
+			check('… the same file again: unchanged', again.status === 200 && again.data?.version === up.data?.version, again.data)
+			const got = await raw(U1, 'GET', `/expense-reports/${SB}/document`)
+			check('the person downloads it', got.status === 200 && got.buf.equals(doc) && got.type.startsWith('application/pdf'), [got.status, got.type])
 			expect('another member downloads it', await raw(U2, 'GET', `/expense-reports/${SB}/document`).then((x) => ({ status: x.status, data: x.data, text: x.text })), 403, 'forbidden')
-			const text = pdfText(doc.buf)
-			if (text === null) {
-				console.log('    info  pdftotext not installed – the PDF text is not checked')
-			} else {
-				check('the PDF: title with number, both receipts, «ohne Beleg», sums, signature lines, the receipt copy, the chain line', text.includes(`Spesenblatt ${NUM}`) && text.includes('Basel–Bern') && text.includes('ohne Beleg') && text.includes('158.10')
-					&& text.includes('Unterschrift Person') && text.includes('Fixiert') && text.includes(`Beleg 10.03.${Y} Bahn Muster`) && text.includes(`Beleg ${NUM} · Kette ${d?.ledger_seq}`), text.slice(0, 600))
-			}
+			expect('another member reads the report', await ocs(U2, 'GET', rec('expense_report', SB)), 403, 'forbidden')
+			expect('the Lead reads it', await ocs(L, 'GET', rec('expense_report', SB)), 403, 'forbidden')
 			const cur = await get('expense_report', SB)
-			expect('the member changes it after fixing', await ocs(U1, 'PUT', rec('expense_report', SB), { version: cur.version, data: cur.data }), 409, 'conflict')
+			expect('the person writes the report', await ocs(U1, 'PUT', rec('expense_report', SB), { version: cur.version, data: cur.data }), 409, 'conflict')
 			expect('Team Admin deletes it', await ocs(A, 'DELETE', `${rec('expense_report', SB)}?version=${cur.version}`), 409, 'conflict')
-			expect('the member marks it paid', await ocs(U1, 'POST', `/expense-reports/${SB}/paid`, { date: `${Y}-04-05` }), 403, 'forbidden')
-			expect('the member reverses it', await ocs(U1, 'POST', `/expense-reports/${SB}/reverse`, {}), 403, 'forbidden')
+			expect('“paid” is gone', await ocs(A, 'POST', `/expense-reports/${SB}/paid`, { date: `${Y}-04-05` }), 404)
+			expect('the person reverses it', await ocs(U1, 'POST', `/expense-reports/${SB}/reverse`, {}), 403, 'forbidden')
 			const rv = await ocs(A, 'POST', `/expense-reports/${SB}/reverse`, { reason: 'Wrong month' })
-			check('Team Admin reverses it: reversed, the reason, a ledger entry; the PDF stays', rv.status === 200 && rv.data?.data?.status === 'reversed' && rv.data?.data?.reverse_reason === 'Wrong month' && rv.data?.data?.reversed_on === today
-				&& /^[0-9a-f]{64}$/.test(rv.data?.ledger?.hash ?? '') && rv.data?.data?.document?.path === docPath && (await davGet(docPath)).status === 200, rv.data)
-			check('… the receipts are free again', (await get('receipt', R1))?.data?.report === null && (await get('receipt', RR))?.data?.report === null)
+			check('Team Admin reverses it: reversed, the reason, a ledger entry; the file stays', rv.status === 200 && rv.data?.data?.status === 'reversed' && rv.data?.data?.reverse_reason === 'Wrong month' && rv.data?.data?.reversed_on === today
+				&& /^[0-9a-f]{64}$/.test(rv.data?.ledger?.hash ?? '') && rv.data?.data?.documents?.length === 1 && (await davGet(docPath)).status === 200, rv.data)
+			check('… the receipts are open again', (await get('receipt', R1))?.data?.report === null && (await get('receipt', RR))?.data?.report === null)
 			expect('reversing again', await ocs(A, 'POST', `/expense-reports/${SB}/reverse`, {}), 409, 'conflict')
-			expect('paid after the reversal', await ocs(A, 'POST', `/expense-reports/${SB}/paid`, {}), 409, 'conflict')
-			// Named, so receipts other runs left on the list stay out of it.
-			const fx2 = await ocs(A, 'POST', '/expense-reports/fix', { person: 'pbuser1', receipts: [RR, R1] })
+			expect('a file for the reversed report', await ocs(U1, 'POST', `/expense-reports/${SB}/documents`, { name: `x_${NUM}.csv`, content: Buffer.from('a;b').toString('base64') }), 409, 'conflict')
+			const fx2 = await ocs(A, 'POST', '/expense-reports/fix', period)
 			const SB2 = fx2.data?.key
 			if (SB2) {
 				records.push(['expense_report', SB2])
@@ -383,12 +399,10 @@ export async function belege() {
 			FIRST = NUM
 			NUM = fx2.data?.data?.number ?? null
 			// The counter runs per year across runs; the pattern carries the run.
-			check('fixed again: a new report with the next number', fx2.status === 200 && SB2 !== SB && NUM === `SP-${RUN}-${String(Number(FIRST?.slice(-4)) + 1).padStart(4, '0')}` && fx2.data?.data?.lines?.length === 2 && fx2.data?.data?.ready_on === null, fx2.data)
-			const paid = await ocs(A, 'POST', `/expense-reports/${SB2}/paid`, { date: `${Y}-04-05` })
-			check('Team Admin marks it paid, with a ledger entry', paid.status === 200 && paid.data?.data?.status === 'paid' && paid.data?.data?.paid_on === `${Y}-04-05` && /^[0-9a-f]{64}$/.test(paid.data?.ledger?.hash ?? ''), paid.data)
-			expect('a paid report is not reversed', await ocs(A, 'POST', `/expense-reports/${SB2}/reverse`, {}), 409, 'conflict')
+			check('Team Admin settles for the person: a new report with the next number', fx2.status === 200 && SB2 !== SB && fx2.data?.data?.fixed_by === 'pbadmin'
+				&& NUM === `SP-${RUN}-${String(Number(FIRST?.slice(-4)) + 1).padStart(4, '0')}` && fx2.data?.data?.lines?.length === 2, fx2.data)
 			const tail = (await ocs(A, 'GET', `/invoices/ledger?since=${(d?.ledger_seq ?? 1) - 1}`)).data?.entries || []
-			check('the ledger holds fixed, document, reversed, fixed, document, paid', JSON.stringify(tail.map((e) => e.action)) === JSON.stringify(['expense_fixed', 'expense_document', 'expense_reversed', 'expense_fixed', 'expense_document', 'expense_paid']), tail.map((e) => e.action))
+			check('the ledger holds fixed, document, reversed, fixed', JSON.stringify(tail.map((e) => e.action)) === JSON.stringify(['expense_fixed', 'expense_document', 'expense_reversed', 'expense_fixed']), tail.map((e) => e.action))
 			const vf = await ocs(A, 'GET', '/invoices/chain/verify')
 			check('the chain verifies with the expense entries', vf.status === 200 && vf.data?.ok === true, vf.data)
 		}
@@ -398,9 +412,9 @@ export async function belege() {
 			expect('a member exports', await raw(U1, 'GET', `/exports/expenses?from=${Y}-01-01&to=${Y}-12-31`).then((x) => ({ status: x.status, data: x.data, text: x.text })), 403, 'forbidden')
 			const csv = await raw(A, 'GET', `/exports/expenses?from=${Y}-01-01&to=${Y}-12-31`)
 			const lines = csv.text.split('\r\n')
-			check('CSV: head and two rows of the paid report (by number), none of the reversed one', csv.status === 200 && lines[0].endsWith('person;person_name;report;report_status;date;supplier;text;project;currency;net;vat_rate;vat;gross;without_receipt')
-				&& lines.some((l) => l.startsWith(`pbuser1;`) && l.includes(`;${NUM};paid;${Y}-03-10;Bahn Muster;Basel–Bern;${PB};CHF;100.00;8.1;8.10;108.10;0`))
-				&& lines.some((l) => l.includes(`;${NUM};paid;${Y}-02-28;;Mobile phone;;CHF;50.00;;0.00;50.00;1`)) && !lines.some((l) => l.includes(`;${FIRST};`)), lines.slice(0, 4))
+			check('CSV: head and two rows of the fixed report (by number) in CHF after the factor, none of the reversed one', csv.status === 200 && lines[0].endsWith('person;person_name;report;report_status;date;supplier;text;project;currency;net;vat_rate;vat;gross;without_receipt')
+				&& lines.some((l) => l.startsWith(`pbuser1;`) && l.includes(`;${NUM};fixed;${Y}-03-10;Bahn Muster;Basel–Bern;${PB};CHF;100.00;8.1;8.10;108.10;0`))
+				&& lines.some((l) => l.includes(`;${NUM};fixed;${Y}-02-28;;Mobile phone;;CHF;25.00;;0.00;25.00;1`)) && !lines.some((l) => l.includes(`;${FIRST};`)), lines.slice(0, 4))
 			const accounts = { ...(datevBefore || {}), consultant: '1234567', client: '12345', account_length: 4 }
 			delete accounts.expense_account
 			await ocs(A, 'PUT', '/team/settings', { datev: accounts })
@@ -414,7 +428,7 @@ export async function belege() {
 			expect('the person gets creditor_account 70001', await put(A, 'person', 'pbuser1', { ...pdata, creditor_account: '70001' }), 200)
 			const dv = await raw(A, 'GET', `/exports/expenses?from=${Y}-01-01&to=${Y}-12-31&kind=datev`)
 			const rows = dv.text.split('\r\n').filter((l) => l.includes(`;${NUM};`))
-			check('DATEV: EXTF head, one booking per receipt, debit 6300, credit 70001', dv.status === 200 && dv.text.includes('TimeSister Spesen') && rows.length === 2 && rows.some((l) => l.startsWith('108,10;S;CHF;;;;6300;70001;;1003;')), rows)
+			check('DATEV: EXTF head, one booking per expense, debit 6300, credit 70001', dv.status === 200 && dv.text.includes('TimeSister Spesen') && rows.length === 2 && rows.some((l) => l.startsWith('108,10;S;CHF;;;;6300;70001;;1003;')) && rows.some((l) => l.startsWith('25,00;S;CHF;')), rows)
 		}
 
 		head('Receipts: invoicing from receipts')

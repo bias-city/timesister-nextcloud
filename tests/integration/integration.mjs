@@ -12,7 +12,8 @@
 // VAT per invoice line and the cost positions of a budget (0.21.0), receipts,
 // expense reports and the document tree (0.22.0), approval by assignment and
 // fixed expense reports with ledger (0.23.0), the invoicing mode and the
-// hand-over to an accounting system that issues the invoice (0.24.0).
+// hand-over to an accounting system that issues the invoice (0.24.0), the
+// expense table, settling by the person and the ECB rates (0.30.0).
 //
 //   NC_URL=http://localhost:8081 node tests/integration/integration.mjs
 //
@@ -36,6 +37,7 @@ import { dokumente } from './teil-dokumente.mjs'
 import { erechnung } from './teil-erechnung.mjs'
 import { kosten } from './teil-kosten.mjs'
 import { belege } from './teil-belege.mjs'
+import { spesen } from './teil-spesen.mjs'
 import { uebergabe } from './teil-uebergabe.mjs'
 import { summary } from './harness.mjs'
 
@@ -56,6 +58,7 @@ await dokumente()
 await erechnung()
 await kosten()
 await belege()
+await spesen()
 await uebergabe()
 await rest()
 await sicherungen()

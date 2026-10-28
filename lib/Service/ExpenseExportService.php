@@ -40,7 +40,7 @@ final class ExpenseExportService {
 			// 0.23.0: the frozen lines, not the receipts as they are now.
 			foreach (Fields::list($report, 'lines') as $l) {
 				if ($l instanceof \stdClass && ExportRules::inPeriod((string)($l->date ?? ''), $from, $to)) {
-					$rows[] = [(string)($report->number ?? $rep->getRkey()), $report, ExpenseReportRules::asReceipt($l)];
+					$rows[] = [(string)($report->number ?? $rep->getRkey()), $report, $l];
 				}
 			}
 		}
@@ -77,11 +77,12 @@ final class ExpenseExportService {
 		$today = gmdate('Y-m-d', $this->time->getTime());
 		$first = $rows[0][2]->date ?? $today;
 		$last = $rows === [] ? $today : ($rows[count($rows) - 1][2]->date ?? $today);
-		$head = ExportRules::datevHeader($datev, $from ?? (string)$first, $to ?? (string)$last, $this->time->getTime(), $m->uid, (string)($rows[0][2]->currency ?? 'EUR'));
+		$currency = $rows === [] ? 'EUR' : ExpenseExportRules::counted($rows[0][1], $rows[0][2])['currency'];
+		$head = ExportRules::datevHeader($datev, $from ?? (string)$first, $to ?? (string)$last, $this->time->getTime(), $m->uid, $currency === '' ? 'EUR' : $currency);
 		$head[16] = 'TimeSister Spesen';
 		$out = ExportRules::line($head) . ExportRules::line(ExportRules::DATEV_HEAD);
 		foreach ($rows as [$key, $report, $r]) {
-			$out .= ExportRules::line(ExpenseExportRules::datevRow($r, $key, $expense, $creditors[(string)$report->person]));
+			$out .= ExportRules::line(ExpenseExportRules::datevRow($report, $r, $key, $expense, $creditors[(string)$report->person]));
 		}
 		return $out;
 	}

@@ -16,7 +16,9 @@ use OCP\AppFramework\Utility\ITimeFactory;
  * current name) and rejecting. The record's own writes go through
  * RecordService and CostWrites; since 0.23.0 an approver's file upload
  * that completes a receipt approves it, as a write does. Since 0.27.0 a
- * Team Admin takes an approval back (`reopen`).
+ * Team Admin takes an approval back (`reopen`); since 0.30.0 a settled
+ * receipt (on a fixed or paid expense report) keeps its file and is not
+ * rejected.
  */
 final class ReceiptService {
 	public const REASON_MAX = 300;
@@ -56,6 +58,9 @@ final class ReceiptService {
 	/** `PUT /receipts/{key}/file` – PDF, JPEG or PNG, while open. @return array<string,mixed> path, sha256, size, mime, version, status, missing? */
 	public function putFile(Membership $m, string $key, string $content): array {
 		[$rec, $d] = $this->load($m, $key);
+		if ($this->heldBy($m->tenantId, $d) !== null) {
+			throw ExpenseFields::stays('file');
+		}
 		ReceiptRules::requireWrite($m->manages(), $m->uid, $this->led($m), $d, $d);
 		if (($d->status ?? null) !== ReceiptRules::OPEN) {
 			throw ApiException::conflict('A file is added only while the receipt is open.');
@@ -154,6 +159,9 @@ final class ReceiptService {
 		}
 		[$rec, $d] = $this->load($m, $key);
 		$this->requireApprover($m, $d);
+		if ($this->heldBy($m->tenantId, $d) !== null) {
+			throw ApiException::conflict('This expense is settled; reverse the expense report first.');
+		}
 		if (($d->status ?? null) !== ReceiptRules::OPEN) {
 			throw ApiException::conflict('Only an open receipt is approved or rejected.');
 		}
@@ -172,17 +180,18 @@ final class ReceiptService {
 	 */
 	public function reopen(Membership $m, string $key): array {
 		[$rec, $d] = $this->load($m, $key);
-		ReceiptRules::requireReopen($m->manages(), $d, ExpenseReportRules::heldBy($d, $this->reports($m->tenantId)));
+		ReceiptRules::requireReopen($m->manages(), $d, $this->heldBy($m->tenantId, $d));
 		ReceiptRules::reopen($d, $m->uid, $this->today());
 		return $this->recordService->writeAsServer($m, ReceiptRules::KIND, $key, $rec->getVersion(), $d);
 	}
 
-	/** The live expense reports by key. @return array<string,?\stdClass> */
-	private function reports(int $tid): array {
-		$out = [];
-		foreach ($this->records->findLiveByKind($tid, ExpenseReportRules::KIND) as $r) {
-			$out[$r->getRkey()] = InvoiceRules::decode($r->getData());
+	/** The fixed or paid expense report that holds the receipt, or null. */
+	private function heldBy(int $tid, \stdClass $d): ?string {
+		$report = $d->report ?? null;
+		if (!is_string($report)) {
+			return null;
 		}
-		return $out;
+		$r = $this->records->findOne($tid, ExpenseReportRules::KIND, $report);
+		return $r !== null && !$r->isTombstone() && ExpenseReportRules::holds(InvoiceRules::decode($r->getData())) ? $report : null;
 	}
 }

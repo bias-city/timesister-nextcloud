@@ -28,6 +28,7 @@ API: [`docs/API.md`](docs/API.md).
 | Translations (admin page, API messages) | `l10n/de.json` (informal German, "du"), `l10n/de_DE.json` (formal, "Sie") |
 | Account/group deleted | `lib/Listener` |
 | Backups: export, storage, consent, own copy | `lib/Service/Backup*`, `CalendarExporter`, `IcsJoiner`, `ProtectedStore`, `VisibleCopy`, `ConsentService`, `OwnCopyService`, `WeekMarks` |
+| Expenses (0.30.0): fields, settling, the expense table, documents, ECB rates | `ExpenseFields`, `ExpenseTable`, `ExpenseReportRules`, `ExchangeRateRules` (pure), `ExpenseReportService`, `ExchangeRateService`, `lib/BackgroundJob/ExchangeRates.php` |
 | Weekly backup (checked hourly) | `lib/BackgroundJob/WeeklyBackup.php` |
 | Retention (daily): history, backup tiers (`Thinning`) | `lib/BackgroundJob/Retention.php` |
 
@@ -86,6 +87,25 @@ validates at runtime; the unit tests validate against the XSD of the dev
 install). Psalm does not check them. The library loads its XMP template
 with `simplexml_load_file()`, which Nextcloud's entity loader blocks;
 `EInvoiceXml::embed()` allows that one file while embedding.
+
+## Exchange rates (0.30.0)
+
+With the team setting `settings.exchange_rates` on, the hourly job
+`ExchangeRates` asks Frankfurter (reference rates of the European Central
+Bank) for the days on which reimbursed expenses in a foreign currency wait
+for a rate. A request names only the team's currency, the foreign
+currencies and the day – no person, amount or receipt. The rates become
+records of kind `exchange_rate`, written by the server alone; the privacy
+notice names the service, the currencies and the days. The address is the
+app config `exchange_rates_url` (default `https://api.frankfurter.dev`); an
+own Frankfurter may run in the local network:
+
+```sh
+occ config:app:set timesister exchange_rates_url --value=https://rates.example.org
+```
+
+The integration test points it to a local stub (`TS_OCC` needed) and
+removes it afterwards; it never asks the real service.
 
 ## Translations
 

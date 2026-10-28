@@ -8,16 +8,18 @@ namespace OCA\TimeSister\Service;
 
 use OCA\TimeSister\Db\CounterMapper;
 use OCA\TimeSister\Db\InvLedger;
+use OCA\TimeSister\Db\Record;
 use OCA\TimeSister\Db\RecordMapper;
 use OCA\TimeSister\Db\TenantMapper;
 use OCP\AppFramework\Utility\ITimeFactory;
 
 /**
- * Expense reports (0.23.0), fixed like an invoice: the person says
- * «ready», a Team Admin fixes the expense list in one transaction –
- * number, frozen lines and sums, `report` on every receipt, ledger entry
- * `expense_fixed` – then the PDF follows (ExpenseReportDocuments). Paid
- * and reversed are ledger entries too.
+ * Expense reports (0.23.0), since 0.30.0 settled by the person themselves
+ * or a Team Admin (PLAN-SPESEN 9): the open expenses of a period are fixed
+ * in one transaction – number, frozen lines and sums of the expense table,
+ * `report` on every receipt, ledger entry `expense_fixed`. The app renders
+ * the files and stores them here (`expense_document`); a Team Admin
+ * reverses a report.
  */
 final class ExpenseReportService {
 	public const REASON_MAX = 500;
@@ -29,7 +31,6 @@ final class ExpenseReportService {
 		private TenantService $team,
 		private CounterMapper $counters,
 		private LedgerAppender $appender,
-		private ExpenseReportDocuments $documents,
 		private TeamTree $tree,
 		private DocumentFolder $folders,
 		private Transaction $tx,
@@ -37,48 +38,23 @@ final class ExpenseReportService {
 	) {
 	}
 
-	// ------------------------------------------------------------- ready
-
-	/** `POST /expense-reports/ready` `{ person }` – the person or Team Admins: the open report with `ready_on` today. @return array<string,mixed> the record */
-	public function ready(Membership $m, \stdClass $body): array {
-		$person = $this->person($m, $body->person ?? null);
-		if (!$m->manages() && $person !== $m->uid) {
-			throw ApiException::forbidden('The person says “ready” for themselves; Team Admins for anyone.');
-		}
-		$today = $this->today();
-		return $this->tx->run(function () use ($m, $person, $today): array {
-			$tid = $m->tenantId;
-			$top = $this->tenants->bumpRevision($tid, 1);
-			$key = ExpenseReportRules::openOf($this->reports($tid), $person);
-			$cur = $key === null ? null : $this->records->findOne($tid, ExpenseReportRules::KIND, $key);
-			$d = InvoiceRules::decode($cur?->getData()) ?? self::fresh($person);
-			if ($key === null) {
-				$key = $this->newKey($tid);
-				ExpenseReportRules::mergeServer(null, $d);
-			}
-			$d->ready_on = $today;
-			return $this->recordService->applyWithin($m, [$this->op($key, $cur?->getVersion() ?? 0, $d)], false, $top, true)['records'][0];
-		});
-	}
-
 	// --------------------------------------------------------------- fix
 
-	/** `POST /expense-reports/fix` `{ person, receipts? }` – Team Admins. @return array<string,mixed> the record (after the document) */
+	/** `POST /expense-reports/fix` `{ person, from, to }` – the person or Team Admins. @return array<string,mixed> the new record */
 	public function fix(Membership $m, \stdClass $body): array {
-		if (!$m->manages()) {
-			throw ApiException::forbidden('Only Team Admins fix expense reports.');
-		}
 		$person = $this->person($m, $body->person ?? null);
+		if (!$m->manages() && $person !== $m->uid) {
+			throw ApiException::forbidden('Only the person and Team Admins settle expenses.');
+		}
+		[$from, $to] = ExpenseReportRules::period($body->from ?? null, $body->to ?? null);
 		$now = $this->time->getTime();
-		$key = $this->tx->run(fn (): string => $this->fixWithin($m, $person, $body->receipts ?? null, $now));
-		// After the transaction, as for an invoice: a failure leaves the state for the retry job.
-		$this->documents->render($m->tenantId, $key, $m->uid, $now);
-		return $this->recordService->get($m, ExpenseReportRules::KIND, $key);
+		return $this->tx->run(fn (): array => $this->fixWithin($m, $person, $from, $to, $now));
 	}
 
-	private function fixWithin(Membership $m, string $person, mixed $given, int $now): string {
+	/** @return array<string,mixed> */
+	private function fixWithin(Membership $m, string $person, string $from, string $to, int $now): array {
 		$tid = $m->tenantId;
-		// The team lock first, so the list cannot change under us.
+		// The team lock first, so the receipts cannot change under us.
 		$this->tenants->bumpRevision($tid, 0);
 		$receipts = [];
 		foreach ($this->records->findLiveByKind($tid, ReceiptRules::KIND) as $r) {
@@ -88,39 +64,28 @@ final class ExpenseReportService {
 			}
 		}
 		$reports = $this->reports($tid);
-		$keys = ExpenseReportRules::pick($receipts, $reports, $person, $given);
 		$settings = $this->live($tid, 'setting', 'settings');
-		$lines = array_map(static fn (string $k): array => ExpenseReportRules::line($k, $receipts[$k]), $keys);
-		$sums = ExpenseReportRules::sums($lines, ReceiptBooking::teamCurrency($settings));
+		$currency = ReceiptBooking::teamCurrency($settings);
+		$keys = ExpenseReportRules::pick($receipts, $reports, $person, $from, $to, $currency);
+		$lines = array_map(static fn (string $k): array => ExpenseTable::line($k, $receipts[$k], $currency), $keys);
+		$sums = ExpenseTable::sums($lines, $currency);
 		$today = gmdate('Y-m-d', $now);
 		$number = $this->takeNumber($tid, $settings, $reports, $today, $now);
-
-		$key = ExpenseReportRules::openOf($reports, $person);
-		$cur = $key === null ? null : $this->records->findOne($tid, ExpenseReportRules::KIND, $key);
-		$d = InvoiceRules::decode($cur?->getData()) ?? self::fresh($person);
-		$key ??= $this->newKey($tid);
-		ExpenseReportRules::mergeServer(null, $d);
-		$readyOn = Fields::str($d, 'ready_on');
-		$d->ready_on = $readyOn;
+		$key = $this->newKey($tid);
 		$entry = $this->appender->append($tid, $m->uid, LedgerRules::EXPENSE_FIXED, 0, $number,
-			LedgerRules::canonical(ExpenseReportRules::payload($key, $number, $person, $today, $m->uid, $readyOn, $lines, $sums)), $now);
-		$d->status = ExpenseReportRules::FIXED;
-		$d->number = $number;
-		$d->lines = $lines;
-		$d->sums = $sums;
-		$d->fixed_on = $today;
-		$d->fixed_by = $m->uid;
-		$d->document_state = ExpenseReportRules::DOCUMENT_PENDING;
-		$d->document_tries = 0;
-		$d->ledger_seq = $entry->getSeq();
-		$d->hash = $entry->getHash();
-		$ops = [$this->op($key, $cur?->getVersion() ?? 0, $d)];
+			LedgerRules::canonical(ExpenseReportRules::payload($key, $number, $person, $from, $to, $today, $m->uid, $lines, $sums)), $now);
+		$d = new \stdClass();
+		foreach (['schema' => ExpenseReportRules::SCHEMA, 'person' => $person, 'status' => ExpenseReportRules::FIXED, 'number' => $number,
+			'from' => $from, 'to' => $to, 'lines' => $lines, 'sums' => $sums, 'fixed_on' => $today, 'fixed_by' => $m->uid,
+			'documents' => [], 'ledger_seq' => $entry->getSeq(), 'hash' => $entry->getHash()] as $f => $v) {
+			$d->{$f} = $v;
+		}
+		$ops = [$this->op($key, 0, $d)];
 		foreach ($keys as $k) {
 			$ops[] = $this->receiptOp($tid, $k, $key);
 		}
 		$top = $this->tenants->bumpRevision($tid, count($ops));
-		$this->recordService->applyWithin($m, $ops, false, $top, true);
-		return $key;
+		return $this->recordService->applyWithin($m, $ops, false, $top, true)['records'][0];
 	}
 
 	/** The next number of the expense counter in the team's pattern; unique among the reports. @param array<string,?\stdClass> $reports */
@@ -138,26 +103,7 @@ final class ExpenseReportService {
 		return $number;
 	}
 
-	// ------------------------------------------------------ paid, reverse
-
-	/** `POST /expense-reports/{key}/paid` `{ date }` – Team Admins. @return array<string,mixed> the record plus `ledger` */
-	public function paid(Membership $m, string $key, \stdClass $body): array {
-		if (!$m->manages()) {
-			throw ApiException::forbidden('Only Team Admins mark expense reports paid.');
-		}
-		$date = $body->date ?? $this->today();
-		if (!is_string($date) || !Time::isDay($date)) {
-			throw ApiException::invalid(Message::of('“{field}” must be a day in the format YYYY-MM-DD.', ['field' => 'date']));
-		}
-		return $this->action($m, $key, function (\stdClass $d) use ($key, $date): array {
-			if (!ExpenseReportRules::is($d, ExpenseReportRules::FIXED)) {
-				throw ApiException::conflict('Only a fixed expense report is marked paid.');
-			}
-			$d->status = ExpenseReportRules::PAID;
-			$d->paid_on = $date;
-			return [LedgerRules::EXPENSE_PAID, ['key' => $key, 'number' => (string)$d->number, 'paid_on' => $date], []];
-		});
-	}
+	// ------------------------------------------------------------ reverse
 
 	/** `POST /expense-reports/{key}/reverse` `{ reason }` – Team Admins, only a fixed report. @return array<string,mixed> the record plus `ledger` */
 	public function reverse(Membership $m, string $key, \stdClass $body): array {
@@ -166,7 +112,12 @@ final class ExpenseReportService {
 		}
 		$reason = IssueRules::shortText($body->reason ?? null, 'reason');
 		$today = $this->today();
-		return $this->action($m, $key, function (\stdClass $d) use ($m, $key, $reason, $today): array {
+		$now = $this->time->getTime();
+		RecordValidator::checkAddress(ExpenseReportRules::KIND, $key);
+		return $this->tx->run(function () use ($m, $key, $reason, $today, $now): array {
+			$tid = $m->tenantId;
+			$this->tenants->bumpRevision($tid, 0);
+			[$rec, $d] = $this->report($tid, $key);
 			if (ExpenseReportRules::is($d, ExpenseReportRules::PAID)) {
 				throw ApiException::conflict('A paid expense report is not reversed.');
 			}
@@ -176,40 +127,17 @@ final class ExpenseReportService {
 			$d->status = ExpenseReportRules::REVERSED;
 			$d->reversed_on = $today;
 			$d->reverse_reason = $reason;
-			// The receipts go back to the person's expense list; the PDF stays.
-			$release = [];
+			// The receipts are open again; the files stay.
+			$ops = [$this->op($key, $rec->getVersion(), $d)];
 			foreach (Fields::list($d, 'lines') as $l) {
 				$k = $l instanceof \stdClass ? Fields::str($l, 'receipt') : null;
-				$r = $k === null ? null : $this->live($m->tenantId, ReceiptRules::KIND, $k);
+				$r = $k === null ? null : $this->live($tid, ReceiptRules::KIND, $k);
 				if ($k !== null && ($r?->report ?? null) === $key) {
-					$release[] = $this->receiptOp($m->tenantId, $k, null);
+					$ops[] = $this->receiptOp($tid, $k, null);
 				}
 			}
-			return [LedgerRules::EXPENSE_REVERSED, ['key' => $key, 'number' => (string)$d->number, 'reversed_on' => $today, 'reason' => $reason], $release];
-		});
-	}
-
-	/**
-	 * One action on a fixed report under the team lock: the change, its
-	 * ledger entry, the record and the receipts it touches.
-	 *
-	 * @param callable(\stdClass):array{0:string,1:array<string,mixed>,2:list<array{kind:string,key:string,version:int,json:?string,accounts:?list<string>}>} $change
-	 * @return array<string,mixed>
-	 */
-	private function action(Membership $m, string $key, callable $change): array {
-		RecordValidator::checkAddress(ExpenseReportRules::KIND, $key);
-		$now = $this->time->getTime();
-		return $this->tx->run(function () use ($m, $key, $change, $now): array {
-			$tid = $m->tenantId;
-			$this->tenants->bumpRevision($tid, 0);
-			$rec = $this->records->findOne($tid, ExpenseReportRules::KIND, $key);
-			$d = $rec === null || $rec->isTombstone() ? null : InvoiceRules::decode($rec->getData());
-			if ($rec === null || $d === null) {
-				throw ApiException::notFound('This expense report does not exist.');
-			}
-			[$action, $payload, $more] = $change($d);
-			$entry = $this->appender->append($tid, $m->uid, $action, 0, (string)$d->number, LedgerRules::canonical($payload), $now);
-			$ops = [$this->op($key, $rec->getVersion(), $d), ...$more];
+			$entry = $this->appender->append($tid, $m->uid, LedgerRules::EXPENSE_REVERSED, 0, (string)$d->number,
+				LedgerRules::canonical(['key' => $key, 'number' => (string)$d->number, 'reversed_on' => $today, 'reason' => $reason]), $now);
 			$top = $this->tenants->bumpRevision($tid, count($ops));
 			$record = $this->recordService->applyWithin($m, $ops, false, $top, true)['records'][0];
 			$record['ledger'] = self::ledgerBlock($entry);
@@ -217,25 +145,95 @@ final class ExpenseReportService {
 		});
 	}
 
-	// ----------------------------------------------------------- document
+	// ---------------------------------------------------------- documents
 
-	/** `GET /expense-reports/{key}/document` – the person, Team Admins. @return array{content:string,name:string} */
-	public function document(Membership $m, string $key): array {
+	/**
+	 * `POST /expense-reports/{key}/documents` `{ name, content }` (0.30.0):
+	 * a file the app rendered – the table as PDF and CSV, the receipts as
+	 * PDF – stored beside the person's receipts, its hash in the ledger
+	 * (`expense_document`) and in `documents`. The same file again changes
+	 * nothing. Answer: the record.
+	 *
+	 * @return array<string,mixed>
+	 */
+	public function storeDocument(Membership $m, string $key, \stdClass $body): array {
 		RecordValidator::checkAddress(ExpenseReportRules::KIND, $key);
-		$d = $this->live($m->tenantId, ExpenseReportRules::KIND, $key) ?? throw ApiException::notFound('This expense report does not exist.');
+		$tid = $m->tenantId;
+		[$rec, $d] = $this->report($tid, $key);
+		if (!ExpenseReportRules::canRead($m->manages(), $m->uid, $d)) {
+			throw ApiException::forbidden('Only the person and Team Admins store documents of an expense report.');
+		}
+		self::requireFixed($d);
+		$name = ExpenseReportRules::documentName($body->name ?? null);
+		$content = ExpenseReportRules::documentContent($name, $body->content ?? null);
+		$sha = hash('sha256', $content);
+		if (ExpenseReportRules::documentAgain($d, $name, $sha) !== null) {
+			return $this->recordService->present($rec);
+		}
+		// The file first, as with the invoice documents; the record and the ledger in one transaction.
+		$place = $this->tree->of($tid);
+		$folder = DocumentTree::expenseFolder($place['root'], (string)$d->fixed_on, $this->team->displayName((string)$d->person));
+		$written = $this->folders->store($place['owner'], $folder, $name, $content, null);
+		$now = $this->time->getTime();
+		try {
+			[$record, $stored] = $this->tx->run(function () use ($m, $tid, $key, $name, $sha, $written, $now): array {
+				$this->tenants->bumpRevision($tid, 0);
+				[$rec, $d] = $this->report($tid, $key);
+				self::requireFixed($d);
+				if (ExpenseReportRules::documentAgain($d, $name, $sha) !== null) {
+					return [$this->recordService->present($rec), false];
+				}
+				$doc = (object)['name' => $name, 'path' => $written['path'], 'sha256' => $sha, 'size' => $written['size']];
+				$this->appender->append($tid, $m->uid, LedgerRules::EXPENSE_DOCUMENT, 0, (string)$d->number,
+					LedgerRules::canonical(['key' => $key, 'number' => (string)$d->number, 'name' => $name, 'sha256' => $sha]), $now);
+				$d->documents = [...ExpenseReportRules::documents($d), $doc];
+				$top = $this->tenants->bumpRevision($tid, 1);
+				return [$this->recordService->applyWithin($m, [$this->op($key, $rec->getVersion(), $d)], false, $top, true)['records'][0], true];
+			});
+		} catch (\Throwable $e) {
+			// Nothing names the file: it goes to the trash.
+			$this->trash($place['owner'], $written['path']);
+			throw $e;
+		}
+		if (!$stored) {
+			// The same file came in twice at once; the first one stays.
+			$this->trash($place['owner'], $written['path']);
+		}
+		return $record;
+	}
+
+	/** `GET /expense-reports/{key}/document?name=` – the person, Team Admins. @return array{content:string,name:string,type:string} */
+	public function document(Membership $m, string $key, mixed $name): array {
+		RecordValidator::checkAddress(ExpenseReportRules::KIND, $key);
+		[, $d] = $this->report($m->tenantId, $key);
 		if (!ExpenseReportRules::canRead($m->manages(), $m->uid, $d)) {
 			throw ApiException::forbidden('Only the person and Team Admins read an expense report.');
 		}
-		$path = Fields::str(Fields::obj($d, 'document'), 'path');
+		$path = ExpenseReportRules::documentPath($d, $name);
 		$owner = $this->tree->ownerOf($m->tenantId);
-		$file = $path === null || $owner === null ? null : $this->folders->read($owner, $path);
-		if ($path === null || $file === null) {
-			throw ApiException::notFound('This expense report has no document yet; it is written when it is fixed.');
+		$file = $owner === null ? null : $this->folders->read($owner, $path);
+		if ($file === null) {
+			throw ApiException::notFound('This expense report has no document yet.');
 		}
-		return ['content' => $file->getContent(), 'name' => basename($path)];
+		return ['content' => $file->getContent(), 'name' => basename($path), 'type' => ExpenseReportRules::documentType($path)];
 	}
 
 	// ------------------------------------------------------------ helpers
+
+	/** 409 unless the report is fixed: documents come only to a settled one. */
+	private static function requireFixed(\stdClass $d): void {
+		if (!ExpenseReportRules::is($d, ExpenseReportRules::FIXED)) {
+			throw ApiException::conflict('Only a settled expense report takes documents.');
+		}
+	}
+
+	private function trash(string $owner, string $path): void {
+		try {
+			$this->folders->trash($owner, $path);
+		} catch (\Throwable) {
+			// A file left behind is harmless.
+		}
+	}
 
 	/** The person of the body: an account of the team. */
 	private function person(Membership $m, mixed $uid): string {
@@ -246,6 +244,16 @@ final class ExpenseReportService {
 			throw ApiException::invalid(Message::of('“{uid}” is not an account of the team.', ['uid' => $uid]));
 		}
 		return $uid;
+	}
+
+	/** The live report or 404. @return array{0:Record,1:\stdClass} */
+	private function report(int $tid, string $key): array {
+		$rec = $this->records->findOne($tid, ExpenseReportRules::KIND, $key);
+		$d = $rec === null || $rec->isTombstone() ? null : InvoiceRules::decode($rec->getData());
+		if ($rec === null || $d === null) {
+			throw ApiException::notFound('This expense report does not exist.');
+		}
+		return [$rec, $d];
 	}
 
 	/** The live expense reports by key. @return array<string,?\stdClass> */
@@ -278,13 +286,6 @@ final class ExpenseReportService {
 		$d->report = $report;
 		$v = RecordValidator::validate(ReceiptRules::KIND, $key, $d);
 		return ['kind' => ReceiptRules::KIND, 'key' => $key, 'version' => $cur?->getVersion() ?? 0, 'json' => $v['json'], 'accounts' => $v['accounts']];
-	}
-
-	/** A new report's data before the server's fields. */
-	private static function fresh(string $person): \stdClass {
-		$d = new \stdClass();
-		$d->person = $person;
-		return $d;
 	}
 
 	/** @return array{seq:int,prev_hash:string,hash:string} */

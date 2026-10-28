@@ -7,7 +7,7 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Tests\Unit;
 
 use OCA\TimeSister\Service\ApiException;
-use OCA\TimeSister\Service\ExpenseReportRules;
+use OCA\TimeSister\Service\ExpenseTable;
 use OCA\TimeSister\Service\ReceiptLineRules;
 use OCA\TimeSister\Service\ReceiptRecognition;
 use OCA\TimeSister\Service\ReceiptRules;
@@ -111,9 +111,13 @@ class ReceiptRecognitionTest extends TestCase {
 		$this->assertSame('422 Position 2: The receipt rc-1 is on the invoice twice.', $check([$line(105.35, null, ['vat_mode' => 'pass_through']), $line(50, 2.6)]));
 	}
 
+	/** 0.30.0: in the expense table each own rate with VAT counts, summed per rate. */
 	public function testInTheExpenseReport(): void {
-		$s = ExpenseReportRules::sums([self::receipt(['vat' => 5.35, 'gross' => 105.35]), self::receipt(['vat_lines' => null, 'vat_rate' => 8.1, 'vat' => 8.1, 'gross' => 108.1])], 'CHF');
-		$this->assertSame([['rate' => 2.6, 'net' => 50.0, 'vat' => 1.3], ['rate' => 8.1, 'net' => 150.0, 'vat' => 12.15]], $s['vat_lines']);
-		$this->assertSame([200.0, 213.45], [$s['net'], $s['gross']]);
+		$lines = [ExpenseTable::line('rc-1', self::receipt(), 'CHF'), ExpenseTable::line('rc-2', self::receipt(['vat_lines' => null, 'vat_rate' => 8.1, 'vat' => 8.1, 'gross' => 108.1]), 'CHF')];
+		$this->assertSame([['rate' => 2.6, 'vat' => 1.3], ['rate' => 8.1, 'vat' => 4.05]], $lines[0]['vat_amounts']);
+		$this->assertSame([['rate' => 2.6, 'net' => 50.0, 'vat' => 1.3], ['rate' => 8.1, 'net' => 50.0, 'vat' => 4.05]], $lines[0]['vat_lines']);
+		$s = ExpenseTable::sums($lines, 'CHF');
+		$this->assertSame([['rate' => 8.1, 'vat' => 12.15], ['rate' => 2.6, 'vat' => 1.3]], $s['vat']);
+		$this->assertSame([213.45, 213.45], [$s['total'], $s['payout']]);
 	}
 }
