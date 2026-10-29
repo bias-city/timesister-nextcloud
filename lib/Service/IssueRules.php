@@ -29,14 +29,14 @@ final class IssueRules {
 	/** The draft's fitness for issuing: a draft without number, with a budget and something to bill. */
 	public static function requireIssuable(\stdClass $d): void {
 		if (($d->status ?? null) !== InvoiceRules::DRAFT) {
-			throw ApiException::invalid('Only a draft can be issued.');
+			throw ApiException::invalid('Only a draft can be issued.')->code(ErrorCode::INVOICE_NOT_DRAFT);
 		}
 		if (($d->number ?? null) !== null) {
 			throw ApiException::invalid('The draft already has a number.');
 		}
 		$budget = $d->budget ?? null;
 		if (!is_string($budget) || trim($budget) === '') {
-			throw ApiException::invalid('“budget” is required: every invoice belongs to a budget.');
+			throw ApiException::invalid('“budget” is required: every invoice belongs to a budget.')->code(ErrorCode::INVOICE_NO_BUDGET)->field('budget');
 		}
 		if (self::positionsOf($d) === [] && self::bookingsOf($d) === []) {
 			throw ApiException::invalid('The draft has neither positions nor bookings.');

@@ -44,13 +44,13 @@ final class HandoverRules {
 	 */
 	public static function requireMode(?array $mode): string {
 		return InvoicingModeRules::externalSystem($mode)
-			?? throw ApiException::conflict('Handing over needs the team setting invoicing_mode external.');
+			?? throw ApiException::conflict('Handing over needs the team setting invoicing_mode external.')->code(ErrorCode::HANDOVER_MODE_NOT_EXTERNAL);
 	}
 
 	/** The body's system must be the team's (409). */
 	public static function requireSystem(string $own, string $given): void {
 		if ($own !== $given) {
-			throw ApiException::conflict(Message::of('This team hands its invoices over to {system}, not to {given}.', ['system' => $own, 'given' => $given]));
+			throw ApiException::conflict(Message::of('This team hands its invoices over to {system}, not to {given}.', ['system' => $own, 'given' => $given]))->code(ErrorCode::HANDOVER_OTHER_SYSTEM);
 		}
 	}
 
@@ -62,7 +62,7 @@ final class HandoverRules {
 	public static function refuseIssue(?array $mode): void {
 		$system = InvoicingModeRules::externalSystem($mode);
 		if ($system !== null) {
-			throw ApiException::conflict(Message::of('This team hands its invoices over to {system}; TimeSister does not issue them.', ['system' => $system]));
+			throw ApiException::conflict(Message::of('This team hands its invoices over to {system}; TimeSister does not issue them.', ['system' => $system]))->code(ErrorCode::INVOICE_ISSUE_EXTERNAL);
 		}
 	}
 
@@ -79,7 +79,7 @@ final class HandoverRules {
 	public static function refuseHandedOver(?\stdClass $d): void {
 		$system = self::handedOverTo($d);
 		if ($system !== null) {
-			throw ApiException::conflict(Message::of('This invoice was handed over to {system}; revoke the hand-over first.', ['system' => $system]));
+			throw ApiException::conflict(Message::of('This invoice was handed over to {system}; revoke the hand-over first.', ['system' => $system]))->code(ErrorCode::INVOICE_HANDED_OVER);
 		}
 	}
 
@@ -156,7 +156,7 @@ final class HandoverRules {
 	 */
 	public static function requireArchive(?array $mode): void {
 		if (!InvoicingModeRules::archivesPdf($mode)) {
-			throw ApiException::conflict('This team does not store the accounting system’s PDFs (invoicing_mode.archive_pdf).');
+			throw ApiException::conflict('This team does not store the accounting system’s PDFs (invoicing_mode.archive_pdf).')->code(ErrorCode::HANDOVER_NO_ARCHIVE);
 		}
 	}
 
@@ -171,7 +171,7 @@ final class HandoverRules {
 			return null;
 		}
 		if (($doc->sha256 ?? null) !== $sha256) {
-			throw ApiException::conflict('The PDF of this invoice is already stored; it stays as it is.');
+			throw ApiException::conflict('The PDF of this invoice is already stored; it stays as it is.')->code(ErrorCode::HANDOVER_PDF_EXISTS);
 		}
 		return $doc;
 	}

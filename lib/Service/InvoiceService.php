@@ -30,7 +30,7 @@ final class InvoiceService {
 	 */
 	public function nextNumber(Membership $m, mixed $year, bool $take): array {
 		if (!$m->manages()) {
-			throw ApiException::forbidden('Only Team Admins assign invoice numbers.');
+			throw ApiException::forbidden('Only Team Admins assign invoice numbers.')->code(ErrorCode::INVOICE_NUMBER_ADMIN_ONLY);
 		}
 		$now = $this->time->getTime();
 		$year = InvoiceNumbering::year($year, (int)gmdate('Y', $now));

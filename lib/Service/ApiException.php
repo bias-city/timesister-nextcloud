@@ -9,11 +9,13 @@ namespace OCA\TimeSister\Service;
 use OCP\IL10N;
 
 /**
- * An error that goes out as an OCS answer with `data = {error, message, …}`.
+ * An error that goes out as an OCS answer with `data = {error, message, code?, field?, …}`.
  *
  * The message is an English source text ({@see Message}); `toData()`
  * translates it into the account's language. Pure (without Nextcloud),
  * so the rules are testable without a server. `getMessage()` is English.
+ * `code` names the violated rule ({@see ErrorCode}), `field` the request
+ * field it concerns (0.31.0); clients decide on them, never on the wording.
  */
 final class ApiException extends \RuntimeException {
 	public const NO_TEAM = 'no_team';
@@ -28,11 +30,17 @@ final class ApiException extends \RuntimeException {
 	public const ISSUED = 'issued';
 	/** 409: a recurring receipt of this rule and period exists already (0.22.0). */
 	public const DUPLICATE = 'duplicate';
+	/** 410: the route was removed; the client is older than the server (0.31.0). */
+	public const GONE = 'gone';
 
 	private Message $text;
+	/** The violated rule, one of {@see ErrorCode}. */
+	private ?string $rule = null;
+	/** The request field the error concerns. */
+	private ?string $ruleField = null;
 
 	/**
-	 * @param 400|403|404|409|413|422 $status
+	 * @param 400|403|404|409|410|413|422 $status
 	 * @param array<string,mixed> $extra
 	 */
 	public function __construct(
@@ -77,12 +85,17 @@ final class ApiException extends \RuntimeException {
 
 	/** An issued invoice refuses every record write (0.18.0). */
 	public static function issued(): self {
-		return new self(409, self::ISSUED, Message::of('An issued invoice does not change; reverse it.'));
+		return (new self(409, self::ISSUED, Message::of('An issued invoice does not change; reverse it.')))->code(ErrorCode::INVOICE_ISSUED);
 	}
 
 	/** 409 `duplicate`. */
 	public static function duplicate(Message|string $message): self {
 		return new self(409, self::DUPLICATE, $message);
+	}
+
+	/** 410 `gone`: a route removed in an earlier release; the client is older than the server. */
+	public static function gone(): self {
+		return (new self(410, self::GONE, Message::of('This route was removed; update the app.')))->code(ErrorCode::GONE);
 	}
 
 	public static function badRequest(Message|string $message): self {
@@ -96,19 +109,19 @@ final class ApiException extends \RuntimeException {
 	/** A missing field, e.g. “data” is missing. */
 	public static function missing(string $field, bool $badRequest = false): self {
 		$m = Message::of('“{field}” is missing.', ['field' => $field]);
-		return $badRequest ? self::badRequest($m) : self::invalid($m);
+		return ($badRequest ? self::badRequest($m) : self::invalid($m))->field($field);
 	}
 
 	/** A field with an invalid value. */
 	public static function invalidField(string $field, bool $badRequest = false): self {
 		$m = Message::of('“{field}” is invalid.', ['field' => $field]);
-		return $badRequest ? self::badRequest($m) : self::invalid($m);
+		return ($badRequest ? self::badRequest($m) : self::invalid($m))->field($field);
 	}
 
 	/** A field that must be a boolean. */
 	public static function notBool(string $field, bool $badRequest = false): self {
 		$m = Message::of('“{field}” must be true or false.', ['field' => $field]);
-		return $badRequest ? self::badRequest($m) : self::invalid($m);
+		return ($badRequest ? self::badRequest($m) : self::invalid($m))->field($field);
 	}
 
 	/** `uid` in the body of a call that only applies to the calling account. */
@@ -116,13 +129,40 @@ final class ApiException extends \RuntimeException {
 		return self::badRequest(Message::of('This only applies to the calling account; “uid” does not belong in the body.'));
 	}
 
-	/** @return 400|403|404|409|413|422 */
+	/** Names the violated rule; returns the same exception, so a factory call chains `->code(ErrorCode::…)`. */
+	public function code(string $code): self {
+		$this->rule = $code;
+		return $this;
+	}
+
+	/** Names the request field the error concerns. */
+	public function field(string $field): self {
+		$this->ruleField = $field;
+		return $this;
+	}
+
+	/** Code and field of another error, for wrappers that reword the message. */
+	public function like(ApiException $e): self {
+		$this->rule = $e->rule;
+		$this->ruleField = $e->ruleField;
+		return $this;
+	}
+
+	/** @return 400|403|404|409|410|413|422 */
 	public function getStatus(): int {
 		return $this->status;
 	}
 
 	public function getErrorCode(): string {
 		return $this->errorCode;
+	}
+
+	public function getRuleCode(): ?string {
+		return $this->rule;
+	}
+
+	public function getField(): ?string {
+		return $this->ruleField;
 	}
 
 	public function getText(): Message {
@@ -134,8 +174,11 @@ final class ApiException extends \RuntimeException {
 		return $this->extra;
 	}
 
-	/** @return array<string,mixed> `message` in the language of `$l`, English without it */
+	/** @return array<string,mixed> `error`, `message` (in the language of `$l`, English without it), `code` and `field` when set, then the extra */
 	public function toData(?IL10N $l = null): array {
-		return ['error' => $this->errorCode, 'message' => $this->text->text($l)] + $this->extra;
+		return ['error' => $this->errorCode, 'message' => $this->text->text($l)]
+			+ ($this->rule === null ? [] : ['code' => $this->rule])
+			+ ($this->ruleField === null ? [] : ['field' => $this->ruleField])
+			+ $this->extra;
 	}
 }

@@ -76,7 +76,7 @@ class TeamFromZipService {
 	/** The import's message, with the note that the team is gone again; anything else without details. */
 	private function failure(\Throwable $e): ApiException {
 		if ($e instanceof ApiException) {
-			return new ApiException($e->getStatus(), $e->getErrorCode(), Message::of('The import failed and the new team was removed again: {message}', ['message' => $e->getText()]), $e->getExtra());
+			return (new ApiException($e->getStatus(), $e->getErrorCode(), Message::of('The import failed and the new team was removed again: {message}', ['message' => $e->getText()]), $e->getExtra()))->like($e);
 		}
 		$this->logger->error('TimeSister: import into a new team failed', ['app' => 'timesister', 'exception' => $e]);
 		return ApiException::conflict('The import failed and the new team was removed again.');

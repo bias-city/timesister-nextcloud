@@ -278,7 +278,7 @@ final class RecordService {
 
 	/** An error of the batch's write number `$i + 1`. */
 	private static function inWrite(ApiException $e, int $i): ApiException {
-		return new ApiException($e->getStatus(), $e->getErrorCode(), Message::of('Write {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]), ['index' => $i]);
+		return (new ApiException($e->getStatus(), $e->getErrorCode(), Message::of('Write {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]), ['index' => $i]))->like($e);
 	}
 
 	/** @return list<array<string,mixed>> newest first, at most 100 */
@@ -701,7 +701,7 @@ final class RecordService {
 					'key' => $p['op']['key'],
 					'current' => $p['current'],
 				], $problems)],
-			);
+			)->code(ErrorCode::VERSION_CONFLICT);
 		}
 		$p = $problems[0];
 		if ($p['outcome'] === VersionCheck::NOT_FOUND) {
@@ -713,6 +713,6 @@ final class RecordService {
 		return ApiException::conflict(
 			Message::of('The record was changed in the meantime by {user}.', ['user' => (string)$p['current']['modified_by']]),
 			['current' => $p['current']],
-		);
+		)->code(ErrorCode::VERSION_CONFLICT);
 	}
 }

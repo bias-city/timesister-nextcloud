@@ -44,7 +44,7 @@ final class ExpenseReportService {
 	public function fix(Membership $m, \stdClass $body): array {
 		$person = $this->person($m, $body->person ?? null);
 		if (!$m->manages() && $person !== $m->uid) {
-			throw ApiException::forbidden('Only the person and Team Admins settle expenses.');
+			throw ApiException::forbidden('Only the person and Team Admins settle expenses.')->code(ErrorCode::SETTLE_OWNER_ONLY);
 		}
 		[$from, $to] = ExpenseReportRules::period($body->from ?? null, $body->to ?? null);
 		$now = $this->time->getTime();
@@ -97,7 +97,7 @@ final class ExpenseReportService {
 		$number = InvoiceNumbering::fill(InvoiceNumbering::patternOf($settings, $f), $no, $year, '', null, InvoiceNumbering::EXPENSE_DEFAULT);
 		foreach ($reports as $d) {
 			if (($d?->number ?? null) === $number) {
-				throw ApiException::conflict(Message::of('The number {number} is already taken; check the expense number pattern.', ['number' => $number]));
+				throw ApiException::conflict(Message::of('The number {number} is already taken; check the expense number pattern.', ['number' => $number]))->code(ErrorCode::REPORT_NUMBER_TAKEN);
 			}
 		}
 		return $number;
@@ -108,7 +108,7 @@ final class ExpenseReportService {
 	/** `POST /expense-reports/{key}/reverse` `{ reason }` – Team Admins, only a fixed report. @return array<string,mixed> the record plus `ledger` */
 	public function reverse(Membership $m, string $key, \stdClass $body): array {
 		if (!$m->manages()) {
-			throw ApiException::forbidden('Only Team Admins reverse expense reports.');
+			throw ApiException::forbidden('Only Team Admins reverse expense reports.')->code(ErrorCode::REPORT_REVERSE_ADMIN_ONLY);
 		}
 		$reason = IssueRules::shortText($body->reason ?? null, 'reason');
 		$today = $this->today();
@@ -119,10 +119,10 @@ final class ExpenseReportService {
 			$this->tenants->bumpRevision($tid, 0);
 			[$rec, $d] = $this->report($tid, $key);
 			if (ExpenseReportRules::is($d, ExpenseReportRules::PAID)) {
-				throw ApiException::conflict('A paid expense report is not reversed.');
+				throw ApiException::conflict('A paid expense report is not reversed.')->code(ErrorCode::REPORT_NOT_FIXED);
 			}
 			if (!ExpenseReportRules::is($d, ExpenseReportRules::FIXED)) {
-				throw ApiException::conflict('Only a fixed expense report is reversed.');
+				throw ApiException::conflict('Only a fixed expense report is reversed.')->code(ErrorCode::REPORT_NOT_FIXED);
 			}
 			$d->status = ExpenseReportRules::REVERSED;
 			$d->reversed_on = $today;
@@ -148,24 +148,37 @@ final class ExpenseReportService {
 	// ---------------------------------------------------------- documents
 
 	/**
-	 * `POST /expense-reports/{key}/documents` `{ name, content }` (0.30.0):
-	 * a file the app rendered – the table as PDF and CSV, the receipts as
-	 * PDF – stored beside the person's receipts, its hash in the ledger
-	 * (`expense_document`) and in `documents`. The same file again changes
-	 * nothing. Answer: the record.
+	 * `POST /expense-reports/{key}/documents` `{ name, content }` (0.30.0,
+	 * Base64): a file the app rendered – the table as PDF and CSV, the
+	 * receipts as PDF – stored beside the person's receipts, its hash in
+	 * the ledger (`expense_document`) and in `documents`. The same file
+	 * again changes nothing. Answer: the record.
 	 *
 	 * @return array<string,mixed>
 	 */
 	public function storeDocument(Membership $m, string $key, \stdClass $body): array {
+		return $this->store($m, $key, $body->name ?? null, static fn (string $name): string => ExpenseReportRules::documentContent($name, $body->content ?? null));
+	}
+
+	/** The raw form (0.31.0): the body is the file, its name in `?name=`. @return array<string,mixed> */
+	public function storeRaw(Membership $m, string $key, mixed $name, string $bytes): array {
+		return $this->store($m, $key, $name, static fn (string $name): string => ExpenseReportRules::documentBytes($name, $bytes));
+	}
+
+	/**
+	 * @param callable(string):string $bytes the checked file for the checked name – after the rights, so 403/409 come first
+	 * @return array<string,mixed>
+	 */
+	private function store(Membership $m, string $key, mixed $rawName, callable $bytes): array {
 		RecordValidator::checkAddress(ExpenseReportRules::KIND, $key);
 		$tid = $m->tenantId;
 		[$rec, $d] = $this->report($tid, $key);
 		if (!ExpenseReportRules::canRead($m->manages(), $m->uid, $d)) {
-			throw ApiException::forbidden('Only the person and Team Admins store documents of an expense report.');
+			throw ApiException::forbidden('Only the person and Team Admins store documents of an expense report.')->code(ErrorCode::REPORT_OWNER_ONLY);
 		}
 		self::requireFixed($d);
-		$name = ExpenseReportRules::documentName($body->name ?? null);
-		$content = ExpenseReportRules::documentContent($name, $body->content ?? null);
+		$name = ExpenseReportRules::documentName($rawName);
+		$content = $bytes($name);
 		$sha = hash('sha256', $content);
 		if (ExpenseReportRules::documentAgain($d, $name, $sha) !== null) {
 			return $this->recordService->present($rec);
@@ -207,7 +220,7 @@ final class ExpenseReportService {
 		RecordValidator::checkAddress(ExpenseReportRules::KIND, $key);
 		[, $d] = $this->report($m->tenantId, $key);
 		if (!ExpenseReportRules::canRead($m->manages(), $m->uid, $d)) {
-			throw ApiException::forbidden('Only the person and Team Admins read an expense report.');
+			throw ApiException::forbidden('Only the person and Team Admins read an expense report.')->code(ErrorCode::REPORT_OWNER_ONLY);
 		}
 		$path = ExpenseReportRules::documentPath($d, $name);
 		$owner = $this->tree->ownerOf($m->tenantId);
@@ -223,7 +236,7 @@ final class ExpenseReportService {
 	/** 409 unless the report is fixed: documents come only to a settled one. */
 	private static function requireFixed(\stdClass $d): void {
 		if (!ExpenseReportRules::is($d, ExpenseReportRules::FIXED)) {
-			throw ApiException::conflict('Only a settled expense report takes documents.');
+			throw ApiException::conflict('Only a settled expense report takes documents.')->code(ErrorCode::REPORT_NOT_FIXED);
 		}
 	}
 
@@ -238,10 +251,10 @@ final class ExpenseReportService {
 	/** The person of the body: an account of the team. */
 	private function person(Membership $m, mixed $uid): string {
 		if (!is_string($uid) || $uid === '' || mb_strlen($uid) > ReceiptRules::UID_MAX) {
-			throw ApiException::invalid('“person” is required: the account’s user ID.');
+			throw ApiException::invalid('“person” is required: the account’s user ID.')->field('person');
 		}
 		if (!array_key_exists($uid, $this->team->members($m->tenantId))) {
-			throw ApiException::invalid(Message::of('“{uid}” is not an account of the team.', ['uid' => $uid]));
+			throw ApiException::invalid(Message::of('“{uid}” is not an account of the team.', ['uid' => $uid]))->code(ErrorCode::PERSON_NOT_MEMBER)->field('person');
 		}
 		return $uid;
 	}

@@ -168,9 +168,9 @@ class ExpenseRulesTest extends TestCase {
 		$this->assertSame("Nr.;Datum\r\n1;2026-10-02\r\n", ExpenseReportRules::documentContent('a.csv', base64_encode("Nr.;Datum\r\n1;2026-10-02\r\n")));
 		$this->assertSame('422 “content” is the file in Base64.', self::outcome(fn () => ExpenseReportRules::documentContent('a.pdf', '%PDF-*')));
 		$this->assertSame('422 “content” is the file in Base64.', self::outcome(fn () => ExpenseReportRules::documentContent('a.pdf', null)));
-		$this->assertSame('422 “content” does not fit its name (PDF or UTF-8 CSV, at most 64 MiB).', self::outcome(fn () => ExpenseReportRules::documentContent('a.pdf', base64_encode('hello'))));
-		$this->assertSame('422 “content” does not fit its name (PDF or UTF-8 CSV, at most 64 MiB).', self::outcome(fn () => ExpenseReportRules::documentContent('a.csv', base64_encode("\xFF\xFE"))));
-		$this->assertSame('413 A document may be at most 64 MiB.', self::outcome(fn () => ExpenseReportRules::documentContent('a.pdf', str_repeat('A', 4 * intdiv(ExpenseReportRules::DOCUMENT_MAX + 2, 3) + 2048))));
+		$this->assertSame('422 The file does not fit its name (PDF or UTF-8 CSV, at most 32 MiB).', self::outcome(fn () => ExpenseReportRules::documentContent('a.pdf', base64_encode('hello'))));
+		$this->assertSame('422 The file does not fit its name (PDF or UTF-8 CSV, at most 32 MiB).', self::outcome(fn () => ExpenseReportRules::documentContent('a.csv', base64_encode("\xFF\xFE"))));
+		$this->assertSame('413 A document may be at most 32 MiB.', self::outcome(fn () => ExpenseReportRules::documentContent('a.pdf', str_repeat('A', 4 * intdiv(ExpenseReportRules::DOCUMENT_MAX + 2, 3) + 2048))));
 
 		$report = (object)['documents' => [(object)['name' => 'Spesenabrechnung_1.pdf', 'path' => 'R/Spesenabrechnung_1.pdf', 'sha256' => 'aa', 'size' => 3],
 			(object)['name' => 'Spesenabrechnung_1.csv', 'path' => 'R/Spesenabrechnung_1.csv', 'sha256' => 'bb', 'size' => 2]]];

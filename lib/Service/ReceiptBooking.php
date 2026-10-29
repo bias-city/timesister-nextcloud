@@ -112,7 +112,7 @@ final class ReceiptBooking {
 			throw ApiException::invalid(Message::of('“billed” is the amount for the budget in its currency {currency}.', ['currency' => (string)$budget]));
 		}
 		if ($approved && !$b instanceof \stdClass) {
-			throw ApiException::invalid(Message::of('Enter the amount in {currency} for the budget.', ['currency' => (string)$budget]));
+			throw ApiException::invalid(Message::of('Enter the amount in {currency} for the budget.', ['currency' => (string)$budget]))->code(ErrorCode::BUDGET_CURRENCY_AMOUNT)->field('billed');
 		}
 	}
 
@@ -120,7 +120,7 @@ final class ReceiptBooking {
 	public static function requireApprovable(\stdClass $d, string $team, ?string $budget = null): void {
 		$own = strtoupper((string)($d->currency ?? $team));
 		if ($own !== $team && !(($d->booked ?? null) instanceof \stdClass)) {
-			throw ApiException::invalid(Message::of('Enter the amount in {currency} that was paid.', ['currency' => $team]));
+			throw ApiException::invalid(Message::of('Enter the amount in {currency} that was paid.', ['currency' => $team]))->code(ErrorCode::BOOKED_CURRENCY_AMOUNT)->field('booked');
 		}
 		self::requireBudgetCurrency($d, $team, $budget, true);
 	}

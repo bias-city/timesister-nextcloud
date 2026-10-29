@@ -60,16 +60,13 @@ class BaseControllerTest extends TestCase {
 		$this->assertGreaterThan(25, $checked);
 	}
 
-	/** Every read route is rate-limited per user; the heavy ones (ledger, verify, weeks, capacity) tighter. */
-	public function testEveryReadRouteHasUserRateLimit(): void {
+	/** Every route is rate-limited per user (0.30.1: writes too); the heavy ones (ledger, verify, weeks, capacity) tighter. */
+	public function testEveryRouteHasUserRateLimit(): void {
 		$checked = 0;
 		foreach (glob(__DIR__ . '/../../lib/Controller/*Controller.php') ?: [] as $file) {
 			$class = 'OCA\\TimeSister\\Controller\\' . basename($file, '.php');
 			foreach ((new \ReflectionClass($class))->getMethods() as $m) {
 				foreach ($m->getAttributes(ApiRoute::class) as $a) {
-					if (($a->getArguments()['verb'] ?? '') !== 'GET') {
-						continue;
-					}
 					$rl = $m->getAttributes(UserRateLimit::class);
 					$this->assertCount(1, $rl, "$class::{$m->getName()}");
 					$args = $rl[0]->getArguments();

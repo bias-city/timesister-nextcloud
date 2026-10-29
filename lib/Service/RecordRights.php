@@ -164,7 +164,7 @@ final class RecordRights {
 	/** The rights of a write: per record for billing and bookings, everything else Team Admins; exchange rates nobody (0.30.0). */
 	public function requireWrite(Membership $m, string $kind, string $key): void {
 		if ($kind === ExchangeRateRules::KIND) {
-			throw ApiException::forbidden('Exchange rates are written by the server only.');
+			throw ApiException::forbidden('Exchange rates are written by the server only.')->code(ErrorCode::EXCHANGE_RATE_SERVER_ONLY);
 		}
 		if ($kind === RecordValidator::BILLING) {
 			BillingRules::requirePerson($key);
@@ -190,7 +190,7 @@ final class RecordRights {
 		if ($kind === InvoiceRules::KIND) {
 			// A Lead's write is checked against the stored invoice: requireInvoiceWrite().
 			if (!$m->manages() && $this->ledProjects($m) === []) {
-				throw ApiException::forbidden('Only Team Admins and the project’s Leads write invoices.');
+				throw ApiException::forbidden('Only Team Admins and the project’s Leads write invoices.')->code(ErrorCode::INVOICE_LEAD_ONLY);
 			}
 			return;
 		}

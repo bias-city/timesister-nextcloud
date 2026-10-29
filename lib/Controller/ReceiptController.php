@@ -6,7 +6,9 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Controller;
 
+use OCA\TimeSister\Service\ApiException;
 use OCA\TimeSister\Service\ExpenseExportService;
+use OCA\TimeSister\Service\ExpenseReportRules;
 use OCA\TimeSister\Service\ExpenseReportService;
 use OCA\TimeSister\Service\Json;
 use OCA\TimeSister\Service\ReceiptRules;
@@ -30,8 +32,8 @@ use OCP\IRequest;
  */
 final class ReceiptController extends BaseController {
 	private const MAX_BODY = 4 * 1024;
-	/** A file of the app in Base64 (64 MB are 85.4 MB of Base64) and its name. */
-	private const MAX_DOCUMENT_BODY = 90 * 1024 * 1024;
+	/** The Base64 form of a document (0.30.0): 32 MiB of file are 44.8 MB of Base64, plus the name. */
+	private const MAX_DOCUMENT_BODY = 48 * 1024 * 1024;
 
 	public function __construct(
 		IRequest $request,
@@ -66,6 +68,7 @@ final class ReceiptController extends BaseController {
 
 	/** POST /receipts/{key}/approve. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/receipts/{key}/approve')]
+	#[UserRateLimit(limit: 60, period: 60)]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	public function approve(string $key): DataResponse {
@@ -74,6 +77,7 @@ final class ReceiptController extends BaseController {
 
 	/** POST /receipts/{key}/reject `{ reason }`. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/receipts/{key}/reject')]
+	#[UserRateLimit(limit: 60, period: 60)]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	public function reject(string $key): DataResponse {
@@ -82,6 +86,7 @@ final class ReceiptController extends BaseController {
 
 	/** POST /receipts/{key}/reopen – a Team Admin takes the approval back (0.27.0). */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/receipts/{key}/reopen')]
+	#[UserRateLimit(limit: 60, period: 60)]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	public function reopen(string $key): DataResponse {
@@ -97,17 +102,56 @@ final class ReceiptController extends BaseController {
 		return $this->run(fn () => $this->reports->fix($this->tenants->current(), $this->body(self::MAX_BODY)));
 	}
 
-	/** POST /expense-reports/{key}/documents `{ name, content }` – a file of the app, Base64, at most 64 MB (0.30.0). */
+	/**
+	 * POST /expense-reports/{key}/documents – a file of the app, at most 32 MiB:
+	 * raw as the body (`application/pdf`, `text/csv`, `application/octet-stream`)
+	 * with `?name=` (0.31.0), or `{ name, content }` with `content` Base64
+	 * (0.30.0, older Macs).
+	 */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-reports/{key}/documents')]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
-	#[UserRateLimit(limit: 60, period: 60)]
+	#[UserRateLimit(limit: 10, period: 60)]
 	public function storeDocument(string $key): DataResponse {
-		return $this->run(fn () => $this->reports->storeDocument($this->tenants->current(), $key, $this->body(self::MAX_DOCUMENT_BODY)));
+		return $this->run(function () use ($key) {
+			$type = strtolower(trim(explode(';', $this->request->getHeader('Content-Type'))[0]));
+			if ($type === '' || $type === 'application/json') {
+				return $this->reports->storeDocument($this->tenants->current(), $key, $this->body(self::MAX_DOCUMENT_BODY));
+			}
+			return $this->reports->storeRaw($this->tenants->current(), $key, $this->request->getParam('name'), Json::readInput(ExpenseReportRules::DOCUMENT_MAX));
+		});
+	}
+
+	/** POST /expense-reports/ready – removed in 0.30.0; 410 tells an older app so (0.31.0). */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-reports/ready')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function readyGone(): DataResponse {
+		return $this->run(static fn () => throw ApiException::gone());
+	}
+
+	/** POST /expense-reports/{key}/paid – removed in 0.30.0; 410. */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-reports/{key}/paid')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function paidGone(string $key): DataResponse {
+		return $this->run(static fn () => throw ApiException::gone());
+	}
+
+	/** POST /expense-rules/{key}/approve – removed in 0.30.0; 410. */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-rules/{key}/approve')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function ruleApproveGone(string $key): DataResponse {
+		return $this->run(static fn () => throw ApiException::gone());
 	}
 
 	/** POST /expense-reports/{key}/reverse `{ reason }` – only a fixed report. */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-reports/{key}/reverse')]
+	#[UserRateLimit(limit: 60, period: 60)]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	public function reverse(string $key): DataResponse {

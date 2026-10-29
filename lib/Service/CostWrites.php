@@ -85,7 +85,7 @@ final class CostWrites {
 			}
 			ReceiptRules::requireWrite($m->manages(), $m->uid, $led, $before, null, $settled);
 			if (($before->status ?? null) !== ReceiptRules::OPEN && ($before->status ?? null) !== ReceiptRules::REJECTED) {
-				throw ApiException::conflict('A receipt is deleted only while open or rejected.');
+				throw ApiException::conflict('A receipt is deleted only while open or rejected.')->code(ErrorCode::RECEIPT_APPROVED_NOT_DELETED);
 			}
 			$path = $before->file->path ?? null;
 			$owner = $this->team->backupOwner($this->team->tenant($m->tenantId));
@@ -157,7 +157,7 @@ final class CostWrites {
 			}
 		}
 		if ($taken !== null && $taken !== $key) {
-			throw ApiException::duplicate(Message::of('The receipt {key} is already the one of this rule for {period}.', ['key' => $taken, 'period' => $period]));
+			throw ApiException::duplicate(Message::of('The receipt {key} is already the one of this rule for {period}.', ['key' => $taken, 'period' => $period]))->code(ErrorCode::RULE_PERIOD_DUPLICATE);
 		}
 		$batch->recurring[$id] = $key;
 	}

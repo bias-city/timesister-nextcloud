@@ -25,7 +25,7 @@ final class ExpenseExportService {
 	/** @return array{content:string,name:string} */
 	public function export(Membership $m, mixed $from, mixed $to, mixed $format): array {
 		if (!$m->manages()) {
-			throw ApiException::forbidden('Only Team Admins export expenses.');
+			throw ApiException::forbidden('Only Team Admins export expenses.')->code(ErrorCode::EXPENSE_EXPORT_ADMIN_ONLY);
 		}
 		$format = ExpenseExportRules::kind($format);
 		$from = ExportRules::day($from, 'from');

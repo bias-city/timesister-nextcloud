@@ -42,7 +42,7 @@ final class HandoverService {
 
 	private function requireAdmin(Membership $m): void {
 		if (!$m->manages()) {
-			throw ApiException::forbidden('Only Team Admins hand invoices over to an accounting system.');
+			throw ApiException::forbidden('Only Team Admins hand invoices over to an accounting system.')->code(ErrorCode::HANDOVER_ADMIN_ONLY);
 		}
 	}
 
@@ -68,7 +68,7 @@ final class HandoverService {
 		[, $stored] = $this->drafts->invoiceRecord($tid, $key);
 		HandoverRules::refuseHandedOver($stored);
 		if (($stored->status ?? null) !== InvoiceRules::DRAFT || ($stored->number ?? null) !== null || $this->invoices->findByKey($tid, $key) !== null) {
-			throw ApiException::conflict('Only a draft without a number can be handed over.');
+			throw ApiException::conflict('Only a draft without a number can be handed over.')->code(ErrorCode::INVOICE_NOT_DRAFT);
 		}
 		$h = $this->drafts->head($tid, $key);
 		$d = $h['d'];
@@ -119,7 +119,7 @@ final class HandoverService {
 		$tid = $m->tenantId;
 		[$cur, $d] = $this->drafts->invoiceRecord($tid, $key);
 		if (HandoverRules::handedOverTo($d) === null) {
-			throw ApiException::conflict('Only a handed-over invoice can be revoked.');
+			throw ApiException::conflict('Only a handed-over invoice can be revoked.')->code(ErrorCode::INVOICE_NOT_HANDED_OVER);
 		}
 		$external = $d->{ExportRules::EXTERNAL_FIELD} ?? null;
 		$external = $external instanceof \stdClass ? $external : new \stdClass();
@@ -250,8 +250,8 @@ final class HandoverService {
 		$external = $d->{ExportRules::EXTERNAL_FIELD} ?? null;
 		if (HandoverRules::handedOverTo($d) === null || !$external instanceof \stdClass) {
 			throw $forDocument
-				? ApiException::conflict('Only a handed-over invoice gets the accounting system’s PDF.')
-				: ApiException::conflict('Only a handed-over invoice can be noted as cancelled in the accounting system.');
+				? ApiException::conflict('Only a handed-over invoice gets the accounting system’s PDF.')->code(ErrorCode::INVOICE_NOT_HANDED_OVER)
+				: ApiException::conflict('Only a handed-over invoice can be noted as cancelled in the accounting system.')->code(ErrorCode::INVOICE_NOT_HANDED_OVER);
 		}
 		return $external;
 	}

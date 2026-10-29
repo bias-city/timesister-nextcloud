@@ -66,7 +66,7 @@ final class IssueService {
 
 	public function requireAdmin(Membership $m): void {
 		if (!$m->manages()) {
-			throw ApiException::forbidden('Only Team Admins issue, reverse and settle invoices.');
+			throw ApiException::forbidden('Only Team Admins issue, reverse and settle invoices.')->code(ErrorCode::INVOICE_ISSUE_ADMIN_ONLY);
 		}
 	}
 
@@ -220,7 +220,7 @@ final class IssueService {
 		$no = $this->counters->takeWithin($tenantId, InvoiceNumbering::counter($n['per_year'], $year), $n['start'], $now);
 		$number = InvoiceNumbering::fill(InvoiceNumbering::patternOf($settings), $no, $year, $project, $customer);
 		if ($this->invoices->findByNumber($tenantId, $number) !== null) {
-			throw ApiException::conflict(Message::of('The number {number} is already taken; check the invoice number pattern.', ['number' => $number]));
+			throw ApiException::conflict(Message::of('The number {number} is already taken; check the invoice number pattern.', ['number' => $number]))->code(ErrorCode::INVOICE_NUMBER_TAKEN);
 		}
 		return [$number, $no];
 	}
@@ -356,7 +356,7 @@ final class IssueService {
 			throw ApiException::invalid('Only an issued or paid invoice can be reversed or credited.');
 		}
 		if ($orig->getReversedBy() !== null) {
-			throw ApiException::conflict('This invoice is already reversed.');
+			throw ApiException::conflict('This invoice is already reversed.')->code(ErrorCode::INVOICE_ALREADY_REVERSED);
 		}
 		$settings = $this->live($tid, 'setting', 'settings');
 		$issuer = InvoiceRules::decode($orig->getIssuerJson()) ?? new \stdClass();
@@ -625,7 +625,7 @@ final class IssueService {
 		if (!$m->manages()) {
 			$project = InvoiceRules::projectOf($r?->getData());
 			if ($project === null || !isset($this->rights->ledProjects($m)[$project])) {
-				throw ApiException::forbidden('Only Team Admins and the project’s Leads read the fixed invoice.');
+				throw ApiException::forbidden('Only Team Admins and the project’s Leads read the fixed invoice.')->code(ErrorCode::INVOICE_READ_LEAD_ONLY);
 			}
 		}
 		if ($r === null || $r->isTombstone()) {

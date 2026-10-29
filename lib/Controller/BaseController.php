@@ -25,7 +25,7 @@ use OCP\IRequest;
 abstract class BaseController extends OCSController {
 	/** A record is at most 256 KB; the body may be somewhat larger. */
 	public const MAX_RECORD_BODY = 1024 * 1024;
-	public const MAX_BATCH_BODY = 50 * 1024 * 1024;
+	public const MAX_BATCH_BODY = 16 * 1024 * 1024;
 	/** `#[BruteForceProtection(action: …)]` of every write route. */
 	public const BRUTE_FORCE_ACTION = 'timesister';
 
