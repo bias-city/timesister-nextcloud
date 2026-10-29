@@ -152,6 +152,21 @@ final class WebhookRules {
 	// ----------------------------------------------------------- delivery
 
 	/** The event a ledger action fires, or null. */
+	/**
+	 * The events of one entry: its action's event, and `document` as well
+	 * when an issue entry of 0.32.0 carries the document's hash.
+	 *
+	 * @return list<string>
+	 */
+	public static function eventsOf(string $action, ?string $payload): array {
+		$event = self::eventOf($action);
+		$out = $event === null ? [] : [$event];
+		if (in_array($action, DocumentRules::ISSUE_ACTIONS, true) && is_string($payload) && str_contains($payload, '"document":{')) {
+			$out[] = 'document';
+		}
+		return $out;
+	}
+
 	public static function eventOf(string $action): ?string {
 		return self::EVENT_OF[$action] ?? null;
 	}

@@ -84,6 +84,10 @@ final class RecordValidator {
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, InvoiceNumbering::EXPENSE_FIELD)) {
 			InvoiceNumbering::validate($data->{InvoiceNumbering::EXPENSE_FIELD}, InvoiceNumbering::EXPENSE_FIELD);
 		}
+		// 0.32.0: the quote's number, a pattern like the invoice's.
+		if ($kind === 'setting' && $key === 'settings' && property_exists($data, QuoteRules::NUMBER_FIELD)) {
+			InvoiceNumbering::validate($data->{QuoteRules::NUMBER_FIELD}, QuoteRules::NUMBER_FIELD);
+		}
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, IssuerRules::FIELD)) {
 			IssuerRules::validate($data->{IssuerRules::FIELD});
 		}

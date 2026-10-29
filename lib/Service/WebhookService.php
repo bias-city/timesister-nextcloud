@@ -40,13 +40,18 @@ final class WebhookService {
 	/** After a ledger entry: one row per hook that lists the entry's event. Logs instead of throwing. */
 	public function enqueue(int $tenantId, InvLedger $entry, int $now): void {
 		try {
-			$event = WebhookRules::eventOf($entry->getAction());
-			if ($event === null) {
-				return;
-			}
+			$events = WebhookRules::eventsOf($entry->getAction(), $entry->getPayload());
 			$t = $this->tenants->find($tenantId);
-			$hooks = $t === null ? [] : array_values(array_filter(WebhookRules::hooks($t->getWebhooksJson()), static fn (array $h): bool => in_array($event, $h['events'], true)));
-			if ($hooks === [] || $t === null) {
+			// One queue row per hook and event (0.32.0: the close fires `issued` and `document` for one entry).
+			$pairs = [];
+			foreach ($t === null ? [] : WebhookRules::hooks($t->getWebhooksJson()) as $h) {
+				foreach ($events as $event) {
+					if (in_array($event, $h['events'], true)) {
+						$pairs[] = [$h, $event];
+					}
+				}
+			}
+			if ($pairs === [] || $t === null) {
 				return;
 			}
 			$row = $this->invoices->findById($tenantId, $entry->getInvoiceId());
@@ -59,8 +64,8 @@ final class WebhookService {
 				'gross' => (float)($row?->getGross() ?? '0'), 'currency' => $row?->getCurrency() ?? (is_string($p['currency'] ?? null) ? $p['currency'] : ''),
 				'total' => $row === null ? 0.0 : InvoiceFixed::sumsOf($row)->total,
 			];
-			$body = WebhookRules::body($t->getSlug(), $event, $entry->getAction(), $entry->getAt(), $invoice, $entry->getSeq(), $entry->getHash());
-			foreach ($hooks as $h) {
+			foreach ($pairs as [$h, $event]) {
+				$body = WebhookRules::body($t->getSlug(), $event, $entry->getAction(), $entry->getAt(), $invoice, $entry->getSeq(), $entry->getHash());
 				$q = new WebhookQueue();
 				$q->setTenantId($tenantId);
 				$q->setLedgerSeq($entry->getSeq());

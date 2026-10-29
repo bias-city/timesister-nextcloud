@@ -7,25 +7,27 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Service;
 
 /**
- * Invoice documents (0.19.0), the pure part: the team setting `documents`
- * (since 0.22.0 the root of the document tree and the chain mail; the
- * paths below it come from DocumentTree), the chain line on every page,
- * the watermark and the labels of the document in German and English.
- * The services (DocumentService, DocumentFolder, InvoicePdf) do the
- * reading, the files and the PDF.
+ * Invoice documents, the pure part: the team setting `documents` (since
+ * 0.22.0 the root of the document tree and the chain mail; the paths below
+ * it come from DocumentTree), the document language, and since 0.32.0 the
+ * checks of the app's uploads – PDF and XML magic, size, the search for
+ * number and chain line – and which files a chain verification re-hashes.
+ * The server renders nothing (one renderer, the Mac app).
  */
 final class DocumentRules {
 	public const FIELD = 'documents';
 	public const PATH_MAX = 255;
 	public const MAIL_MAX = 254;
-	public const MAX_TRIES = 10;
-	/** Ledger action of a stored document. */
+	/** Ledger action of a file that arrives after the issue's entry (the XML, older chains). */
 	public const ACTION = 'document';
 	public const KIND_PDF = 'pdf';
 	public const KIND_XML = 'xml';
-	/** Ledger `kind` of the stored files (0.20.0): the PDF/A-3 with the XML inside, the XRechnung file. */
-	public const KIND_ZUGFERD = 'zugferd';
+	/** Ledger `kind` of the XRechnung file (0.20.0). */
 	public const KIND_XRECHNUNG = 'xrechnung';
+	/** An upload is at most 20 MB, as the quote documents and the accounting system's PDF. */
+	public const FILE_MAX = 20 * 1024 * 1024;
+	/** The ledger actions whose payload carries the issue's own document (0.32.0). */
+	public const ISSUE_ACTIONS = [LedgerRules::ISSUED, LedgerRules::REVERSAL, LedgerRules::CREDIT];
 	public const DE = 'de';
 	public const EN = 'en';
 	/** The settings with their defaults (0.22.0: the tree's root; null = `TimeSister/<team>`). */
@@ -153,18 +155,7 @@ final class DocumentRules {
 		return "team: $team\ndate: $day\nentries: $entries\nhead seq: $seq\nhead hash: $hash\n";
 	}
 
-	// ------------------------------------------------------------ document
-
-	/** `Beleg <number> · Kette <seq> <hash[0:12]> ← <prev_hash[0:12]>` – on every page; a first entry has no previous hash. */
-	public static function chainLine(string $number, ?int $seq, ?string $hash, ?string $prevHash): string {
-		$prev = $prevHash === null || $prevHash === '' ? '–' : substr($prevHash, 0, 12);
-		return 'Beleg ' . $number . ' · Kette ' . (string)($seq ?? 0) . ' ' . substr((string)$hash, 0, 12) . ' ← ' . $prev;
-	}
-
-	/** The watermark of a preview: VORABZUG in German, DRAFT otherwise. */
-	public static function watermark(string $lang): string {
-		return $lang === self::DE ? 'VORABZUG' : 'DRAFT';
-	}
+	// ------------------------------------------------------------ language
 
 	/**
 	 * The team's document language as written (0.22.0): null (the server's
@@ -197,73 +188,99 @@ final class DocumentRules {
 		return self::EN;
 	}
 
+	// ------------------------------------------------------------- uploads
+
+	/** The PDF the app sends: at most 20 MB (`413`), starting with `%PDF-` (`422`, field `content`). */
+	public static function requirePdf(string $bytes): void {
+		if (strlen($bytes) > self::FILE_MAX) {
+			throw ApiException::tooLarge('A file may be at most 20 MB.');
+		}
+		if (!str_starts_with($bytes, '%PDF-')) {
+			throw ApiException::invalid('The document must be a PDF.')->field('content');
+		}
+	}
+
 	/**
-	 * The labels of the document in its language.
+	 * The PDF must name this invoice: the number and the chain line as
+	 * answered by `issue` (the XMP is uncompressed, so a plain search
+	 * finds them); `422 document_mismatch` otherwise. A PDF of another
+	 * invoice or an older render stays out of the file.
 	 *
-	 * @return array<string,string>
+	 * @param list<string> $needles
 	 */
-	public static function texts(string $lang): array {
-		if ($lang === self::DE) {
-			return [
-				'invoice' => 'Rechnung', 'advance' => 'Akontorechnung', 'reversal' => 'Storno zu', 'credit' => 'Gutschrift', 'not_issued' => '(noch nicht gestellt)',
-				'date' => 'Datum', 'due' => 'Zahlbar bis', 'period' => 'Leistungszeitraum', 'project' => 'Projekt', 'budget' => 'Budget',
-				'vat_id' => 'MWST-Nr.', 'email' => 'E-Mail', 'phone' => 'Telefon', 'contact' => 'Kontakt',
-				'position' => 'Position', 'hours' => 'Stunden', 'rate' => 'Ansatz', 'amount' => 'Betrag',
-				'net' => 'Netto', 'vat' => 'MWST', 'gross' => 'Total', 'appendix' => 'Stundenliste', 'person' => 'Person',
-				'code' => 'Code', 'title' => 'Titel', 'total' => 'Total', 'page' => 'Seite {n} von {total}', 'payment_part' => 'Zahlteil',
-				'on' => 'auf', 'gross_vat' => 'Total inkl. MWST', 'pass_through' => 'Durchlaufende Posten (ohne MWST)',
-				'pass_through_sum' => 'Summe durchlaufende Posten',
-				'receipt' => 'Beleg', 'copy_missing' => 'Die Kopie dieses Belegs liess sich nicht einbinden. Die Datei liegt hier:',
-				'copy_more' => '… und {n} weitere Seiten in der Datei des Belegs.', 'copy_unreadable' => 'Die Datei fehlt.',
-				'report' => 'Spesenblatt', 'supplier' => 'Lieferant', 'text' => 'Text', 'gross_col' => 'Brutto', 'without_receipt' => 'ohne Beleg',
-				'sign_person' => 'Unterschrift Person', 'sign_fixed' => 'Fixiert', 'team' => 'Team', 'status' => 'Stand',
-				'subtotal' => 'Zwischensumme', 'by_level' => 'Übersicht je Ebene', 'by_tag' => 'Übersicht je Merkmal', 'budget_state' => 'Stand des Budgets',
-				'target' => 'Soll', 'before' => 'Bisher verrechnet', 'this_invoice' => 'Diese Rechnung', 'rest' => 'Rest', 'tag' => 'Merkmal', 'level' => 'Ebene',
-			];
+	public static function requireMentions(string $bytes, array $needles): void {
+		foreach ($needles as $n) {
+			if ($n !== '' && !str_contains($bytes, $n)) {
+				throw ApiException::invalid('The uploaded file does not name this invoice; render it from the reservation and send it again.')->code(ErrorCode::DOCUMENT_MISMATCH)->field('content');
+			}
 		}
-		return [
-			'invoice' => 'Invoice', 'advance' => 'Advance invoice', 'reversal' => 'Reversal of', 'credit' => 'Credit note', 'not_issued' => '(not yet issued)',
-			'date' => 'Date', 'due' => 'Due', 'period' => 'Period', 'project' => 'Project', 'budget' => 'Budget',
-			'vat_id' => 'VAT ID', 'email' => 'E-mail', 'phone' => 'Phone', 'contact' => 'Contact',
-			'position' => 'Position', 'hours' => 'Hours', 'rate' => 'Rate', 'amount' => 'Amount',
-			'net' => 'Net', 'vat' => 'VAT', 'gross' => 'Total', 'appendix' => 'Hours', 'person' => 'Person',
-			'code' => 'Code', 'title' => 'Title', 'total' => 'Total', 'page' => 'Page {n} of {total}', 'payment_part' => 'Payment part',
-			'on' => 'on', 'gross_vat' => 'Total incl. VAT', 'pass_through' => 'Pass-through items (no VAT)',
-			'pass_through_sum' => 'Pass-through items',
-			'receipt' => 'Receipt', 'copy_missing' => 'The copy of this receipt could not be embedded. The file is here:',
-			'copy_more' => '… and {n} more pages in the receipt’s file.', 'copy_unreadable' => 'The file is missing.',
-			'report' => 'Expense report', 'supplier' => 'Supplier', 'text' => 'Text', 'gross_col' => 'Gross', 'without_receipt' => 'without receipt',
-			'sign_person' => 'Signature person', 'sign_fixed' => 'Fixed', 'team' => 'Team', 'status' => 'Status',
-			'subtotal' => 'Subtotal', 'by_level' => 'Overview by level', 'by_tag' => 'Overview by tag', 'budget_state' => 'State of the budget',
-			'target' => 'Target', 'before' => 'Billed before', 'this_invoice' => 'This invoice', 'rest' => 'Remaining', 'tag' => 'Tag', 'level' => 'Level',
-		];
 	}
 
-	/** The document's title: “Invoice RE-2026-0007”, “Reversal of RE-2026-0007”, “Credit note RE-2026-0008”, since 0.26.0 “Advance invoice RE-2026-0009”. @param array<string,string> $t */
-	public static function title(array $t, string $number, ?string $reverses, ?string $credits, ?string $originalNumber, bool $advance = false): string {
-		if ($reverses !== null) {
-			return $t['reversal'] . ' ' . ($originalNumber ?? $reverses) . ' – ' . $number;
+	/**
+	 * The e-invoice XML the app sends: at most 20 MB, UTF-8, well-formed
+	 * (no network, no DTD, no external entities), root `CrossIndustryInvoice`
+	 * (CII) or `Invoice` (UBL); `422` with field `content` otherwise.
+	 */
+	public static function requireXml(string $bytes): void {
+		if (strlen($bytes) > self::FILE_MAX) {
+			throw ApiException::tooLarge('A file may be at most 20 MB.');
 		}
-		if ($credits !== null) {
-			return $t['credit'] . ' ' . $number;
+		$bad = static fn (): ApiException => ApiException::invalid('The file must be a well-formed e-invoice XML (CII or UBL).')->field('content');
+		if ($bytes === '' || !mb_check_encoding($bytes, 'UTF-8') || preg_match('/<!DOCTYPE/i', $bytes) === 1) {
+			throw $bad();
 		}
-		return ($advance ? $t['advance'] : $t['invoice']) . ' ' . $number;
+		$previous = libxml_use_internal_errors(true);
+		try {
+			$doc = new \DOMDocument();
+			$ok = $doc->loadXML($bytes, LIBXML_NONET | LIBXML_NOCDATA);
+			$root = $doc->documentElement;
+			if ($ok === false || $root === null || !in_array($root->localName, ['CrossIndustryInvoice', 'Invoice'], true)) {
+				throw $bad();
+			}
+		} finally {
+			libxml_clear_errors();
+			libxml_use_internal_errors($previous);
+		}
 	}
 
-	/** An amount: `1’234.50` in German (Swiss style), `1,234.50` in English. */
-	public static function money(float $v, string $lang): string {
-		return number_format($v, 2, '.', $lang === self::DE ? '’' : ',');
+	/**
+	 * The files a chain verification re-hashes (`?files=true`): the issue's
+	 * own document of 0.32.0 entries (`payload.document.sha256`, the path
+	 * from the frozen row) and the `document` entries (`payload.path`,
+	 * `payload.sha256`). Entries without a file are skipped.
+	 *
+	 * @param iterable<array{seq:int,action:string,invoice:int,payload?:?string,...}> $entries
+	 * @return list<array{seq:int,invoice:int,path:?string,sha256:string}>
+	 */
+	public static function hashedFiles(iterable $entries): array {
+		$out = [];
+		foreach ($entries as $e) {
+			$raw = $e['payload'] ?? null;
+			$p = is_string($raw) ? json_decode($raw, true) : null;
+			if (!is_array($p)) {
+				continue;
+			}
+			if ($e['action'] === self::ACTION && is_string($p['sha256'] ?? null)) {
+				$out[] = ['seq' => $e['seq'], 'invoice' => $e['invoice'], 'path' => is_string($p['path'] ?? null) ? $p['path'] : null, 'sha256' => $p['sha256']];
+			} elseif (in_array($e['action'], self::ISSUE_ACTIONS, true) && is_array($p['document'] ?? null) && is_string($p['document']['sha256'] ?? null)) {
+				$out[] = ['seq' => $e['seq'], 'invoice' => $e['invoice'], 'path' => null, 'sha256' => $p['document']['sha256']];
+			}
+		}
+		return $out;
 	}
+
+	/** The break of a chain verification at a file. @return array{ok:false,first_break:int,field:string,expected:string,found:string} */
+	public static function fileBreak(int $seq, string $expected, ?string $found): array {
+		return ['ok' => false, 'first_break' => $seq, 'field' => 'document', 'expected' => $expected, 'found' => $found ?? 'missing'];
+	}
+
+	// ------------------------------------------------------------- numbers
 
 	/** A rate: `8.1 %`, `19 %`. */
 	public static function percent(float $v): string {
 		return rtrim(rtrim(number_format($v, 2, '.', ''), '0'), '.') . ' %';
 	}
 
-	/** Hours: `12.5` → `12.50`. */
-	public static function hours(float $v): string {
-		return number_format($v, 2, '.', '');
-	}
 
 	/** A day: `15.10.2026` in German, `2026-10-15` in English. */
 	public static function day(string $day, string $lang): string {

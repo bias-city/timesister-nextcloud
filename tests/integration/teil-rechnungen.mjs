@@ -71,7 +71,7 @@ export async function rechnungen() {
 				check(`… “${message}”`, r.data?.message === message, r.data?.message)
 			}
 			await bad('from after to', invoice(PI, { from: '2026-10-01' }), '“from” must not be after “to”.')
-			await bad('unknown status', invoice(PI, { status: 'open' }), '“status” of an invoice is one of draft, issued, paid, cancelled, external.')
+			await bad('unknown status', invoice(PI, { status: 'open' }), '“status” of an invoice is one of draft, issuing, issued, paid, cancelled, external.')
 			await bad('no project', invoice(null), '“project” must be the key of a project.')
 			await bad('a booking twice', invoice(PI, { bookings: [{ person: 'a', uid: 'u', start: '2026-09-02' }, { person: 'a', uid: 'u', start: '2026-09-02' }] }),
 				'Booking 2: The same booking (person, uid, start) is there twice.')

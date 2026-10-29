@@ -19,6 +19,7 @@ final class InvoiceService {
 		private CounterMapper $counters,
 		private RecordMapper $records,
 		private ITimeFactory $time,
+		private IssueLock $lock,
 	) {
 	}
 
@@ -36,6 +37,10 @@ final class InvoiceService {
 		$year = InvoiceNumbering::year($year, (int)gmdate('Y', $now));
 		$n = InvoiceNumbering::of($this->settings($m->tenantId));
 		$name = InvoiceNumbering::counter($n['per_year'], $year);
+		if ($take) {
+			// 0.32.0: the counter must not move while an issue of the team is pending.
+			$this->lock->require($m->tenantId, $now);
+		}
 		$number = $take
 			? $this->counters->take($m->tenantId, $name, $n['start'], $now)
 			: InvoiceNumbering::next($this->counters->last($m->tenantId, $name), $n['start']);

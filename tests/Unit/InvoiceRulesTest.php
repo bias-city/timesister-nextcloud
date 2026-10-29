@@ -122,8 +122,8 @@ class InvoiceRulesTest extends TestCase {
 		$this->assertSame('422 “from” must be a day in the format YYYY-MM-DD.', self::check(['from' => '2026-02-30']));
 		$this->assertSame('422 “to” must be a day in the format YYYY-MM-DD.', self::check([], ['to']));
 		$this->assertSame('422 “from” must not be after “to”.', self::check(['from' => '2026-10-01']));
-		$this->assertSame('422 “status” of an invoice is one of draft, issued, paid, cancelled, external.', self::check(['status' => 'open']));
-		$this->assertSame('422 “status” of an invoice is one of draft, issued, paid, cancelled, external.', self::check([], ['status']));
+		$this->assertSame('422 “status” of an invoice is one of draft, issuing, issued, paid, cancelled, external.', self::check(['status' => 'open']));
+		$this->assertSame('422 “status” of an invoice is one of draft, issuing, issued, paid, cancelled, external.', self::check([], ['status']));
 		foreach (['', str_repeat('x', 65), 12, "RE\n1"] as $n) {
 			$this->assertSame('422 “number” must be null or text of 1 to 64 characters.', self::check(['number' => $n]), var_export($n, true));
 		}
@@ -468,7 +468,7 @@ class InvoiceRulesTest extends TestCase {
 		$cap = (new Capabilities($this->createMock(IAppManager::class)))->getCapabilities()['timesister'];
 		$this->assertSame(1, $cap['invoices']);
 		$this->assertSame(1, $cap['advances'], 'advance invoices, 0.26.0');
-		$this->assertSame(1, $cap['invoice_layout'], 'invoice layout, 0.26.0');
+		$this->assertSame(2, $cap['invoice_layout'], 'invoice layout, 0.26.0; six appendices from the client since 0.32.0');
 		$mapped = ZipRules::mapData(self::data(), ['alice' => 'alice.new', 'pblead' => 'lea']);
 		$this->assertInstanceOf(\stdClass::class, $mapped);
 		$this->assertSame('alice.new', $mapped->bookings[0]->person, 'a team ZIP moved to other accounts: the booking’s person follows');

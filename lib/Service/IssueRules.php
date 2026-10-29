@@ -20,6 +20,8 @@ final class IssueRules {
 	public const NOTE_MAX = 500;
 	public const REVERSAL = 'reversal';
 	public const CREDIT = 'credit';
+	/** 0.32.0: a reservation without a document is released after this many seconds. */
+	public const EXPIRY = 900;
 	/** The team's default VAT rate in `setting/settings`, percent. */
 	public const VAT_FIELD = 'vat';
 	/** Which customer fields are frozen. */
@@ -367,5 +369,31 @@ final class IssueRules {
 	/** A fresh record key for a reversal or credit note. */
 	public static function newKey(): string {
 		return 'inv-' . bin2hex(random_bytes(4));
+	}
+
+	// ------------------------------------------------------ the reservation
+
+	/**
+	 * The footer sentence of the document (0.32.0): «Beleg <number> · Kette
+	 * <seq> ← <prev_hash[0:12]>» in German, «Document … · Chain … ← …» in
+	 * English; `← –` for the first entry of a team. The app prints it on
+	 * every page and puts it into the PDF's XMP; the close searches for it.
+	 */
+	public static function chainLine(string $lang, string $number, int $seq, string $prevHash): string {
+		$prev = $prevHash === '' ? '–' : substr($prevHash, 0, 12);
+		return $lang === DocumentRules::DE
+			? 'Beleg ' . $number . ' · Kette ' . $seq . ' ← ' . $prev
+			: 'Document ' . $number . ' · Chain ' . $seq . ' ← ' . $prev;
+	}
+
+	/** `409 issue_pending` with the open reservation of the team. */
+	public static function pending(string $key, string $number, int $expiresAt): ApiException {
+		return ApiException::conflict('An issue of this team is open; close it with its PDF, cancel it or wait for its expiry.',
+			['pending' => ['key' => $key, 'number' => $number, 'expires_at' => LedgerRules::at($expiresAt)]])->code(ErrorCode::ISSUE_PENDING);
+	}
+
+	/** The document block of the ledger payload and the record: kind, name, size, hash. @return array{kind:string,name:string,size:int,sha256:string} */
+	public static function documentBlock(string $kind, string $name, int $size, string $sha256): array {
+		return ['kind' => $kind, 'name' => $name, 'size' => $size, 'sha256' => $sha256];
 	}
 }

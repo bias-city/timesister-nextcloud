@@ -69,6 +69,21 @@ final class ErrorCode {
 	public const HANDOVER_OTHER_SYSTEM = 'handover_other_system';
 	public const HANDOVER_NO_ARCHIVE = 'handover_no_archive';
 	public const HANDOVER_PDF_EXISTS = 'handover_pdf_exists';
+	// ---- the two-step issue and the documents (0.32.0)
+	public const ISSUE_PENDING = 'issue_pending';
+	public const NOT_ISSUING = 'not_issuing';
+	public const DOCUMENT_MISSING = 'document_missing';
+	public const NUMBER_NOT_LAST = 'number_not_last';
+	public const DOCUMENT_MISMATCH = 'document_mismatch';
+	public const DOCUMENT_EXISTS = 'document_exists';
+	// ---- quotes (0.32.0)
+	public const QUOTE_LEAD_ONLY = 'quote_lead_only';
+	public const QUOTE_NOT_DRAFT = 'quote_not_draft';
+	public const QUOTE_NOT_ISSUED = 'quote_not_issued';
+	public const QUOTE_ISSUED_FROZEN = 'quote_issued_frozen';
+	public const QUOTE_NUMBER_TAKEN = 'quote_number_taken';
+	public const QUOTE_DOCUMENTS_MAX = 'quote_documents_max';
+	public const QUOTE_NAME_REQUIRED = 'quote_name_required';
 	// ---- records and routes
 	public const EXCHANGE_RATE_SERVER_ONLY = 'exchange_rate_server_only';
 	public const VERSION_CONFLICT = 'version_conflict';

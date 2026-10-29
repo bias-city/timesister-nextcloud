@@ -60,16 +60,12 @@ final class CostWrites {
 		return $after === null ? null : Json::encode($after);
 	}
 
-	/** The quote's PDF is written by the server only (0.22.0): the stored `document` stays. */
+	/** The quote's server fields (0.22.0 `document`, 0.32.0 `documents` and `issued`) stay as stored; number and `issued` of an issued quote are frozen. */
 	private function quote(?\stdClass $before, ?\stdClass $after, ?string $json): ?string {
-		if ($after === null || $before === null || !property_exists($before, 'document')) {
-			if ($after !== null && property_exists($after, 'document')) {
-				unset($after->document);
-				return Json::encode($after);
-			}
+		if ($after === null) {
 			return $json;
 		}
-		$after->document = $before->document;
+		QuoteRules::keepServerFields($before, $after);
 		return Json::encode($after);
 	}
 

@@ -8,17 +8,14 @@
 // (rule without approval, one receipt per period), settling by the person
 // (fix with period, number, lines, sums and ledger, the app's file,
 // reverse, the chain) and the export (CSV, DATEV), invoicing from receipts
-// (lines, markup, expense percentage, billed on issue, released on
-// reversal, copies in the PDF), the quote document through the server, the
+// (lines, markup, expense percentage, billed at the reservation, released
+// at the close of the reversal; the copies are the app's), the quote
+// document through the server, the
 // project dossier and the privacy notice. Leaves pb as it found it
 // (settings, team settings, person); records and frozen rows only with
 // TS_SQL, the ledger stays; the test folder in the owner's files goes.
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { dav, ocs, sql, ADMIN, NC, API } from './lib.mjs'
-import { A, L, RUN, U1, U2, check, expect, head, isObj, me, sha256 } from './harness.mjs'
+import { A, L, RUN, U1, U2, check, expect, festschreiben, head, isObj, me, sha256, stornieren } from './harness.mjs'
 
 const rec = (kind, key) => `/records/${kind}/${encodeURIComponent(key)}`
 const near = (a, b) => typeof a === 'number' && Math.abs(a - b) < 0.001
@@ -63,20 +60,6 @@ function pdf(line) {
 	return Buffer.from(out, 'latin1')
 }
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
-
-/** The text of a PDF through pdftotext; null when it is not installed. */
-function pdfText(buf) {
-	const dir = mkdtempSync(join(tmpdir(), 'ts-belege-'))
-	try {
-		const file = join(dir, 'doc.pdf')
-		writeFileSync(file, buf)
-		return execFileSync('pdftotext', ['-layout', file, '-'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).replace(/\s+/g, ' ')
-	} catch {
-		return null
-	} finally {
-		rmSync(dir, { recursive: true, force: true })
-	}
-}
 
 /** The names in a ZIP's central directory. */
 function zipNames(buf) {
@@ -145,7 +128,7 @@ export async function belege() {
 		head('Receipts: setup and the document tree')
 		{
 			const cap = (await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')).data?.capabilities?.timesister
-			check('capabilities receipts: 2, document_tree, expense_fixing: 1, expense_table: 1 (expense_reports gone)', cap?.receipts === 2 && cap?.document_tree === 1 && cap?.expense_fixing === 1 && cap?.expense_table === 1 && cap?.expense_reports === undefined, cap)
+			check('capabilities receipts: 2, document_tree, expense_fixing: 1, expense_table: 2 (0.31.0; expense_reports gone)', cap?.receipts === 2 && cap?.document_tree === 1 && cap?.expense_fixing === 1 && cap?.expense_table === 2 && cap?.expense_reports === undefined, cap)
 			const set = await ocs(A, 'PUT', '/team/settings', { documents: { root: FOLDER } })
 			expect('Team Admin sets documents.root', set, 200)
 			check('… settings.documents is { root, chain_mail }', JSON.stringify(Object.keys(set.data?.documents || {}).sort()) === '["chain_mail","root"]' && set.data?.documents?.root === FOLDER, set.data)
@@ -299,7 +282,7 @@ export async function belege() {
 			expect('a rule for someone else', await ocs(U1, 'PUT', rec('expense_rule', `${RULE}x`), { version: 0, data: { ...rule, person: 'pbuser2' } }), 403, 'forbidden')
 			const recurring = (period, key = RR) => ocs(U1, 'PUT', rec('receipt', key), { version: 0, data: receipt({ kind: 'recurring', rule: RULE, period, date: `${Y}-02-28`, supplier: '', text: 'Mobile phone', net: 50, vat_rate: null, vat: 0, gross: 50, project: null, budget: null, cost: null }) })
 			// 0.30.0: a rule applies from creation; its approval is gone.
-			expect('approving a rule (endpoint gone)', await ocs(A, 'POST', `/expense-rules/${RULE}/approve`, {}), 404)
+			expect('approving a rule (endpoint gone: 410 since 0.31.0)', await ocs(A, 'POST', `/expense-rules/${RULE}/approve`, {}), 410)
 			const rr = await recurring(`${Y}-02`)
 			check('the recurring receipt of February: internal at once (general), the rule needs no approval', rr.status === 200 && rr.data?.data?.status === 'internal' && rr.data?.data?.approved_by === 'pbuser1', rr.data?.data)
 			const dup = await recurring(`${Y}-02`, `rc-${RUN}-r2`)
@@ -323,7 +306,7 @@ export async function belege() {
 			const today = new Date().toISOString().slice(0, 10)
 			const ty = today.slice(0, 4)
 			const period = { person: 'pbuser1', from: `${Y}-01-01`, to: `${Y}-12-31` }
-			expect('“ready” is gone', await ocs(U1, 'POST', '/expense-reports/ready', { person: 'pbuser1' }), 404)
+			expect('“ready” is gone (410 since 0.31.0)', await ocs(U1, 'POST', '/expense-reports/ready', { person: 'pbuser1' }), 410)
 			expect('a report through /records', await ocs(U1, 'PUT', rec('expense_report', `sb-${RUN}x`), { version: 0, data: { schema: 2, person: 'pbuser1' } }), 409, 'conflict')
 			expect('another member settles for pbuser1', await ocs(U2, 'POST', '/expense-reports/fix', period), 403, 'forbidden')
 			expect('the Lead settles for pbuser1', await ocs(L, 'POST', '/expense-reports/fix', period), 403, 'forbidden')
@@ -383,7 +366,7 @@ export async function belege() {
 			const cur = await get('expense_report', SB)
 			expect('the person writes the report', await ocs(U1, 'PUT', rec('expense_report', SB), { version: cur.version, data: cur.data }), 409, 'conflict')
 			expect('Team Admin deletes it', await ocs(A, 'DELETE', `${rec('expense_report', SB)}?version=${cur.version}`), 409, 'conflict')
-			expect('“paid” is gone', await ocs(A, 'POST', `/expense-reports/${SB}/paid`, { date: `${Y}-04-05` }), 404)
+			expect('“paid” is gone (410 since 0.31.0)', await ocs(A, 'POST', `/expense-reports/${SB}/paid`, { date: `${Y}-04-05` }), 410)
 			expect('the person reverses it', await ocs(U1, 'POST', `/expense-reports/${SB}/reverse`, {}), 403, 'forbidden')
 			const rv = await ocs(A, 'POST', `/expense-reports/${SB}/reverse`, { reason: 'Wrong month' })
 			check('Team Admin reverses it: reversed, the reason, a ledger entry; the file stays', rv.status === 200 && rv.data?.data?.status === 'reversed' && rv.data?.data?.reverse_reason === 'Wrong month' && rv.data?.data?.reversed_on === today
@@ -443,47 +426,36 @@ export async function belege() {
 			const draft = (more = {}) => ({ schema: 1, project: PB, budget: 'b1', from: `${Y}-03-01`, to: `${Y}-03-31`, status: 'draft', number: null, bookings: [], positions, created_by: 'pbadmin', created_on: `${Y}-04-01`, ...more })
 			expect('receipts on a flat line', await ocs(A, 'PUT', rec('invoice', K1), { version: 0, data: draft({ positions: [{ kind: 'flat', text: 'x', amount: 1, receipts: [R1] }] }) }), 422, 'invalid')
 			expect('Team Admin writes the draft', await ocs(A, 'PUT', rec('invoice', K1), { version: 0, data: draft({ positions: positions.map((p, i) => (i === 2 ? { ...p, amount: 12 } : p)) }) }), 200)
-			const wrong = await raw(A, 'GET', `/invoices/${K1}/preview`)
-			check('preview with a wrong markup → 422 naming the amount', wrong.status === 422 && wrong.text.includes('The amount must be 10.00'), [wrong.status, wrong.text.slice(0, 200)])
-			expect('… issue too', await ocs(A, 'POST', `/invoices/${K1}/issue`, { issued_on: `${Y}-04-01` }), 422, 'invalid')
+			expect('the preview is gone (0.32.0); issue checks the lines', await raw(A, 'GET', `/invoices/${K1}/preview`).then((x) => ({ status: x.status, data: x.data, text: x.text })), 410)
+			const wrong = await ocs(A, 'POST', `/invoices/${K1}/issue`, { issued_on: `${Y}-04-01` })
+			check('issue with a wrong markup → 422 naming the amount', wrong.status === 422 && wrong.data?.message?.includes('The amount must be 10.00'), [wrong.status, wrong.data])
 			expect('the draft corrected', await put(A, 'invoice', K1, draft()), 200)
-			const pre = await raw(A, 'GET', `/invoices/${K1}/preview`)
-			check('the preview renders', pre.status === 200 && pre.buf.subarray(0, 5).toString() === '%PDF-', pre.status)
-			const pt = pdfText(pre.buf)
-			if (pt !== null) {
-				check('… with the receipt copies', pt.includes(`Beleg 10.03.${Y} Bahn Muster`) && pt.includes(`Beleg 10.03.${Y} Druckerei`), pt.slice(-400))
-			}
-			const is = await ocs(A, 'POST', `/invoices/${K1}/issue`, { issued_on: `${Y}-04-01` })
-			expect('issue', is, 200)
-			check('… total: 1140 taxable at 8.1 % plus 0 pass-through', near(is.data?.issue?.net, 1140) && near(is.data?.issue?.total, 1232.34), is.data?.issue)
+			const is = await festschreiben(A, K1, { issued_on: `${Y}-04-01` })
+			expect('issue (reservation)', is.reserve, 200)
+			expect('… closed with the app’s PDF', is.close, 200)
+			check('… total: 1140 taxable at 8.1 % plus 0 pass-through', near(is.issue?.net, 1140) && near(is.issue?.total, 1232.34), is.issue)
 			const r1 = (await get('receipt', R1))?.data
 			const r2 = (await get('receipt', R2))?.data
-			check('both receipts billed by the invoice, in the same transaction', r1?.status === 'billed' && r1?.invoice === K1 && r2?.status === 'billed' && r2?.invoice === K1, [r1?.status, r2?.status])
-			let f = await ocs(A, 'GET', `/invoices/${K1}/fixed`)
-			if (f.data?.document_state !== 'done') {
-				await ocs(A, 'POST', `/invoices/${K1}/render`, {})
-				f = await ocs(A, 'GET', `/invoices/${K1}/fixed`)
-			}
+			check('both receipts billed by the invoice, at the reservation', r1?.status === 'billed' && r1?.invoice === K1 && r2?.status === 'billed' && r2?.invoice === K1, [r1?.status, r2?.status])
+			const f = await ocs(A, 'GET', `/invoices/${K1}/fixed`)
 			check('fixed: receipts[] kept; the customer-paid line at 0.00 with VAT 0', JSON.stringify(f.data?.positions?.[1]?.receipts) === JSON.stringify([R1]) && f.data?.positions?.[3]?.amount === 0 && f.data?.positions?.[3]?.vat === null && f.data?.positions?.[3]?.text?.includes('paid by the customer'), f.data?.positions)
-			check('the stored PDF lies under Rechnungen/', f.data?.document_state === 'done' && f.data?.document_path === `${FOLDER}/Buchhaltung/${Y}/Rechnungen/${Y}-04-01_${f.data?.number}_Kunde-Sued-${RUN}.pdf`, [f.data?.document_path, f.data?.document_error])
+			check('the filed PDF lies under Rechnungen/', f.data?.status === 'issued' && f.data?.documents?.[0]?.path === `${FOLDER}/Buchhaltung/${Y}/Rechnungen/${Y}-04-01_${f.data?.number}_Kunde-Sued-${RUN}.pdf` && f.data?.document_path === f.data?.documents?.[0]?.path, [f.data?.documents, f.data?.document_path])
 			const doc = await raw(A, 'GET', `/invoices/${K1}/document`)
-			const dt = pdfText(doc.buf)
-			if (dt !== null) {
-				check('… with the receipt copies and the chain line on them', dt.includes(`Beleg 10.03.${Y} Bahn Muster`) && dt.includes(`Beleg ${f.data?.number} · Kette`), dt.slice(-400))
-			}
+			check('… the bytes as sent (the receipt copies are the app’s business now)', doc.status === 200 && doc.buf.equals(is.pdf), doc.status)
 			expect('a second draft naming a billed receipt', await ocs(A, 'PUT', rec('invoice', K2), { version: 0, data: draft({ positions: [positions[1], { ...positions[2] }] }) }), 200)
 			expect('… issuing it → 409', await ocs(A, 'POST', `/invoices/${K2}/issue`, { issued_on: `${Y}-04-02` }), 409, 'conflict')
 			const c1 = await get('receipt', R1)
 			expect('a billed receipt: the note changes', await ocs(A, 'PUT', rec('receipt', R1), { version: c1.version, data: { ...c1.data, note: 'billed' } }), 200)
 			const c2 = await get('receipt', R1)
 			expect('… the cost position does not', await ocs(A, 'PUT', rec('receipt', R1), { version: c2.version, data: { ...c2.data, cost: 2 } }), 409, 'conflict')
-			const rv = await ocs(A, 'POST', `/invoices/${K1}/reverse`, { kind: 'reversal', issued_on: `${Y}-04-03` })
-			expect('reversal', rv, 200)
-			if (rv.data?.record?.key) {
-				invoices.push(rv.data.record.key)
+			const rv = await stornieren(A, K1, { kind: 'reversal', issued_on: `${Y}-04-03` })
+			expect('reversal (reservation)', rv.reserve, 200)
+			if (rv.key) {
+				invoices.push(rv.key)
 			}
+			expect('… closed', rv.close, 200)
 			const after = [(await get('receipt', R1))?.data, (await get('receipt', R2))?.data]
-			check('the reversal releases the receipts: approved, invoice null', after.every((x) => x?.status === 'approved' && x?.invoice === null), after.map((x) => [x?.status, x?.invoice]))
+			check('the close of the reversal releases the receipts: approved, invoice null', after.every((x) => x?.status === 'approved' && x?.invoice === null), after.map((x) => [x?.status, x?.invoice]))
 		}
 
 		head('Receipts: the quote document')
@@ -493,11 +465,12 @@ export async function belege() {
 			expect('a member stores its PDF', await raw(U1, 'PUT', `/quotes/${Q}/document`, pdf('Offerte'), 'application/pdf').then((x) => ({ status: x.status, data: x.data, text: x.text })), 403, 'forbidden')
 			expect('… a PNG', await raw(A, 'PUT', `/quotes/${Q}/document`, PNG, 'image/png').then((x) => ({ status: x.status, data: x.data, text: x.text })), 422, 'invalid')
 			const d = await raw(L, 'PUT', `/quotes/${Q}/document`, pdf('Offerte'), 'application/pdf')
-			check('the project’s Lead stores it under Offerten/, the record carries document', d.status === 200 && d.data?.path === `${FOLDER}/Buchhaltung/${Y}/Offerten/${Y}-01-20_OF-${RUN}_Kunde-Sued-${RUN}.pdf` && d.data?.sha256 === sha256(pdf('Offerte')) && (await get('quote', Q))?.data?.document?.path === d.data?.path, [d.status, d.data])
+			const dd = d.data?.document
+			check('the project’s Lead stores it under Offerten/, the record carries document (0.32.0: { document, record })', d.status === 200 && dd?.kind === 'timesister' && dd?.path === `${FOLDER}/Buchhaltung/${Y}/Offerten/${Y}-01-20_OF-${RUN}_Kunde-Sued-${RUN}.pdf` && dd?.sha256 === sha256(pdf('Offerte')) && d.data?.record?.data?.document?.path === dd?.path && d.data?.record?.data?.documents?.[0]?.kind === 'timesister', [d.status, d.data])
 			const cur = await get('quote', Q)
-			const { document: _, ...rest } = cur.data
+			const { document: _, documents: _2, ...rest } = cur.data
 			const w = await ocs(A, 'PUT', rec('quote', Q), { version: cur.version, data: { ...rest, name: `Offerte ${RUN} B` } })
-			check('a client write without document keeps it', w.status === 200 && w.data?.data?.document?.path === d.data?.path, w.data?.data)
+			check('a client write without document keeps it', w.status === 200 && w.data?.data?.document?.path === dd?.path && w.data?.data?.documents?.length === 1, w.data?.data)
 			const g = await raw(L, 'GET', `/quotes/${Q}/document`)
 			check('GET returns the PDF', g.status === 200 && g.buf.equals(pdf('Offerte')), g.status)
 		}
@@ -550,14 +523,18 @@ export async function belege() {
 			check('approval clears the mark', a.status === 200 && a.data?.data?.status === 'approved' && a.data?.data?.review === false && JSON.stringify(a.data?.data?.review_reasons) === '[]', a.data)
 			const draft = (positions) => ({ schema: 1, project: PB, budget: 'b1', from: `${Y}-03-01`, to: `${Y}-03-31`, status: 'draft', number: null, bookings: [], positions, created_by: 'pbadmin', created_on: `${Y}-04-05` })
 			expect('a draft with the receipt on one line', await ocs(A, 'PUT', rec('invoice', K3), { version: 0, data: draft([{ kind: 'costs', text: 'Market', amount: 100, cost: 1, receipts: [R4] }]) }), 200)
-			const one = await raw(A, 'GET', `/invoices/${K3}/preview`)
-			check('… preview: the line must name one of its rates → 422', one.status === 422 && one.text.includes('several VAT rates'), [one.status, one.text.slice(0, 200)])
+			const one = await ocs(A, 'POST', `/invoices/${K3}/issue`, { issued_on: `${Y}-04-05` })
+			check('… issue: the line must name one of its rates → 422', one.status === 422 && one.data?.message?.includes('several VAT rates'), [one.status, one.data])
 			expect('… one line per rate', await put(A, 'invoice', K3, draft([{ kind: 'costs', text: 'Market 2.6 %', amount: 40, vat: 2.6, cost: 1, receipts: [R4] }])), 200)
-			const half = await raw(A, 'GET', `/invoices/${K3}/preview`)
-			check('… only one of the two rates → 422', half.status === 422 && half.text.includes('the line at 8.1 % is missing'), [half.status, half.text.slice(0, 200)])
+			const half = await ocs(A, 'POST', `/invoices/${K3}/issue`, { issued_on: `${Y}-04-05` })
+			check('… only one of the two rates → 422', half.status === 422 && half.data?.message?.includes('the line at 8.1 % is missing'), [half.status, half.data])
 			expect('… both rates', await put(A, 'invoice', K3, draft([{ kind: 'costs', text: 'Market 2.6 %', amount: 40, vat: 2.6, cost: 1, receipts: [R4] }, { kind: 'costs', text: 'Market 8.1 %', amount: 60, vat: 8.1, cost: 1, receipts: [R4] }])), 200)
-			const pre = await raw(A, 'GET', `/invoices/${K3}/preview`)
-			check('… the preview renders', pre.status === 200 && pre.buf.subarray(0, 5).toString() === '%PDF-', [pre.status, pre.text.slice(0, 200)])
+			const res = await ocs(A, 'POST', `/invoices/${K3}/issue`, { issued_on: `${Y}-04-05` })
+			expect('… the reservation succeeds', res, 200)
+			check('… the receipt is billed while reserved', (await get('receipt', R4))?.data?.status === 'billed', (await get('receipt', R4))?.data?.status)
+			const cancel = await ocs(A, 'POST', `/invoices/${K3}/issue/cancel`, {})
+			expect('… and is cancelled again without a PDF (0.32.0)', cancel, 200)
+			check('… the record is a draft again, the receipt approved, the number released', cancel.data?.record?.data?.status === 'draft' && cancel.data?.record?.data?.number === null && cancel.data?.released?.number === res.data?.issue?.number && (await get('receipt', R4))?.data?.status === 'approved', [cancel.data?.record?.data, (await get('receipt', R4))?.data?.status])
 		}
 
 		head('Receipts: another currency')

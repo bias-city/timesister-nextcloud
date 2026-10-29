@@ -7,17 +7,14 @@ declare(strict_types=1);
 namespace OCA\TimeSister\Tests\Unit;
 
 use OCA\TimeSister\Service\ApiException;
-use OCA\TimeSister\Service\DocumentRules;
-use OCA\TimeSister\Service\InvoiceDocument;
 use OCA\TimeSister\Service\InvoiceLayout;
-use OCA\TimeSister\Service\InvoicePdf;
 use OCA\TimeSister\Service\Json;
-use OCA\TimeSister\Service\VatLines;
 use PHPUnit\Framework\TestCase;
 
 /**
  * The invoice layout (0.26.0): grouping by level, appended tables per
- * level, per tag and the state of the budget - checked, grouped, drawn.
+ * level, per tag and the state of the budget; since 0.32.0 six appendices,
+ * every table from the client - checked and stored, never drawn here.
  */
 class InvoiceLayoutTest extends TestCase {
 	private static function outcome(callable $fn): string {
@@ -43,7 +40,11 @@ class InvoiceLayoutTest extends TestCase {
 		foreach ([
 			['"x"', '422 “layout” must be null or an object.'],
 			['{"grouping":"tree"}', '422 “layout.grouping” must be one of flat, level.'],
-			['{"appendix":["costs"]}', '422 “layout.appendix” must be a list of levels, tags, budget.'],
+			['{"appendix":["costs"]}', '422 “layout.appendix” must be a list of levels, tags, budget, aps, companies, rates.'],
+			['{"aps":{"no":"1"}}', '422 “layout.aps” must be a list of at most 500 entries.'],
+			['{"companies":[1]}', '422 Each entry of “layout.companies” must be an object.'],
+			['{"rates":[{"level":"' . str_repeat('x', 501) . '"}]}', '422 “layout.rates” takes flat objects with texts of at most 500 characters and finite numbers.'],
+			['{"tags":[{"tag":"a","rows":[1]}]}', '422 “layout.tags” takes flat objects with texts of at most 500 characters and finite numbers.'],
 			['{"levels":[{"title":""}]}', '422 “layout.levels.title” must be text of 1 to 500 characters.'],
 			['{"levels":[{"title":"A","target":"1"}]}', '422 “layout.levels.target” must be null or a number.'],
 			['{"budget":7}', '422 “layout.budget” must be an object.'],
@@ -57,40 +58,20 @@ class InvoiceLayoutTest extends TestCase {
 		$this->assertSame('422 “path” must be null or a list of at most 10 texts of 1 to 500 characters.', self::outcome(static fn () => InvoiceLayout::checkPosition(self::obj('{"path":"x"}'))));
 	}
 
-	public function testGroupedAndTags(): void {
-		$pos = [
-			['kind' => 'hours', 'text' => '31.1 Varianten', 'hours' => 10, 'amount' => 1500, 'path' => ['3 Projektierung', '31 Vorprojekt'], 'tags' => ['Planung']],
-			['kind' => 'hours', 'text' => '31.2 Kosten', 'hours' => 4, 'amount' => 600, 'path' => ['3 Projektierung', '31 Vorprojekt'], 'tags' => ['Planung', 'Kosten']],
-			['kind' => 'hours', 'text' => '41 Ausschreibung', 'hours' => 2, 'amount' => 280, 'path' => ['4 Ausschreibung']],
-			['kind' => 'flat', 'text' => 'Modell', 'amount' => 500],
-		];
-		$g = InvoiceLayout::grouped($pos);
-		$this->assertSame(['head:3 Projektierung', 'head:31 Vorprojekt', 'pos', 'pos', 'sub:3 Projektierung', 'head:4 Ausschreibung', 'pos', 'sub:4 Ausschreibung', 'pos'],
-			array_map(static fn (array $x): string => $x['type'] . (isset($x['title']) ? ':' . $x['title'] : ''), $g));
-		$this->assertSame(2100.0, $g[4]['amount']);
-		$this->assertSame([['tag' => 'Planung', 'hours' => 14.0, 'amount' => 2100.0], ['tag' => 'Kosten', 'hours' => 4.0, 'amount' => 600.0]], InvoiceLayout::tagRows($pos));
-	}
-
-	/** The PDF with grouping and all three tables renders (the page content is compressed; the figures are checked above). */
-	public function testPdfWithLayout(): void {
-		$d = new InvoiceDocument();
-		$d->lang = DocumentRules::DE;
-		$d->number = 'RE-2026-0009';
-		$d->issuer = ['name' => 'Muster', 'country' => 'CH'];
-		$d->customer = ['name' => 'Gemeinde Muster', 'country' => 'CH'];
-		$d->issuedOn = '2026-12-31';
-		$d->dueOn = '2027-01-30';
-		$d->positions = [
-			['kind' => 'hours', 'text' => '31 Vorprojekt', 'hours' => 80, 'rate' => 150, 'amount' => 12000, 'path' => ['3 Projektierung'], 'tags' => ['Planung']],
-			['kind' => 'advance_deduction', 'text' => 'Abzüglich Akonto', 'amount' => -2000, 'invoice' => 'inv-1'],
-		];
-		$d->vat = 8.1;
-		$d->sums = VatLines::of($d->positions, $d->vat, $d->taxCase);
-		$d->layout = ['grouping' => 'level', 'appendix' => ['levels', 'tags', 'budget'],
-			'levels' => [(object)['title' => '3 Projektierung', 'target' => 34500, 'before' => 0, 'this' => 12000]],
-			'budget' => (object)['target' => 66700, 'before' => 2000, 'this' => 10000]];
-		$pdf = (new InvoicePdf())->render($d);
-		$this->assertStringStartsWith('%PDF-', $pdf);
-		$this->assertGreaterThanOrEqual(1, preg_match_all('/\/Type \/Page\b/', $pdf));
+	/** 0.32.0: the six appendices, every table as the client computed it – form only, stored as sent. */
+	public function testSixAppendicesFromTheClient(): void {
+		$l = InvoiceLayout::check(self::obj('{"appendix":["aps","companies","rates","tags","budget","levels"],'
+			. '"aps":[{"no":"D196.4","name":"Vorprojekt","hours":62.5,"amount":9375,"before":3000,"remaining":2625}],'
+			. '"companies":[{"name":"Muster sàrl","hours":40,"amount":6000}],'
+			. '"rates":[{"level":"Projektleitung","rate":150,"hours":62.5,"amount":9375}],'
+			. '"tags":[{"tag":"bauleitung","hours":12,"amount":1800}]}'));
+		$this->assertSame(['aps', 'companies', 'rates', 'tags', 'budget', 'levels'], $l->appendix);
+		$this->assertSame('{"no":"D196.4","name":"Vorprojekt","hours":62.5,"amount":9375,"before":3000,"remaining":2625}', json_encode($l->aps[0]));
+		$this->assertSame('Muster sàrl', $l->companies[0]->name);
+		$this->assertSame(150, $l->rates[0]->rate);
+		$this->assertSame('bauleitung', $l->tags[0]->tag);
+		// A listed appendix without its table is no error (older drafts); the app shows it empty.
+		$this->assertSame('{"grouping":"flat","appendix":["tags"]}', json_encode(InvoiceLayout::check(self::obj('{"appendix":["tags"]}'))));
+		$this->assertCount(6, InvoiceLayout::APPENDIX);
 	}
 }

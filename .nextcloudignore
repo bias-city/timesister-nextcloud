@@ -14,12 +14,9 @@
 /UPDATE.md
 # Images for the App Store, linked there via GitHub
 /img/screenshot-*.png
-# The libraries (0.19.0: TCPDF, swiss-qr-bill; 0.20.0: horstoeko/zugferd
-# and what they need) ship in vendor/, installed with `composer install
-# --no-dev` by the release workflow. Should a dev install be packaged by
-# hand, these dev-only packages stay out (doctrine/lexer,
-# doctrine/instantiator and phpstan/phpdoc-parser stay: jms/serializer
-# needs them).
+# No runtime library since 0.32.0 (the Mac app renders every document);
+# vendor/ holds only Composer's autoloader. Should a dev install be
+# packaged by hand, the dev-only packages stay out.
 /vendor/bin
 /vendor/amphp
 /vendor/danog
@@ -78,46 +75,3 @@
 /vendor/*/*/Makefile
 /vendor/*/*/CHANGELOG*
 /vendor/*/*/README*
-# TCPDF: only DejaVu Sans (the document) and the core fonts (the QR bill) are used
-/vendor/tecnickcom/tcpdf/fonts/ae*
-/vendor/tecnickcom/tcpdf/fonts/cid0*
-/vendor/tecnickcom/tcpdf/fonts/dejavu-fonts-ttf-*
-/vendor/tecnickcom/tcpdf/fonts/dejavusanscondensed*
-/vendor/tecnickcom/tcpdf/fonts/dejavusansextralight*
-/vendor/tecnickcom/tcpdf/fonts/dejavusansmono*
-/vendor/tecnickcom/tcpdf/fonts/dejavuserif*
-/vendor/tecnickcom/tcpdf/fonts/freefont-*
-/vendor/tecnickcom/tcpdf/fonts/freemono*
-/vendor/tecnickcom/tcpdf/fonts/freesans*
-/vendor/tecnickcom/tcpdf/fonts/freeserif*
-/vendor/tecnickcom/tcpdf/fonts/hysmyeongjostdmedium*
-/vendor/tecnickcom/tcpdf/fonts/kozgopromedium*
-/vendor/tecnickcom/tcpdf/fonts/kozminproregular*
-/vendor/tecnickcom/tcpdf/fonts/msungstdlight*
-/vendor/tecnickcom/tcpdf/fonts/pdfa*
-/vendor/tecnickcom/tcpdf/fonts/stsongstdlight*
-/vendor/tecnickcom/tcpdf/fonts/uni2cid_*
-# horstoeko/zugferd: the app builds and embeds; it validates nothing at runtime
-# (the XSD, Schematron and XSLT files, 6 MB, stay out – the unit tests use the
-# XSD from the dev install), reads no PDFs (smalot/pdfparser only for the
-# reader), calls no KoSIT validator (symfony/process, symfony/finder) and
-# needs no code lists beyond the few the builder references.
-/vendor/horstoeko/zugferd/src/schema
-/vendor/horstoeko/zugferd/src/validation
-/vendor/horstoeko/zugferd/src/quick
-/vendor/horstoeko/zugferd/src/codelistsenum
-/vendor/horstoeko/zugferd/src/ZugferdKositValidator.php
-/vendor/horstoeko/zugferd/src/ZugferdPdfValidator.php
-/vendor/horstoeko/zugferd/src/ZugferdDocumentValidator.php
-/vendor/horstoeko/zugferd/src/ZugferdXsdValidator.php
-/vendor/horstoeko/zugferd/src/ZugferdDocumentPdfReaderExt.php
-/vendor/smalot
-/vendor/symfony/finder
-/vendor/symfony/process
-# symfony/intl: the QR bill checks country codes only (regions, plus locales/meta.php)
-/vendor/symfony/intl/Resources/data/currencies
-/vendor/symfony/intl/Resources/data/languages
-/vendor/symfony/intl/Resources/data/locales/[a-ln-z]*.php
-/vendor/symfony/intl/Resources/data/locales/m[!e]*.php
-/vendor/symfony/intl/Resources/data/scripts
-/vendor/symfony/intl/Resources/data/timezones

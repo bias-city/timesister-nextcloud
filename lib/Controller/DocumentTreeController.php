@@ -6,10 +6,11 @@ declare(strict_types=1);
 
 namespace OCA\TimeSister\Controller;
 
+use OCA\TimeSister\Service\DocumentRules;
 use OCA\TimeSister\Service\DossierService;
 use OCA\TimeSister\Service\Json;
 use OCA\TimeSister\Service\QuoteDocumentService;
-use OCA\TimeSister\Service\ReceiptRules;
+use OCA\TimeSister\Service\QuoteIssueService;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\Attribute\BruteForceProtection;
@@ -21,34 +22,67 @@ use OCP\AppFramework\Http\Response;
 use OCP\IL10N;
 use OCP\IRequest;
 
-/** The document tree (0.22.0): quote documents through the server and the project dossier. */
+/**
+ * The document tree (0.22.0): quote documents through the server and the
+ * project dossier. Since 0.32.0 the quote's issue (`quotes: 4`) and its
+ * three document kinds (`quote_documents: 1`).
+ */
 final class DocumentTreeController extends BaseController {
+	private const MAX_BODY = 4096;
+
 	public function __construct(
 		IRequest $request,
 		TenantService $tenants,
 		IL10N $l,
 		private QuoteDocumentService $quotes,
+		private QuoteIssueService $issues,
 		private DossierService $dossiers,
 	) {
 		parent::__construct($request, $tenants, $l);
 	}
 
-	/** PUT /quotes/{key}/document – the body is the PDF, at most 20 MB. */
-	#[ApiRoute(verb: 'PUT', url: '/api/v1/quotes/{key}/document')]
+	/** POST /quotes/{key}/issue {"date"?, "valid_until"?, "hours"?, "amount"?} – the number from the team's counter, the frozen copy `issued`. */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/quotes/{key}/issue')]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 60, period: 60)]
-	public function putQuote(string $key): DataResponse {
-		return $this->run(fn () => $this->quotes->put($this->tenants->current(), $key, Json::readInput(ReceiptRules::FILE_MAX)));
+	public function issueQuote(string $key): DataResponse {
+		return $this->run(fn () => $this->issues->issue($this->tenants->current(), $key, $this->body(self::MAX_BODY)));
 	}
 
-	/** GET /quotes/{key}/document – the stored PDF. */
+	/** PUT /quotes/{key}/document – the body is the TimeSister PDF, at most 20 MB; needs an issued quote. */
+	#[ApiRoute(verb: 'PUT', url: '/api/v1/quotes/{key}/document')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 30, period: 60)]
+	public function putQuote(string $key): DataResponse {
+		return $this->run(fn () => $this->quotes->put($this->tenants->current(), $key, Json::readInput(DocumentRules::FILE_MAX)));
+	}
+
+	/** POST /quotes/{key}/documents?kind=sent|signed – the body is the PDF, at most 20 MB; added, never overwritten. */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/quotes/{key}/documents')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 30, period: 60)]
+	public function addQuoteDocument(string $key): DataResponse {
+		return $this->run(fn () => $this->quotes->add($this->tenants->current(), $key, $this->request->getParam('kind'), Json::readInput(DocumentRules::FILE_MAX)));
+	}
+
+	/** GET /quotes/{key}/documents – the filed documents in order. */
+	#[ApiRoute(verb: 'GET', url: '/api/v1/quotes/{key}/documents')]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 120, period: 60)]
+	public function listQuoteDocuments(string $key): DataResponse {
+		return $this->run(fn () => $this->quotes->list($this->tenants->current(), $key));
+	}
+
+	/** GET /quotes/{key}/document?kind=timesister|sent|signed&name= – one filed PDF. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/quotes/{key}/document')]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 120, period: 60)]
 	public function getQuote(string $key): Response {
 		return $this->respond(function () use ($key): Response {
-			$r = $this->quotes->get($this->tenants->current(), $key);
+			$r = $this->quotes->get($this->tenants->current(), $key, $this->request->getParam('kind'), $this->request->getParam('name'));
 			return new DataDownloadResponse($r['content'], $r['name'], 'application/pdf');
 		});
 	}

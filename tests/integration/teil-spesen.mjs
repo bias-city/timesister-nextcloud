@@ -202,7 +202,7 @@ export async function spesen() {
 		head('Expenses 0.30.0: setup')
 		{
 			const cap = (await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')).data?.capabilities?.timesister
-			check('capability expense_table: 2 (0.31.0)', cap?.expense_table === 2 && cap?.version === '0.31.0', cap)
+			check('capability expense_table: 2 (0.31.0), version 0.32.0', cap?.expense_table === 2 && cap?.version === '0.32.0', cap)
 			expect('documents.root for the test', await ocs(A, 'PUT', '/team/settings', { documents: { root: FOLDER } }), 200)
 			expect('settings: costs on, CHF, an own expense number', await ocs(A, 'PUT', '/records/setting/settings', { version: settings.status === 200 ? settings.data.version : 0, data: { ...base,
 				currency: 'CHF', modules: { ...(base.modules || {}), costs: true }, expense_number: { pattern: `SQ-${RUN}-{no:4}`, per_year: true, start: 1 } } }), 200)

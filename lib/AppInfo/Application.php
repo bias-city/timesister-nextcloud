@@ -24,8 +24,8 @@ use OCP\Calendar\Events\CalendarObjectUpdatedEvent;
 use OCP\Group\Events\GroupDeletedEvent;
 use OCP\User\Events\UserDeletedEvent;
 
-// The libraries of the invoice documents (0.19.0: TCPDF, swiss-qr-bill; 0.20.0: horstoeko/zugferd) live
-// in vendor/ and come through Composer's autoloader; Nextcloud loads only lib/.
+// No runtime library since 0.32.0 (the Mac app renders every document); a vendor/
+// autoloader is used when present – Nextcloud loads only lib/.
 if (is_file(__DIR__ . '/../../vendor/autoload.php')) {
 	require_once __DIR__ . '/../../vendor/autoload.php';
 }

@@ -6,9 +6,10 @@
 // (catalog and lead), Jobs and their weekly numbers, billing marks and externals, invoices and their numbers, quotes, the invoice template, team boundary, conflicts, batch, delta, history,
 // backups (with consent, visible copy and weekly job), heartbeat,
 // concurrency, the time entries (named calendars, job, roles), invoicing
-// on the server (issue, reverse, paid, ledger and chain) and the invoice
-// documents (folders, preview, stored PDF, ledger hash, chain head) and the
-// e-invoices and exports (tax case, ZUGFeRD, XRechnung, QRR, exports, webhooks),
+// on the server (issue in two steps since 0.32.0 – reservation, the app's
+// PDF closes –, reverse, paid, ledger and chain) and the invoice documents
+// (folders, the filed PDF, its hash in the issued entry, chain head) and the
+// e-invoices and exports (tax case, the app's XRechnung, QRR, exports, webhooks),
 // VAT per invoice line and the cost positions of a budget (0.21.0), receipts,
 // expense reports and the document tree (0.22.0), approval by assignment and
 // fixed expense reports with ledger (0.23.0), the invoicing mode and the
@@ -39,6 +40,7 @@ import { kosten } from './teil-kosten.mjs'
 import { belege } from './teil-belege.mjs'
 import { spesen } from './teil-spesen.mjs'
 import { uebergabe } from './teil-uebergabe.mjs'
+import { renderer } from './teil-renderer.mjs'
 import { summary } from './harness.mjs'
 
 await teams()
@@ -60,6 +62,7 @@ await kosten()
 await belege()
 await spesen()
 await uebergabe()
+await renderer()
 await rest()
 await sicherungen()
 process.exit(summary())

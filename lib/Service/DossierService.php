@@ -80,9 +80,8 @@ final class DossierService {
 				continue;
 			}
 			$ids[$inv->getId()] = true;
-			if ($inv->getDocumentState() === InvInvoice::DOCUMENT_DONE) {
-				$add('Rechnungen', $inv->getDocumentPath());
-				$add('Rechnungen', $inv->getXmlPath());
+			foreach ($inv->documents() as $doc) {
+				$add('Rechnungen', $doc['path']);
 			}
 		}
 		foreach ($this->records->findLiveByKind($tid, ReceiptRules::KIND) as $rc) {
