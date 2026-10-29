@@ -54,7 +54,7 @@ final class DraftResolver {
 	public function resolve(int $tenantId, string $key): array {
 		$h = $this->head($tenantId, $key);
 		$settings = $this->live($tenantId, 'setting', 'settings');
-		$issuer = IssueRules::issuerOf($settings) ?? throw ApiException::invalid('The team has no invoice issuer; set “issuer” in the settings first.');
+		$issuer = IssueRules::issuerOf($settings) ?? throw ApiException::invalid('The team has no invoice issuer; set “issuer” in the settings first.')->code(ErrorCode::NO_ISSUER)->field('issuer');
 		[$bookings, $positions, $receipts] = $this->billables($tenantId, $key, $h['d'], $h['projectKey']);
 		$positions = ReceiptLineRules::prepare($positions, $receipts);
 		$cur = $h['record'];
@@ -192,7 +192,7 @@ final class DraftResolver {
 					continue;
 				}
 				if ($h['start'] === $start) {
-					throw ApiException::conflict(Message::of('Booking {n} is billed by invoice {number}.', ['n' => $i + 1, 'number' => $h['number']]));
+					throw ApiException::conflict(Message::of('Booking {n} is billed by invoice {number}.', ['n' => $i + 1, 'number' => $h['number']]))->code(ErrorCode::BOOKING_BILLED);
 				}
 				$live = true;
 			}
@@ -208,12 +208,12 @@ final class DraftResolver {
 			$ext = $handed[$person . "\n" . $uid] ?? [];
 			foreach ($ext as $x) {
 				if ($x['start'] === $start) {
-					throw ApiException::conflict(Message::of('Booking {n} is billed by invoice {number}.', ['n' => $i + 1, 'number' => $x['number']]));
+					throw ApiException::conflict(Message::of('Booking {n} is billed by invoice {number}.', ['n' => $i + 1, 'number' => $x['number']]))->code(ErrorCode::BOOKING_BILLED);
 				}
 			}
 			if (!$live && $ext === []) {
 				$doc = $mark->document ?? null;
-				throw ApiException::conflict(Message::of('Booking {n} is billed by invoice {number}.', ['n' => $i + 1, 'number' => is_string($doc) && $doc !== '' ? $doc : '?']));
+				throw ApiException::conflict(Message::of('Booking {n} is billed by invoice {number}.', ['n' => $i + 1, 'number' => is_string($doc) && $doc !== '' ? $doc : '?']))->code(ErrorCode::BOOKING_BILLED);
 			}
 		}
 	}

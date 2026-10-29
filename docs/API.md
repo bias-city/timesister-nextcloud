@@ -1,6 +1,3 @@
-> **Copy.** The authoritative version is `nc-app/API.md` in the monorepo
-> until the repository `bias-city/timesister-nextcloud` is split off. After that, this file applies.
-
 # TimeSister Server – API Version 1 (Contract)
 
 As of 2026-09-27. This contract applies to the Nextcloud app `timesister`
@@ -16,15 +13,96 @@ deviates from it changes this file first. Plan and rationale: `PLAN-NC-APP.md`.
 - Response in the OCS envelope: `{"ocs":{"meta":{"status","statuscode","message"},"data":…}}`.
   With OCS v2 the HTTP status matches `statuscode`. Below, only `data` is
   described.
-- Errors: HTTP 400, 403, 404, 409, 413 or 422, with
+- Errors: HTTP 400, 403, 404, 409, 410, 413 or 422, with
   `data = { "error": "<code>", "message": "<sentence in the account's language>", …}`.
   Codes: `no_team`, `ambiguous_team`, `forbidden`, `not_found`, `conflict`,
-  `invalid`, `too_large`. `message` is a sentence in the account's language:
+  `invalid`, `too_large`, `gone` (410, since 0.31.0). `message` is a sentence in the account's language:
   Nextcloud's language setting for the account, else the `Accept-Language`
   header, else English. English is the source text; German comes from
-  `l10n/de.json` (informal) and `de_DE.json` (formal). Clients decide on the
-  `error` code, never on the wording.
+  `l10n/de.json` and `de_DE.json` (both informal since 0.31.0). Clients
+  decide on the `error` code, never on the wording. Since 0.31.0 a rule
+  violation also carries `code` and, where it concerns one field, `field`
+  (see «Error codes» below); the Mac app maps `code` to its own sentence and
+  to the place that resolves it.
 - Times as ISO 8601 in UTC (`2026-09-26T08:15:00Z`), days as `YYYY-MM-DD`.
+
+## Error codes (0.31.0)
+
+`data = { "error", "message", "code"?, "field"?, … }`. `error` stays the
+coarse class (`no_team`, `ambiguous_team`, `forbidden`, `not_found`,
+`conflict`, `invalid`, `too_large`, and the 409/422 classes `confirm`,
+`issued`, `duplicate` that older releases already sent). `code` is a stable
+snake_case identifier of the rule that was violated; `field` names the
+request field it concerns (`person`, `currency`, `issuer`, `category`,
+`rate`, …). Both are optional: a plain form error (`invalid` with a field)
+carries `field` only; a rule violation carries `code`. Neither ever
+changes once published; a rule that goes away keeps its code in this table
+as *retired*. Message wording may change at any time.
+
+| `code` | HTTP / `error` | Meaning |
+|---|---|---|
+| `expense_settled` | 409 conflict | the receipt is on a fixed expense report; amounts and expense fields do not change (`field` names the one that stays, also `file`), it is not deleted, rejected or reopened |
+| `expense_settled_lead_only` | 403 forbidden | a settled expense is corrected (project, budget, cost, amount for the budget, invoice effect, note) by Team Admins and the project's Leads only |
+| `expense_fields_owner_only` | 403 forbidden | category, factor and rate are set by the person and Team Admins |
+| `expense_export_admin_only` | 403 forbidden | only Team Admins export expenses |
+| `receipt_approved_not_deleted` | 409 conflict | an approved, internal or billed receipt is not deleted; take the approval back first |
+| `receipt_approved_lead_only` | 403 forbidden | after approval only Team Admins and the project's Leads change a receipt |
+| `receipt_approved_stays` | 409 conflict | an approved receipt changes only in project, cost kind, budget, cost, amount for the budget, invoice effect and note (`field` names the one that stays) |
+| `receipt_approver_only` | 403 forbidden | receipts are approved and rejected by the project's Leads and Team Admins; general receipts and those without a file by Team Admins |
+| `receipt_billed` | 409 conflict | the receipt is billed with an invoice: not reopened, changes only in `note` (`field` names the one that stays); reverse the invoice first |
+| `receipt_file_missing` | 422 invalid | the receipt has no file yet |
+| `receipt_not_approved` | 409 conflict | only an approved receipt is reopened |
+| `receipt_not_open` | 409 conflict | only an open receipt is approved, rejected or given a file |
+| `receipt_not_own` | 403 forbidden | members read and write only the receipts they created or paid; Leads also those of their projects |
+| `receipt_reopen_admin_only` | 403 forbidden | only Team Admins take an approval back |
+| `booked_currency_amount` | 422 invalid | a receipt in another currency needs the amount paid in the team's currency (`field: booked`) |
+| `budget_currency_amount` | 422 invalid | a budget in a third currency needs the amount in that currency (`field: billed`) |
+| `rule_has_receipts` | 409 conflict | an expense rule with receipts is not deleted; end it by `to` |
+| `rule_owner_only` | 403 forbidden | expense rules are written by their person and by Team Admins |
+| `rule_period_duplicate` | 409 duplicate | a recurring receipt of this rule and period exists |
+| `report_no_expenses` | 422 invalid | no open expenses of this person in the period |
+| `report_no_category` | 422 invalid | an expense of the period has no category (`field: category`) |
+| `report_no_rate` | 422 invalid | an expense of the period has no rate to the team's currency (`field: rate`) |
+| `report_not_fixed` | 409 conflict | the action needs a fixed expense report (documents, reverse; a `paid` one of 0.23.0 is not reversed) |
+| `report_not_writable` | 409 conflict | an expense report changes only through its actions |
+| `report_number_taken` | 409 conflict | the next expense number is taken; check the expense number pattern |
+| `report_owner_only` | 403 forbidden | only the person and Team Admins read an expense report and store its documents |
+| `report_reverse_admin_only` | 403 forbidden | only Team Admins reverse expense reports |
+| `report_document_exists` | 409 conflict | a document of this name with other content is stored already |
+| `report_documents_max` | 409 conflict | an expense report holds at most 5 documents |
+| `person_not_member` | 422 invalid | `person` is not an account of the team (`field: person`) |
+| `settle_owner_only` | 403 forbidden | only the person and Team Admins settle expenses |
+| `no_currency` | 422 invalid | the team has no currency (`field: currency`); reserved – the server falls back to CHF, the Mac app raises it locally |
+| `no_issuer` | 422 invalid | the team has no invoice issuer (`field: issuer`) |
+| `invoice_issued` | 409 issued | an issued invoice does not change; reverse it |
+| `invoice_not_draft` | 409 conflict (hand-over), 422 invalid (issue) | the action needs a draft without a number |
+| `invoice_no_budget` | 422 invalid | every invoice belongs to a budget (`field: budget`) |
+| `invoice_handed_over` | 409 conflict | the invoice is handed over to an external system; revoke the hand-over first |
+| `invoice_not_handed_over` | 409 conflict | revoking, the system's PDF and the cancelled mark need a handed-over invoice |
+| `invoice_lead_only` | 403 forbidden | only Team Admins and the project's Leads write invoices |
+| `invoice_lead_draft_only` | 403 forbidden | a Lead writes only drafts without a number; issuing, payment and cancelling are for Team Admins |
+| `invoice_review_admin_only` | 403 forbidden | only Team Admins return a draft submitted for approval |
+| `invoice_issue_admin_only` | 403 forbidden | only Team Admins issue, reverse and settle invoices |
+| `invoice_issue_external` | 409 conflict | the team hands its invoices over to an accounting system; TimeSister does not issue them |
+| `invoice_number_admin_only` | 403 forbidden | only Team Admins assign invoice numbers |
+| `invoice_number_taken` | 409 conflict | the next invoice number is taken; check the invoice number pattern |
+| `invoice_already_reversed` | 409 conflict | the invoice is reversed already |
+| `invoice_read_lead_only` | 403 forbidden | only Team Admins and the project's Leads read the fixed invoice |
+| `booking_billed` | 409 conflict | a booking of the draft is billed by another invoice |
+| `handover_admin_only` | 403 forbidden | only Team Admins hand invoices over |
+| `handover_mode_not_external` | 409 conflict | handing over needs `invoicing_mode` external |
+| `handover_other_system` | 409 conflict | the body's system is not the team's |
+| `handover_no_archive` | 409 conflict | the team does not store the accounting system's PDFs (`invoicing_mode.archive_pdf`) |
+| `handover_pdf_exists` | 409 conflict | the accounting system's PDF of this invoice is stored already; it stays |
+| `exchange_rate_server_only` | 403 forbidden | exchange rates are written by the server only |
+| `version_conflict` | 409 conflict | the record changed in the meantime (`current` is present; in a batch `conflicts[]`) |
+| `gone` | 410 gone | the route was removed; the client is older than the server (`expense-reports/ready`, `…/paid`, `expense-rules/{key}/approve` since 0.30.0) |
+
+The server app adds codes release by release; every new `ApiException`
+for a rule gets one (a unit test holds the services of receipts, expenses,
+invoices and hand-over to it and keeps this table and the constants of
+`ErrorCode` equal). Form errors (`invalidField`, `missing`, `notBool`,
+`name`, `content`, `person` required) carry `field` and no `code`.
 
 ## Capability
 
@@ -266,7 +344,7 @@ Clarifications the app implements this way. Nothing stated above changes.
   before the app runs. `data` is then empty (`[]`), the message is in
   `meta.message`. All other errors have `data.error`.
 - **Sizes:** `data` over 256 KB → `413 too_large`. Body of a `PUT` or
-  restore at most 1 MB, of a batch at most 50 MB, more than 500 writes →
+  restore at most 1 MB, of a batch at most 16 MB (0.30.1; was 50), more than 500 writes →
   `413 too_large`.
 - **Body:** `kind`, `key` and `id` are in the path; if they are in the body
   → `400 invalid`. Not a JSON object, `version` missing or not an integer
@@ -1768,12 +1846,16 @@ Admins).
 | `codes` | While a quote (`draft`, `quoted`, `declined`) it may be empty or missing – as may `subprojects`. From `active` on (also with no status) exactly one code, as since 0.12.0: none → `422` “An active project needs a code.”; more than one → `422` “A project has exactly one code …” in every status. |
 | `from_quote` | Optional boolean: the project began as a quote. It keeps it in every status, also `active`. `true`, `false` or `null`; anything else `422`. No rights hang on it. |
 | `team` | Optional list of `{ "user": uid, "role": role }`: the accounts assigned to the quote or project and their role (see “The team and its roles”). At most 100, each an account of the team – also one who left (`422` “Not members of this team: …” otherwise). |
-| `budgets[].currency` | Optional, three letters (`CHF`), stored upper case; `422` otherwise. |
-| `budgets[].work_packages[].rate` | Optional number ≥ 0; `422` otherwise. |
+| `budgets[].currency` | Optional, three letters (`CHF`), stored upper case; `422` otherwise. Since 0.27.0 the project's `currency` overrides it on write (see “Project: `currency`”). |
+| `budgets[].work_packages[].rate` | Optional number ≥ 0; `422` otherwise. Since 0.26.3 the default for the packages below (`parent`) without a rate of their own. |
+| `budgets[].work_packages[].hours` | Since 0.26.3: a package that is the `parent` of another has no hours of its own – all entries zero or none; `422` “A work package with packages below has no hours of its own – move them to a package below.” otherwise. Its figure is the sum of the packages below; such a package is not bookable. |
 | `budgets[].cap` | Optional cost cap in the budget's currency, a number ≥ 0; `null` or missing: the sum of hours × rate counts. `422` ““cap” must be null or a number ≥ 0.” otherwise. |
 | `budgets[].invoice_dates` | Optional list of at most 200 days `YYYY-MM-DD`, each once: the planned invoice dates (forecast invoices – the client computes the ideal line of the burndown between them). `null` or `[]` mean none; otherwise `422` ““invoice_dates” must be a list of at most 200 days (YYYY-MM-DD), each once.” |
 | `budgets[].progress` | Since 0.24.1, optional whole percent `0`–`100` set by a Lead or Team Admin (`null`: not set); `422` ““progress” must be null or a whole number from 0 to 100.” otherwise. |
+| `budgets[].work_packages[].progress` | 0.27.0: `null` or a whole percent `0`–`100` set by a Lead or Team Admin – how far the package is. `null`: the client estimates from done jobs. `422` otherwise. |
+| `budgets[].addenda` | 0.27.0: `null` or a list of at most 200 orders after the quote. Each: `no` integer ≥ 1 (unique in the budget), `date` `YYYY-MM-DD`, `status` `"open"` (default), `"approved"` or `"rejected"`, `title` ≤ 200, and exactly one target – `package` (the `no` of a work package of this budget) with `hours` ≥ 0, or `cost` (the `no` of a cost position) with `amount` ≥ 0; optional `reference` ≤ 200 and `description` ≤ 1000. The client counts approved addenda in the phase of their date (the first milestone on or after it). `422` naming the entry otherwise. |
 | `budgets[].work_packages[].addendum` | Since 0.24.1, optional `true`/`false`/`null`: the work package is an addendum; `422` ““addendum” must be true, false or null.” otherwise. |
+| `budgets[].work_packages[].progress_log` | 0.27.0: `null` or a list of at most 500 entries `{ date, done?, remaining?, by }` – per day and person how far the package is (`done`, a whole percent 0–100) and the remaining effort in hours (`remaining` ≥ 0), at least one of both; `by` a text ≤ 100. Stored trimmed and ordered by date. On write the server joins the stored entries into the list (same `date` and `by` = the same entry; the incoming one wins), so nothing is lost; a package sent without the field keeps its stored log, and a changed bare `progress` becomes an entry of today by the caller. `422` naming the field otherwise (see “Work package: `progress_log`”). |
 | `budgets[].rates` | **Not part of the record.** Rates per person are the person's `cost_rates` (see below). With content it is refused: `422` (““rates” is no longer part of a budget; cost rates live on the person.”) `null` or `{}` (a client's empty default) passes. |
 
 Everything is nullable; what is missing means nothing. The server does
@@ -1847,6 +1929,8 @@ every person record.
 | Field | Content |
 |---|---|
 | `cost_rates` | Optional list of `{ "from": "YYYY-MM-DD", "rate": number ≥ 0 }`: the rate valid from that day on, like `workload`. Each day once. `null` or `[]` mean nothing; any order, stored as sent. A non-list, an entry without a real day `from` or a number `rate` ≥ 0, or a day twice: `422`. Other fields of an entry pass. |
+| `levels` | 0.27.0: the person's level as a series `[{ "from": "YYYY-MM-DD", "level": "<id>" }]` – see Levels (0.27.0). Team Admins and Leads read it, never a member. (`billing_rates`, a rate per person, was dropped before 0.27.0 shipped; it passes unchecked like any unknown field.) |
+| `company` | 0.27.0: `null` or up to 80 characters – the person's company (a subcontractor's people). Part of the name card Leads read. |
 
 ```json
 { "kind": "person", "key": "pbuser1", "data": {
@@ -2331,6 +2415,11 @@ ts_tenants         + entries_revision, entries_since
   new one is read in full.
 - `DELETE /me/time-calendar`: un-names; the person's entries become
   tombstones, kept ones stay.
+- `PUT /me/absences` `{ "items": [{ source_uid, kind, start, end }] }`
+  (every member, for themselves): the complete state of the own absences
+  for the shared vacation calendar, at most 400 items; replaces what was
+  there. With the person's opt-out nothing is stored and what was there
+  goes. Answer `{ stored, opted_out }`.
 - **Naming by convention** (added 2026-10-15): before each run of the job,
   every active member without a named calendar gets `zeit-<uid>` – the
   calendar the Mac app creates – as soon as that calendar exists. The
@@ -2444,6 +2533,41 @@ deleted to someone who merely loses sight.
   error kept in `last_error`; at most 100 000 objects per calendar or
   feed in one full read.
 - Team boundary in every query, as everywhere.
+
+### Lists of hours (0.28.0)
+
+`POST /entries/list` (Team Admins): the hours of an **external person** –
+no account, no calendar – straight into the book, source `list`.
+
+```json
+{ "uid": "ext-max", "put": ["BEGIN:VCALENDAR…END:VCALENDAR"], "delete": ["fs-…"] }
+```
+
+- `uid` is the key of a person record that is no member and names no
+  account; `put` holds iCalendar objects with one UID each (at most 256 KB),
+  `delete` event UIDs; together at most 2000 per call.
+- `put` stores or replaces by event UID (the cutoff applies), `delete`
+  tombstones. A booking that is billed or on an invoice is not touched
+  (`locked`); a UID that already belongs to a calendar or feed entry is
+  refused (`failed`). Every item gets its own result:
+  `{ "event_uid", "status": "ok" | "locked" | "failed", "etag", "revision", "message" }`.
+- Entries of source `list` are delivered by `GET /entries` like any other
+  and are corrected with `POST /entries/correct` – the change goes into the
+  entry itself. A list sent again keeps the corrections: every applied
+  correction of the person and event is laid onto the incoming object
+  before the book stores it. `delete` of a UID that belongs to a calendar
+  or feed entry is refused (`failed`), like `put`.
+- All objects of one call go into the book in one transaction; the result
+  of each is read afterwards. When the person record is deleted
+  (tombstone), the list entries of that person vanish with the next write.
+- Team ZIP: `calendars/list-<uid>.ics` with `list: true` in the manifest –
+  never the path of a member's calendar; an import writes them back into
+  the book, never onto a member (`stored: false, reason: member`).
+  Capability `entry_lists: 1`.
+- `GET /entries` reads in two steps: the rows pass the role filter without
+  their texts, then only the page's texts are read. `GET /entries`,
+  `/records`, `/team`, `/me` and the receipt and expense report files take
+  at most 120 calls per minute and account (`429`).
 
 ### Team ZIP (added 2026-10-15)
 
@@ -3249,6 +3373,7 @@ Each budget of a project record may carry `costs[]`, separate from
 | `markup` | `rebill` only: 0–100 percent |
 | `vat` | `rebill` only: `null` or 0–100 – a rate of its own for this position |
 | `description` | `null` or up to 300 characters |
+| `code` | 0.26.3: `null` or 1–60 characters – the code of the work package the position belongs to (the client's code logic: `D200.2.1` is the costs of package 2.1; nobody books hours on it) |
 
 `422 invalid` naming the field otherwise. Consumption of a cost position
 is computed by the client (0.21.0: from the issued invoices' lines with
@@ -3415,6 +3540,10 @@ The Mac app no longer writes quote PDFs over WebDAV.
 
 ### Receipts (record `receipt`, B3)
 
+> Since 0.30.0 also `category`, `factor`, `rate`, `template`, `quantity`,
+> open expense fields and settled receipts – see “Expense table, settling
+> and exchange rates, 0.30.0”, A and B.
+
 Key from the client (`rc-…`). Data:
 
 | Field | Rule |
@@ -3457,19 +3586,29 @@ returned): `status`, `file`, `invoice`, `report`, `created_by`,
 | GET | `/receipts/{key}/file` | who reads the receipt | the file |
 | POST | `/receipts/{key}/approve` | Lead of the project, Team Admins (general and trust: Team Admins) | renames the file once to the current name (project and cost in it), then never moves it again; status `approved` / `internal` |
 | POST | `/receipts/{key}/reject` | same | body `{ reason }` (1–300 characters); status `rejected` |
+| POST | `/receipts/{key}/reopen` | Team Admins | takes the approval back (0.27.0): the receipt is `open` again, with who and when; not while billed with an invoice or on a fixed expense report; the file keeps its name until the next approval |
 
 ### Expense rules (record `expense_rule`, B4a)
+
+> Since 0.30.0 a rule applies from creation: no approval, deleting while no
+> receipt names it – see “Expense table, settling and exchange rates,
+> 0.30.0”, G.
 
 `{ schema: 1, person, text, amount, vat_rate|null, period: "monthly"|"quarterly"|"yearly", from: "YYYY-MM-DD", to: null|"YYYY-MM-DD", project|null, budget|null, cost|null }`;
 server-owned `approved_by`, `approved_on`. Written by the person
 (member: only for themselves) and Team Admins; `POST
 /expense-rules/{key}/approve` by Team Admins (with project: also its
-Lead). Changing `amount`, `vat_rate` or `period` after approval clears
+Lead) sets `approved_by` and `approved_on` and answers the record.
+Changing `amount`, `vat_rate` or `period` after approval clears
 the approval. Ending = setting `to`. The **client** creates the
 `recurring` receipt of each period that has begun (locally as in a team);
 the server only checks.
 
 ### Expense reports (record `expense_report`, B4a)
+
+> Replaced in 0.23.0 and again in 0.30.0 (settling by the person over a
+> period, documents of the app) – see “Expense table, settling and exchange
+> rates, 0.30.0”.
 
 `{ schema: 1, person, from, to, receipts: [keys] }`; server-owned
 `status` (`submitted` → `approved` → `paid`), `sums: { net, vat_lines,
@@ -4002,6 +4141,12 @@ amount when it is missing.
 
 ## Simpler receipt flow and fixed expense reports, 0.23.0 (2026-10-16)
 
+> Since 0.30.0: no `ready`, no `paid`, no server PDF; Team Admins no longer
+> fix alone – the person settles a period; lines and sums are those of the
+> expense table; the ledger payloads of `expense_fixed` and
+> `expense_document` changed. See “Expense table, settling and exchange
+> rates, 0.30.0”.
+
 Decision of 2026-10-16: one receipt list, receipts flow on to an expense
 list (per person) or to invoicing (per project). Expense reports are
 **fixed** like invoices: frozen, numbered, PDF with receipt copies, in the
@@ -4458,6 +4603,37 @@ characters (the new actions are longer). Not published.
 
 Also in the budget of a quote (`ProjectRules::checkBudget`).
 
+### Work package: `progress_log`
+
+0.27.0 (unpublished – no transition). The log of how far a work package is
+and how much effort remains, kept per day and person; `progress` stays the
+newest `done` for old clients.
+
+```json
+"progress_log": [
+  { "date": "2026-09-01", "done": 20, "remaining": 80, "by": "lea" },
+  { "date": "2026-10-21", "remaining": 45.5, "by": "bob" }
+]
+```
+
+- `null` or a list of at most 500 objects; each a day `date`, `done` null
+  or a whole percent 0–100, `remaining` null or a number ≥ 0 – at least one
+  of both – and `by` a text of at most 100 characters (the account that
+  recorded it; `Umzug` marks the Mac app's migration of an old `progress`).
+  Stored trimmed and ordered by date; `422` naming the field otherwise.
+- **Never lost** (`ProgressLog::merge`, project records only): on write the
+  server reads the stored project and joins each package's stored entries
+  into the incoming list – an entry is the same when `date` and `by` match,
+  and the incoming one wins (a correction of the day). A package sent
+  without the field (an older client) keeps its stored log; if that client's
+  bare `progress` differs from the newest `done`, an entry of today by the
+  caller is added. Packages are matched by `no`, budgets by `id`; a new
+  package or budget passes as sent.
+- Clients read the newest entry up to a reference date: `done` and
+  `remaining` separately (each the newest entry that carries it). The Mac
+  app's forecast at end is actual + Σ `remaining` against the budget once
+  every package with hours has one, otherwise the pace of the last 8 weeks.
+
 ### Team setting `invoicing_mode.archive_pdf`
 
 In the mode external the object takes `archive_pdf` (`true`|`false`|`null`,
@@ -4664,3 +4840,732 @@ Also in a quote's budget (`ProjectRules::checkBudget`).
 - `ProjectRules::checkBillingPlan`, `WP_ROLES`, `WP_GROUP_MAX`.
 - Unit tests `TemplateRulesTest`, `CatalogRulesTest`, `ProjectRulesTest`;
   integration parts `teil-vorlagen.mjs`, `teil-projekte.mjs`.
+
+## Advance invoices, 0.26.0 (2026-10-17)
+
+Additive, `api: 2` unchanged; capability `advances: 1`.
+
+A step of the invoice plan with an agreed share or amount (`billing_plan`,
+0.25.1) is billed as an **advance invoice**: one line with exactly that
+amount, the hours stay open. A later invoice of the same budget, usually
+the final one, bills the hours and deducts the advances.
+
+### Positions `advance` and `advance_deduction`
+
+| kind | amount | `invoice` | meaning |
+|---|---|---|---|
+| `advance` | ≥ 0 | absent | the agreed advance, a fee line |
+| `advance_deduction` | ≤ 0 | key of the advance invoice | the advance deducted again, at the advance's VAT rate |
+
+- Only `advance_deduction` carries `invoice`; every other kind without it.
+- Neither has a `cost` or `vat_mode: pass_through`.
+- On a reversal or credit note (`reverses`/`credits` set, 0.27.0) the
+  lines are negated, so the signs mirror: `advance` ≤ 0,
+  `advance_deduction` ≥ 0 – a final invoice with a deduction is reversible.
+- The server checks the form, not whether the named invoice exists; the
+  client deducts each issued advance once.
+
+### The document
+
+- An invoice with an `advance` line that is no reversal or credit note is
+  titled «Advance invoice …» / «Akontorechnung …».
+- Its e-invoice (ZUGFeRD / XRechnung) has type code **326** (partial
+  invoice) instead of 380; reversals stay 384.
+
+### Cost position: `forecast`
+
+`budgets[].costs[].forecast`: null or a list of at most 200 amounts ≥ 0,
+one per milestone of the budget, in the same order as
+`work_packages[].hours`. The client writes `cap` as their sum. A position
+by percentage has no forecast: its share per phase follows the fee of the
+work packages in that phase. The budget's cost curve plans each cap along
+its forecast (linear within a phase), else evenly over the term.
+
+### Work package: `parent` and `tags`
+
+Replace `group` and `role` (0.25.1, unpublished – no transition; old
+fields pass unchecked like any unknown field).
+
+- `work_packages[].parent`: null or the `no` of another work package of
+  the same budget, stored trimmed. It forms the tree (SIA 3 › 31 › 31.2);
+  clients show a package with packages below it as their sum.
+- `work_packages[].tags`: null or at most 20 texts of 1–60 characters
+  without control characters, stored trimmed – free markers of the team,
+  a second axis across the tree. Catalogs bring theirs (`tags` on template
+  items, which replaces `role` there).
+
+### Invoice: `layout`, `positions[].path` and `.tags`
+
+Capability `invoice_layout: 1` (0.26.1, migration `Version1020Date20261017220000`).
+
+```json
+{ "grouping": "level", "appendix": ["levels", "tags", "budget"],
+  "levels": [{ "title": "3 Projektierung", "target": 34500, "before": 0, "this": 12000 }],
+  "budget": { "target": 66700, "before": 13340, "this": 12000 } }
+```
+
+- `grouping`: `flat` (default) or `level` – hours positions under headings
+  of their `path`, a subtotal where a top level ends; positions without a
+  path follow ungrouped.
+- `appendix`: any of `levels` (per top level: target, billed before, this
+  invoice, remaining), `tags` (hours and amount per tag of this invoice,
+  computed by the server from `positions[].tags`), `budget` (the budget's
+  fee: target, before, this, remaining).
+- The client computes `levels` and `budget` from the budget; the server
+  checks the form and freezes the layout on issue (`layout_json`; in the
+  ledger payload only when set, so older entries keep their payload) and
+  returns it in `GET …/fixed`.
+- Hours positions: `path` (the titles of the levels above, at most 10 of
+  1–500 characters) and `tags` (at most 20 of 1–60).
+- Team setting `tags`: the vocabulary `[{name, description?}]` – not
+  checked by the server, used by the clients.
+
+### As built, 0.26.0 (2026-10-17)
+
+- `InvoiceRules::ADVANCE`, `ADVANCE_DEDUCTION`, `checkAdvance`, `isAdvance`;
+  `InvoiceDocument::isAdvance`; `ProjectRules::checkParentAndTags`; `DocumentRules::title(…, $advance)` and
+  the label `advance`; `EInvoiceXml::TYPE_PARTIAL`; `CostRules::FORECAST_MAX`.
+- Unit tests `InvoiceRulesTest`, `DocumentRulesTest`, `EInvoiceXmlTest`, `CostRulesTest`.
+
+## Levels, 0.27.0 (2026-10-21)
+
+The value of the work – Lead, Specialist, Staff – as **levels** with default
+rates per hour. A person carries one level (with «from»); a project inherits
+the defaults and may override the rate per level. Hours are valued at the
+rate of the person's level in the project, else the default of that day, else
+the work package's mean rate (`rate`). The server checks the shape and keeps
+the rates away from members; the clients compute.
+
+### Team setting `levels`
+
+```json
+{ "levels": [
+  { "id": "lead", "name": "Leitung", "rates": [{ "from": "2026-01-01", "rate": 180 }, { "from": "2027-01-01", "rate": 190 }] },
+  { "id": "staff", "name": "Mitarbeit", "rates": [{ "from": "2026-01-01", "rate": 120 }] } ] }
+```
+
+- `null` or a list of at most 50 levels. `id`: 1–40 lower-case letters,
+  digits or dashes, unique in the list and stable (persons and projects
+  refer to it); `name`: 1–60 characters; `rates`: missing, `null` or a
+  series like `cost_rates` (`from` a day, each day once, `rate` ≥ 0). A raise
+  is a new entry – the past keeps its rate. `422` naming the fault otherwise.
+- **Members read the list without `rates`** (`id` and `name` stay); Team
+  Admins and Leads (of an active project) read it whole. Written by Team
+  Admins, like every setting.
+
+### Person: `levels`
+
+`levels: [{ "from": "YYYY-MM-DD", "level": "<id>" }]` – the level valid from
+that day on, each day once; `null` or `[]` mean none. The id is not checked
+against the setting: an unknown one counts as no level. Team Admins read it;
+a Lead reads it on every name card and on their own record; a member never
+does (not on the own record either). Written by Team Admins only.
+
+### Project: `level_rates`
+
+`level_rates: { "<id>": rate ≥ 0 }` – the project's own rate per level in its
+currency; what is missing inherits the default. `null` or `{}` mean nothing.
+Only in the full project record (Team Admins and the project's Leads), never
+in the booking catalog. The Leads write it with the rest of the project.
+
+### Project: `currency`
+
+`currency`: `null` or three letters, stored upper case (`422` ““currency” must
+be three letters, for example CHF.” otherwise) – the one currency of the
+project; its `level_rates` and its budgets count in it. With a `currency` on
+the project every `budgets[].currency` is set to it on write (older clients
+keep reading it there); without one a budget keeps its own. Summing across
+projects happens per currency – there is no exchange rate. Only in the full
+project record, never in the booking catalog.
+
+### As built, 0.27.0 (2026-10-21)
+
+- `LevelRules` (`validateSettings`, `validatePerson`, `validateProject`,
+  `withoutRates`); `PersonRules::LEVELS`, `LEAD_ONLY`; `PersonAccess::own()`
+  and `card()` with the Lead flag; `RecordRights::shape()` strips the rates
+  of `setting/settings` for members.
+- Unit tests `LevelRulesTest`, `PersonRulesTest`.
+
+## Corrections of bookings, 0.27.0 (2026-10-21) – the app writes into the time calendar
+
+Decided 2026-10-21 (`PLAN-SAETZE.md`, S3 / B2): a Team Admin or the Lead
+of the project corrects **title, code, billable and level** of a booking,
+and the app writes that **into the event of the person's time calendar**
+on the server – the same way for own and foreign bookings, and the one
+exception to the rule of 0.17.0 that the server never writes into a named
+calendar. Date, start and duration are never changed here (less to bill is
+done on the invoice). «Billed» stays in the book, not in the event. The
+Mac app's `billable` marks (0.14.0) are replaced by this; the record kind
+stays for old clients. Still `api: 2`; capability `corrections: 1`.
+
+### In the event
+
+- Code and title: `SUMMARY` is `#<code> <title>`; a new code replaces every
+  `#code` token (also in `LOCATION` and `DESCRIPTION`), a new title keeps
+  the tokens. An event with an own `X-TIMESISTER-CODE` (a foreign
+  invitation) gets the new code there and keeps its title.
+- Billable: the category `non-billable` (set when `billable: false`,
+  removed when true; the old `nicht anrechenbar` is removed too). Other
+  categories stay.
+- Level: `X-TIMESISTER-LEVEL:<level id>` – only the id of a level of
+  `settings.levels`, never a rate; `level: null` removes the property.
+- `SEQUENCE` is increased, `DTSTAMP` and `LAST-MODIFIED` set, so every
+  client re-reads. Nested components (`VALARM`) are untouched.
+- **A series as a whole:** the change goes into every `VEVENT` of the
+  object (master and exceptions). A single occurrence cannot be corrected
+  on its own; the client sends the object once, whichever occurrence was
+  chosen.
+
+### `POST /entries/correct`
+
+Team Admins and Leads (members: `403 forbidden`). Body:
+
+```json
+{ "entries": [ { "uid": "anna", "event_uid": "…" }, … ],
+  "title": "Besprechung Bauherr", "code": "D200.4", "billable": true, "level": "lead" }
+```
+
+- `entries`: 1 to 500 bookings as the book keys them (`uid` = the account,
+  `event_uid` = the object's UID).
+- At least one of `title` (1–500 characters), `code` (a project code,
+  with or without `#`), `billable` (bool), `level` (a level id or `null`).
+  Anything else is `422 invalid` – there is no field for date, start or
+  duration, by design.
+- One change for the whole list; every booking answers for itself:
+
+```json
+{ "results": [
+  { "uid": "anna", "event_uid": "…", "status": "ok", "etag": "…", "revision": 4711,
+    "codes": ["d200.4"], "level": "lead", "ics": "BEGIN:VCALENDAR…" },
+  { "uid": "bruno", "event_uid": "…", "status": "locked", "message": "Booking … is billed by invoice 2026-0007." } ] }
+```
+
+  `status`: `ok` (written, `ics` is the object as stored, `revision` the
+  entry's new revision), `locked` (a row of an issued, paid or handed-over
+  invoice bills the event, or a live `billing` record marks it billed – a
+  draft does not lock), `forbidden` (a Lead without the project), `not_found`
+  (not in the book, vanished from the calendar – `kept` – or the object is
+  gone), `failed` (a feed entry, no named calendar, no dav backend, or the
+  write failed; `message` says what).
+- **Rights of a Lead:** every code of the entry belongs to a project the
+  Lead leads (`/me.lead_of`, subprojects and parts count as for `GET
+  /entries`), and a new `code` does too – moving a booking needs the old
+  and the new project. Team Admins correct everything.
+- After the write the object is stored in the book at once (the listener
+  and an explicit store; the same etag is a no-op), so the next
+  `GET /entries` carries it. Each written booking gets a protocol row.
+
+### `GET /entries` and the level
+
+Every entry adds `level`: the `X-TIMESISTER-LEVEL` of the master
+component (`null` without). The clients read it with their own parser as
+well; the field saves them a parse for lists. `ts_entries` gets the column
+`level` (migration `Version1021`).
+
+### `GET /entries/corrections?uid=&event_uid=&limit=`
+
+The protocol, newest first, at most `limit` (default and maximum 500):
+`{ "corrections": [ { "uid", "event_uid", "by", "at", "changes": { "title"?, "code"?, "billable"?, "level"? } } ] }`.
+Team Admins read everything; Leads the bookings they see in `GET /entries`;
+members `403`. Table `ts_entry_corrections` (`tenant_id`, `uid`,
+`event_uid`, `actor`, `at`, `changes`). Deleting a team removes its rows.
+
+### Capability
+
+```json
+"timesister": { … , "corrections": 1 }
+```
+
+## Corrections as records, offline and per occurrence, 0.27.0 (2026-10-21) – `corrections: 2`
+
+Decided 2026-10-21 (`PLAN-SAETZE.md`, K-Offline / K-Serie): a correction is
+a **record** `correction` – the target state of a booking's corrected
+fields – written through the records API like every record, so a client
+can keep it in its outbox while offline. `POST /entries/correct` stays for
+online lists and old clients; inside it is the same service.
+
+### The record `correction`
+
+- Key: the person's key, `+` and the first 32 hex digits of the SHA-256 of
+  the event UID; with a recurrence of `UID\nrecurrence` (`"s1\n20261012T090000"`).
+- Data: `person` (the person's key), `event_uid`, optional `recurrence`
+  (`YYYYMMDDTHHMMSS` in the series' wall time, or `YYYYMMDD`), and at least
+  one of `title`, `code`, `billable`, `level` (`null` removes the level) –
+  the rules of `POST /entries/correct`. Any other field is `422 invalid`.
+- **Applied as it is written** (inside the records transaction): the
+  server resolves the account (the key itself or an account of the person
+  record), checks the rights and the lock exactly as `POST /entries/correct`,
+  writes the event, and stores the outcome in the record – its own fields:
+  `status` (`applied`, `locked`, `forbidden`, `not_found`, `failed`),
+  `message` (why not), `by`, `at`, and when applied `etag` and `codes` (the
+  entry's codes afterwards). Whatever a client sends in these fields is
+  replaced. A refused correction is still a record (the protocol of the
+  attempt); it is never applied later.
+- **Idempotent:** the record describes a state, not a command. Writing it
+  again when the event already carries the state writes nothing and notes
+  nothing. A later correction of the same booking is the same key – the
+  client merges it into the pending one.
+- Rights: Team Admins and Leads write (`403` for members; a Lead without
+  the project gets `status: forbidden` in the record). Reading: Team
+  Admins; the person themselves (their locked fields, see below); a Lead
+  their own and those whose `codes`/`code` belong to a project they lead.
+  A batch of corrections counts as a per-record batch for Leads.
+- Deleting the record is a tombstone: the state is no longer enforced; the
+  event is not changed back.
+
+### Per occurrence (`recurrence`)
+
+With `recurrence` the change goes into the **exception** of that occurrence
+only: the VEVENT whose `RECURRENCE-ID` matches (wall time, zone aside), or
+a new one – a copy of the master without `RRULE`/`RDATE`/`EXDATE`, with
+`RECURRENCE-ID` and `DTSTART` on the occurrence (the master's `TZID` or
+`VALUE=DATE` or `Z` form) and `DTEND` moved by the master's duration –
+inserted after the master. Without `recurrence` the change goes into every
+VEVENT as before. `GET /entries` keeps `level` from the master; a
+per-occurrence level is read from the object's exception by the clients.
+
+### A corrected field is the lead's
+
+Decided 2026-10-21: a corrected field is changed by the lead (or a Team
+Admin) only. When the book stores a live entry of a named time calendar
+(listener or reader) and an applied correction of that person and event is
+no longer met – the person changed title, code, billable or level in
+another calendar app – the server writes the correction back into the
+event, notes it in the protocol (`kind: reapplied`), counts it on the
+record (`reapplied`, `reapplied_at`, new `etag`; a server write with the
+lead's name, so the record's version grows) and sends the person a
+Nextcloud notification (object `correction`, subject
+`correction_reapplied`). Uncorrected fields, date, start and duration stay
+as the person wrote them. The clients show corrected fields locked to the
+person.
+
+### Protocol
+
+`GET /entries/corrections` rows add `recurrence` (null for the whole
+series) and `kind` (`applied`, `reapplied`). Table `ts_entry_corrections`
+gets both columns (migration `Version1022`).
+
+### Capability
+
+```json
+"timesister": { … , "corrections": 2 }
+```
+
+## Approval of invoice drafts (`review`), 0.27.0 (2026-10-21)
+
+The Lead prepares, the Team Admin issues (decision of 2026-10-21): a Lead
+writes the drafts of the projects they lead as before (no number, no
+issuing) and marks a draft as submitted for approval; Team Admins work
+through the submitted drafts – issue, or return with a note. The mark is
+a field on the record `invoice`; no new endpoint. Issuing stays
+`POST /invoices/{key}/issue`, Team Admins only.
+
+| Field | Rule |
+|---|---|
+| `review` | `null` (default) or an object; other members are dropped |
+| `review.state` | required: `requested` (submitted) or `returned` (the Team Admin's answer) |
+| `review.by`, `review.returned_by` | `null` or text up to 64 characters: who submitted, who returned |
+| `review.at`, `review.changed_at`, `review.returned_at` | `null`, a day `YYYY-MM-DD` or a local time `YYYY-MM-DDTHH:MM:SS` (as `bookings[].start`): when submitted, when the draft changed after that, when returned |
+| `review.note`, `review.returned_note` | `null` or text up to 2000 characters (tab and line breaks allowed): the note to the Team Admin, the note to the Lead |
+
+Validation: `422 invalid` naming the member (“review.state” is one of
+requested, returned.). A **Lead's** write (checked with the draft rule,
+before and after): they may set `requested` (submit) or `null` (withdraw)
+and keep whatever `returned_*` block is stored; they may neither set
+`returned` nor change `returned_by`, `returned_at` or `returned_note` –
+`403 forbidden` “Only Team Admins return a draft submitted for approval; a
+Lead submits or withdraws it.” A resubmission keeps the stored return as
+history. Issuing does not touch the mark: an issued invoice is no longer a
+draft, so clients ignore `review` on it. Checked and stored only.
+
+## Quotes as a subtree, 0.27.0 (2026-10-21)
+
+Capability `quotes: 3`. A quote is a head with a **target** and the same
+subtree a project has: **1–n budgets** with work packages, cost positions
+and milestones. The target is an existing `project` (a follow-up order, a
+further phase) or a **project draft** – code proposal and name of the
+project the acceptance creates; the draft lives only in the quote and is
+no project record. On acceptance the client writes the project (if a
+draft) and all budgets, then sets the quote `accepted` – ordinary record
+writes as before, no new endpoint. Additive; nothing of “Quotes as
+records, 0.16.0” is removed.
+
+New and changed fields of the `quote` record:
+
+| Field | Rule |
+|---|---|
+| `status` | also `negotiation` and `verbal` (verbally agreed) – open like `quoted`; `accepted` still needs `project` |
+| `budgets` | `null` or a list of at most 50 budgets; each checked like `budget` (a text `id` of 1–128 characters, then as a project's budget: `currency`, `cap`, `rates`, `invoice_dates` …). The same `id` twice: `422` “`budgets` must not hold the same `id` twice.”; not a list or more than 50: `422` “`budgets` must be null or a list of at most 50 budgets.” |
+| `budget_ids` | `null` or a list of at most 50 ids (text, 1–128 characters): the ids of the budgets in the project after acceptance; otherwise `422` “`budget_ids` must be null or a list of at most 50 budget ids of 1 to 128 characters.” |
+| `project_draft` | `null` or `{ "code": null \| text, "name": text }` – `name` 1–200 characters without control characters, `code` `null` or 1–64 characters without spaces, `#` or dots. With `project` set: `422` “A quote has either `project` or `project_draft`, not both.” |
+| `budget`, `budget_id` | stay accepted (records of older clients); a client reads them as one budget / one id. New clients write `budgets` and `budget_ids` and leave the old fields out |
+| `currency` | the one currency of the quote: with `project` the project's, with a draft the new project's; every `budgets[].currency` is set to it by the client; frozen at acceptance with `hours` and `amount`, which now sum over all budgets |
+
+```json
+{ "schema": 1, "name": "School house", "status": "negotiation", "customer": "stadt", "project": null,
+  "project_draft": { "code": "N400", "name": "School house new building" }, "currency": "EUR",
+  "budgets": [ { "id": "b-q-1a2b3c4d", "name": "Preliminary project", "currency": "EUR", "cap": 4000,
+                 "work_packages": [{ "no": "AP1", "name": "Concept", "hours": [40], "rate": 100 }] },
+               { "id": "b-q-1a2b3c4d-2", "name": "Building project", "currency": "EUR", "cap": 1500,
+                 "work_packages": [{ "no": "AP1", "name": "Plans", "hours": [20], "rate": 100 }] } ],
+  "budget_ids": [], "hours": null, "amount": null, "leads": ["pblead"] }
+```
+
+Accepted, the quote carries `project`, `budget_ids: ["b-q-1a2b3c4d", "b-q-1a2b3c4d-2"]`,
+`hours: 60`, `amount: 5500`, `currency: "EUR"` and no `budgets`. Rights and
+tombstones as for `quotes: 2`. The invoice's customer (`IssueRules`) is
+found through `budget_ids` as well as the old `budget_id`.
+
+## Pipeline and receivables fields, 0.27.0 (2026-10-21)
+
+Additive, for the controlling of the Mac app (PLAN-CONTROLLING C4). No new
+capability; `invoicing: 1` covers the new endpoint.
+
+`quote` record:
+
+| Field | Rule |
+|---|---|
+| `probability` | `null` or an integer 0–100: the chance to win in percent; `null` means the client's default per status (draft 10, quoted 40, negotiation 60, verbal 80). Otherwise `422` “`probability` must be null or an integer from 0 to 100.” |
+| `lost_reason` | `null` or text of at most 500 characters (why a quote was lost) |
+
+`customer` record:
+
+| Field | Rule |
+|---|---|
+| `type` | `null` or a key: since 0.29.0 any of the team's `settings.customer_types`, 1–40 lower-case letters, digits or dashes (before: one of `public`, `cooperative`, `private`, `company`); otherwise `422` |
+| `payment_days` | `null` or an integer 1–365: the customer's payment term in days. `POST /invoices/{key}/issue` without `due_days` takes it for `due_on` (then the default 30) |
+| `tags` | `null` or a list of at most 30 words of 1–40 characters without `#`, whitespace, comma or control characters: the customer's free tags (`arealentwicklung`), for filtering and sorting in the app; checked from the next release, earlier ones keep the field as it comes |
+
+`invoice` record (checked on every write; a client writes them only on
+invoices the server has not issued – issued ones take the endpoints below):
+
+| Field | Rule |
+|---|---|
+| `dunning_level` | `null` or an integer 0–3 |
+| `dunned_on` | `null` or a day `YYYY-MM-DD`: the last reminder |
+| `payments` | `null` or a list of at most 200 `{ "date": "YYYY-MM-DD", "amount": > 0, "note"?: ≤ 500 }` – the payments received, partial payments included |
+
+Endpoints (Team Admins):
+
+- `POST /invoices/{key}/paid` `{ "paid_on", "amount"?, "note"? }` – with
+  `amount` a payment of that sum is appended to `payments`; without, one over
+  the open rest (amount of the invoice minus the payments so far). The
+  invoice turns `paid` once the payments reach its amount, `paid_on` is then
+  the day of the last payment; a partial payment keeps it `issued`. Ledger
+  action `paid` when settled, `payment` for a part; the payload adds `amount`
+  and `date` when `amount` was given. `POST /invoices/{key}/unpaid` takes all
+  payments back (ledger `unpaid`).
+- `POST /invoices/{key}/dunning` `{ "level": 0–3, "on"?: "YYYY-MM-DD" }` –
+  the dunning level of an issued invoice with the day of the last reminder
+  (missing: today; level 0 clears it). No ledger entry. `422` when not issued.
+  Answer: the record.
+
+## The record `setting/office_costs`, 0.27.0 (2026-10-21)
+
+A fourth setting beside `targethours`, `settings` and `privacy`, for the
+cashflow of the Mac app (PLAN-CONTROLLING C5). Team Admins write it like
+any record (`PUT /records/setting/office_costs`) and are the only ones who
+read it: Leads and members get `403` on the record, in the changes feed
+and in the history. No new capability. Fields, all optional:
+
+```json
+{ "schema": 1,
+  "costs": [ { "id": "c-1", "name": "Rent", "amount": 3000, "due_day": 1, "rhythm": "monthly",
+               "from": "2026-01-01", "to": null, "kind": "rent", "note": "…" },
+             { "id": "c-2", "name": "Salaries", "amount": 40000, "due_day": 25, "rhythm": "monthly",
+               "from": "2026-01-01", "kind": "salaries", "month13": 12 },
+             { "id": "c-3", "name": "AHV", "amount": 0, "due_day": 10, "rhythm": "monthly",
+               "from": "2026-01-01", "kind": "social", "percent": 10.5 } ],
+  "balances": [ { "date": "2026-10-20", "amount": 248000, "note": "Bank and cash" } ],
+  "reserve": 150000 }
+```
+
+| Field | Rule |
+|---|---|
+| `costs[]` | a list of at most 200 objects; `name` text 1–120, `amount` number ≥ 0, `due_day` integer 1–31 (default 1), `rhythm` one of `monthly`, `quarterly`, `half_yearly`, `yearly`, `once`, `from` a day `YYYY-MM-DD`, `to` null or a day on or after `from`, `kind` one of `rent`, `insurance`, `licenses`, `salaries`, `social`, `vat`, `other`, `note` null or text ≤ 500, `id` null or text ≤ 64 (the client assigns it), `month13` null or 1–12 (salaries: the month of the 13th salary), `percent` null or 0–100 (social: of the month's salaries; vat: of the invoices issued in the preceding period – set, it replaces `amount`) |
+| `balances[]` | a list of at most 500 `{ "date": "YYYY-MM-DD", "amount": number, "note"?: ≤ 500 }` – a history; the client keeps one per day and takes the latest up to its reference date |
+| `reserve` | null or a number ≥ 0 |
+
+Unknown fields `422 invalid`. The server stores, it does not compute: the
+forecast (fixed costs by rhythm, 13th salary, VAT estimate, liquidity) is
+the Mac app's.
+
+## The team's customer types, 0.29.0 (2026-10-27) – `customer_types: 1`
+
+Additive. The team setting `settings.customer_types` lists the customer
+types the Mac app offers and evaluates (quotes, work in progress and
+receivables per type):
+
+```json
+{ "customer_types": [ { "id": "public", "name": "Öffentliche Hand" },
+                      { "id": "company", "name": "Unternehmen" },
+                      { "id": "wohnbaugenossenschaft", "name": "Wohnbaugenossenschaft" } ] }
+```
+
+| Field | Rule |
+|---|---|
+| `customer_types` | `null` or a list of at most 50 `{ "id", "name" }`; `id` 1–40 lower-case letters, digits or dashes, not starting with a dash, unique; `name` text of 1–60 characters. Missing or `null`: the team has no list yet; TimeSister fills a first one from the team's use case (profile), and every type stays the team's to rename or remove |
+
+A customer's `type` is a key of the same form. The server checks the form,
+not the list: a list may change while customers keep their type. The Mac
+app refuses to remove a type a customer still carries and offers only the
+list when a type is set. Older apps (before 0.29.0) reject any `type`
+outside the four of the default.
+
+## Expense table, settling and exchange rates, 0.30.0 (2026-10-28) – `expense_table: 1`
+
+PLAN-SPESEN §9 (S3, S4). One expense table per person; settling is
+exporting plus locking, done by the person themselves (Team Admins for
+anyone) over a period, without approval; the Mac app renders every file
+and the server stores them. Not additive for expenses: `ready`, `paid`,
+the server's expense report PDF and the approval of expense rules are
+gone (development, no transition). `api: 2` stays; capability
+`expense_table: 1` beside `expense_fixing: 1`; no migration (`occ
+upgrade` registers the job `ExchangeRates`).
+
+### A. Expense fields of a receipt
+
+Optional on every receipt, `null` allowed, form only (`422` naming the
+field):
+
+| Field | Rule |
+|---|---|
+| `category` | `^[a-z0-9][a-z0-9-]{0,39}$` – a key of the team's categories (the server does not check the list) |
+| `factor` | number, 0 < x ≤ 100; missing or null counts as 1 (e.g. 0.5 for a private phone) |
+| `rate` | `{ "value", "date", "source" }` and nothing else: `value` 0 < v < 1 000 000 – one unit of the receipt's currency is `value` of the team's currency –, `date` a day `YYYY-MM-DD`, `source` `"ecb"` or `"manual"` |
+| `template` | like `category`: the template the expense comes from |
+| `quantity` | number, 0 < x ≤ 1 000 000 (e.g. 160 km) |
+
+Messages: `“category”` / `“template”` must be null or a key of 1 to 40
+lower-case letters, digits or dashes; `“factor”` / `“quantity”` must be
+null or a number above 0 and at most 100 / 1000000; `“rate” must be null or
+{ “value” above 0 and below 1000000, “date” as YYYY-MM-DD, “source” “ecb” or
+“manual” }.` (curly quotes as in all messages).
+
+### B. Writing
+
+1. **Open expense fields.** `category`, `factor` and `rate` of a receipt
+   with `reimburse: true` that no fixed report holds change by its
+   `person` and Team Admins in any status (open, approved, internal,
+   billed); a Lead only on their own expense. Otherwise `403` “Only the
+   person and Team Admins set category, factor and rate of an expense.” –
+   also on an open receipt of a project the Lead leads. Creating a receipt
+   with them is anyone's who may write it. After approval the person needs
+   no Lead for these three fields; every other field keeps the rules of
+   0.22.0/0.23.0 (`template` and `quantity` are content).
+2. **Settled.** A receipt whose `report` names a `fixed` or `paid` report
+   (schema 2): not deleted (`409` “This expense is settled; reverse the
+   expense report first.”), not rejected (same `409`), not reopened (as
+   before), no new file (`409` “This expense is settled; reverse the
+   expense report first. “file” stays.”). A write changes only `project`,
+   `cost_kind`, `budget`, `cost`, `billed`, `invoice_effect`, `note` – by
+   Team Admins and the project's Leads, in any status (also `open`); any
+   other changed field `409` “This expense is settled; reverse the expense
+   report first. “{field}” stays.” (checked first), a correctable one by
+   someone else `403` “Only Team Admins and the project’s Leads change a
+   settled expense.”; billed stays note-only (`409` “A billed receipt
+   changes only in “note”; “{field}” stays.”). A write that changes
+   nothing passes. Approving a settled open receipt (endpoint or
+   assignment) still works and does not touch the report.
+
+### C. Settling: `POST /expense-reports/fix`
+
+Body `{ "person": uid, "from": "YYYY-MM-DD", "to": "YYYY-MM-DD" }`.
+
+- `person` an account of the team (`422` ““person” is required: the
+  account’s user ID.” / ““{uid}” is not an account of the team.”); the
+  person themselves or a Team Admin, else `403` “Only the person and Team
+  Admins settle expenses.”; `from` and `to` days with `from` ≤ `to`, else
+  `422` ““from” and “to” are days (YYYY-MM-DD), “from” not after “to”.”
+- The expenses: the live receipts with this `person`, `reimburse: true`,
+  status not `rejected` (`open` too – expenses need no approval), held by
+  no `fixed`/`paid` report, `from ≤ date ≤ to`. None: `422` “No open
+  expenses of this person in this period.” More than 500: `422` “An
+  expense report holds at most 500 expenses; choose a shorter period.”
+- Sorted by date and key, the first that lacks something: `422` “The
+  expense {key} of {date} has no category.” or “The expense {key} of
+  {date} has no rate to {currency}.” (the team's currency) – an amount in
+  the team's currency comes from the team's currency itself, from `booked`
+  in it (gross > 0) or from `rate`.
+- One transaction under the team lock: number from the expense counter
+  (`settings.expense_number`, as 0.23.0; the year of `fixed_on`), always a
+  **new** record (`sb-` + 8 hex digits) with `schema: 2`, `person`,
+  `status: "fixed"`, `number`, `from`, `to`, `lines`, `sums`, `fixed_on`
+  (today, UTC), `fixed_by`, `documents: []`, `ledger_seq`, `hash`; `report`
+  on every receipt; ledger `expense_fixed`. No `ready_on`, no rendering, no
+  `document_state`. Answer: the record (as `GET /records/…`).
+
+### D. A frozen line (`lines[]`, by date and key)
+
+```json
+{ "receipt": "rc-…", "date": "2026-10-05", "supplier": "Hotel", "text": "Night",
+  "project": null, "charged": false, "gross": 100.0, "currency": "EUR",
+  "vat_lines": [{ "rate": 19.0, "net": 84.03, "vat": 15.97 }], "category": "misc", "factor": 0.5,
+  "rate": { "value": 0.95, "source": "ecb", "date": "2026-10-05" }, "amount": 47.5,
+  "vat_amounts": [], "without_file": false }
+```
+
+- `gross`: with `vat_lines` their sum (`net + vat` per line) on cents,
+  else `gross`; `currency`: the receipt's, empty = the team's;
+  `supplier`/`text` as text (`""` for none); `project` the project's key.
+- Before the factor, in the team's currency: the team's currency → `gross`,
+  `rate: { value: 1.0, source: "team", date: null }`; else `booked` in the
+  team's currency with `gross` > 0 → its amount, `value` = round(booked ÷
+  gross, 6), `source: "booked"` (`rate: null` when the receipt's own gross
+  is 0); else the receipt's `rate` → round2(gross × value), its `source`
+  and `date`.
+- `factor`: the receipt's, else 1.0; `amount` = round2(team amount ×
+  factor).
+- `vat_amounts` only for receipts in the team's currency (foreign VAT is no
+  input tax, also with `booked`): per own VAT line with a VAT amount ≠ 0
+  (|vat| > 0.004) `{ rate, vat: vat × factor }`, unrounded; a receipt
+  without `vat_lines` counts with `vat_rate`/`vat` when the rate is set.
+- `vat_lines`: the receipt's own lines as in 0.23.0 (its `vat_lines`, else
+  one line of `vat_rate`, else `[]`). `charged`: a project and the effect
+  as it counts is `charge`. `without_file`: kind `trust` or `recurring`.
+- Rounding is the Mac app's (`core/src/spesen/tabelle.rs`): half away from
+  zero on the double itself, `round2(x) = round(x × 100) / 100`, never a
+  decimal pre-rounding – PHP's `round()` can differ by a cent (1.005 gives
+  1.00 here, 1.01 with `round()`). The PHP class is `ExpenseTable`; a
+  differential check of 200 000 values against Rust found no difference.
+
+### E. Sums (`sums`)
+
+`{ "currency": team, "categories": [{ "id", "amount" }], "vat": [{ "rate",
+"vat" }], "total", "payout" }`: every category that occurs, in the order of
+first mention, amount = round2 of its lines' sum; VAT summed per rate
+(rates within 0.001 are one), then rounded, highest rate first; `total` =
+round2(Σ amount); `payout` = `total` on 0.05 (half away from zero). Ledger
+`expense_fixed` (canonical JSON, `invoice` 0, `number` the report's):
+`{ key, number, person, from, to, fixed_on, fixed_by, lines, sums }`.
+
+### F. Documents of the app
+
+`POST /expense-reports/{key}/documents` – a file of the app, at most
+32 MiB (since 0.31.0; 64 before), rate 10 per minute. Two forms, one route:
+
+- **Raw (0.31.0, `expense_table: 2`):** the body is the file, `Content-Type`
+  `application/pdf`, `text/csv` or `application/octet-stream`, the name in
+  the query `?name=`.
+- **Base64 (0.30.0, older Macs):** `Content-Type: application/json`,
+  `{ "name", "content" }` with `content` Base64 (body at most 48 MB).
+
+- `404` “This expense report does not exist.”; the person or Team Admins,
+  else `403` “Only the person and Team Admins store documents of an expense
+  report.”; only `fixed`, else `409` “Only a settled expense report takes
+  documents.”
+- `name` `^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.(pdf|csv)$`, else `422`
+  ““name” is a file name ending in .pdf or .csv.” (`field: name`); in the
+  Base64 form `content` Base64, else `422` ““content” is the file in
+  Base64.” (`field: content`); at most 32 MiB, else `413` “A document may
+  be at most 32 MiB.”; a PDF begins with `%PDF-`, a CSV is UTF-8, else
+  `422` “The file does not fit its name (PDF or UTF-8 CSV, at most
+  32 MiB).” (`field: content`)
+- Stored under `<root>/Buchhaltung/<year of fixed_on>/Spesen/<person>/<name>`
+  (the person's display name made safe, as the server PDF before; a name
+  taken by another file gets `_2`). The record gets `documents: [{ name,
+  path, sha256, size }]` (server field, at most 5 – a sixth name `409` “An
+  expense report holds at most 5 documents.”), the ledger
+  `expense_document` `{ key, number, name, sha256 }`.
+- The same name with the same SHA-256 again: `200`, nothing changes (no
+  ledger entry); the same name with another hash: `409` “A document of
+  this name is stored already.” Answer: the record.
+- `GET /expense-reports/{key}/document?name=` (the person, Team Admins;
+  else `403`): the stored file by name (`404` “This expense report has no
+  document “{name}”.”); without `name` the first PDF, for reports of
+  0.23.0 their `document`; none `404` “This expense report has no document
+  yet.” Type `application/pdf` or `text/csv; charset=utf-8`.
+
+### G. What is gone, what stays
+
+- Gone: `POST /expense-reports/ready`, `POST /expense-reports/{key}/paid`,
+  `POST /expense-rules/{key}/approve` answer `410` `{ error: "gone", code:
+  "gone" }` since 0.31.0 (0.30.0: `404`, no route). The
+  server renders no expense report (`ExpenseReportPdf`,
+  `ExpenseReportDocuments` and the expense part of the retry job are
+  removed).
+- A client writes no `expense_report` through `/records` (create, change,
+  delete): `409` “An expense report changes only through its actions (fix,
+  documents, reverse).” Reports of 0.23.0 (`open`, `paid`) stay readable;
+  `paid` ones hold their receipts. Their server fields gain `from`, `to`,
+  `documents`.
+- `POST /expense-reports/{key}/reverse` stays: Team Admins, only `fixed`
+  (`paid` `409` “A paid expense report is not reversed.”); the receipts are
+  free again, the documents stay; answer the record plus `ledger`.
+- **Expense rules apply from creation.** A `recurring` receipt needs a live
+  rule of its person (period inside the rule, one receipt per rule and
+  period, as before) and is `approved` (with project) or `internal`
+  (without) at once, `approved_by` = the writer, `approved_on` = today.
+  `approved_by`/`approved_on` of a rule stay as stored on old rules, are
+  never set on new ones, and are ignored on client writes. Deleting a rule:
+  its person and Team Admins while no live receipt names it (`rule`);
+  otherwise `409` “An expense rule with receipts is not deleted; end it by
+  setting “to”.”
+- Export (`/exports/expenses`): lines of 0.30.0 count with `amount` and
+  `vat_amounts` in the team's currency (`currency` from `sums`, VAT =
+  round2(Σ), net = round2(amount − VAT), `vat_rate` the one rate or
+  empty); older lines as before.
+- Ledger actions: `expense_fixed` (new payload above), `expense_document`
+  (new payload above), `expense_reversed` (unchanged); `expense_paid`
+  remains only in old chains. Verification is action-agnostic.
+
+### H. Exchange rates of the ECB
+
+- Team setting `settings.exchange_rates`: `null` or a boolean (`422`
+  ““exchange_rates” must be true or false.”), default off; Team Admins
+  write it with `setting/settings`.
+- The job `ExchangeRates` (hourly, one run at a time) takes, for every team
+  with the switch on, the days on which receipts with `reimburse: true` in
+  a foreign currency have neither `booked` nor `rate`, are not rejected and
+  not settled – days before today (the ECB publishes in the afternoon), at
+  most 400 days back, newest first, at most 50 days per run over all
+  teams, only the ECB's reference currencies (AUD, BRL, CAD, CHF, CNY, CZK,
+  DKK, EUR, GBP, HKD, HUF, IDR, ILS, INR, ISK, JPY, KRW, MXN, MYR, NOK,
+  NZD, PHP, PLN, RON, SEK, SGD, THB, TRY, USD, ZAR; BGN until 2025-12-31)
+  – and asks `GET {base}/v1/{date}?base={team currency}&symbols={A,B,…}`
+  (timeout 10 s; three failures in a row end the run, the next run tries
+  again). A day whose record names every needed currency is not asked
+  again; a missing one is asked with the stored ones.
+- `{base}`: the app config `exchange_rates_url` (default
+  `https://api.frankfurter.dev`; only http(s); set by the Nextcloud admin,
+  e.g. an own Frankfurter, also in the local network). Tests use a local
+  stub, never the real service.
+- Record kind **`exchange_rate`**, key `<team currency>-<date>`
+  (`CHF-2026-10-25`): `{ "base": "CHF", "date": "2026-10-25", "ecb_date":
+  "2026-10-23", "rates": { "EUR": 0.941265 } }` – the team's currency per
+  one unit, round(1 ÷ answer, 6) like the line's rounding; `ecb_date` the
+  day the ECB published. Written only by the server (`modified_by:
+  "system"`); every member reads it (list, delta, single, history); any
+  client write – PUT, DELETE, restore, a batch, also a Team Admin's – `403`
+  “Exchange rates are written by the server only.”
+- The privacy notice names, when on, the service's host, the currencies
+  and the number of days fetched so far.
+- The Mac app proposes the rate at a receipt; it is taken only on a click
+  (`rate` with `source: "ecb"`, `date` = `ecb_date`).
+
+### Classes
+
+Pure: `ExpenseFields` (A, B), `ExpenseTable` (D, E and the rounding),
+`ExpenseReportRules` (settling, documents, rights), `ExchangeRateRules`
+(H). Services: `ExpenseReportService` (fix, documents, reverse, document),
+`ExchangeRateService` with the job `ExchangeRates`; `CostWrites` (settled
+receipts, rules without approval, no report writes).
+
+## Error codes, raw documents and 410, 0.31.0 (2026-10-28) – `expense_table: 2`
+
+PLAN-ROBUST R1 (E5–E7). Additive for every client of 0.30.0; `api: 2`
+stays; capability `expense_table: 2` (1 before); no migration.
+
+- **Error codes.** Every error body is `{ error, message, code?, field? }`
+  as in «Error codes» at the top: `code` names the violated rule, `field`
+  the request field; the 409/403 of receipts, expenses, invoices and
+  hand-over all carry one, form errors carry `field` only. Wrappers that
+  reword a message (batch «Write n: …», team import) keep both.
+- **Documents raw.** `POST /expense-reports/{key}/documents` takes the file
+  as the body with `?name=` (F above); the Base64 form stays for older
+  Macs. Both at most 32 MiB, rate 10 per minute.
+- **410 gone.** The three routes removed in 0.30.0 are routes again and
+  answer `410` with `error: "gone"`, `code: "gone"`, so an older app learns
+  that the server is newer rather than seeing a 404.
+- **Informal German.** `l10n/de_DE.json` is a copy of `de.json`; the app
+  says «du» everywhere.

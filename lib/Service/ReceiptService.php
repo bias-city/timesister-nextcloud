@@ -43,7 +43,7 @@ final class ReceiptService {
 			throw ApiException::notFound('This receipt does not exist.');
 		}
 		if (!$this->rights->canReadCost($m, ReceiptRules::KIND, $d)) {
-			throw ApiException::forbidden('This account may not read this receipt.');
+			throw ApiException::forbidden('This account may not read this receipt.')->code(ErrorCode::RECEIPT_NOT_OWN);
 		}
 		return [$r, $d];
 	}
@@ -63,7 +63,7 @@ final class ReceiptService {
 		}
 		ReceiptRules::requireWrite($m->manages(), $m->uid, $this->led($m), $d, $d);
 		if (($d->status ?? null) !== ReceiptRules::OPEN) {
-			throw ApiException::conflict('A file is added only while the receipt is open.');
+			throw ApiException::conflict('A file is added only while the receipt is open.')->code(ErrorCode::RECEIPT_NOT_OPEN);
 		}
 		if (($d->kind ?? null) !== ReceiptRules::RECEIPT) {
 			throw ApiException::invalid('Only a receipt of kind “receipt” has a file.');
@@ -116,7 +116,7 @@ final class ReceiptService {
 	/** Lead of the project or Team Admins; general and trust receipts Team Admins. */
 	private function requireApprover(Membership $m, \stdClass $d): void {
 		if (!ReceiptRules::canApprove($m->manages(), $this->led($m), $d)) {
-			throw ApiException::forbidden('Receipts are approved by the project’s Leads and Team Admins; general receipts and those without a file by Team Admins.');
+			throw ApiException::forbidden('Receipts are approved by the project’s Leads and Team Admins; general receipts and those without a file by Team Admins.')->code(ErrorCode::RECEIPT_APPROVER_ONLY);
 		}
 	}
 
@@ -125,10 +125,10 @@ final class ReceiptService {
 		[$rec, $d] = $this->load($m, $key);
 		$this->requireApprover($m, $d);
 		if (($d->status ?? null) !== ReceiptRules::OPEN) {
-			throw ApiException::conflict('Only an open receipt is approved or rejected.');
+			throw ApiException::conflict('Only an open receipt is approved or rejected.')->code(ErrorCode::RECEIPT_NOT_OPEN);
 		}
 		if (($d->kind ?? null) === ReceiptRules::RECEIPT && Fields::obj($d, 'file') === null) {
-			throw ApiException::invalid('The receipt has no file yet.');
+			throw ApiException::invalid('The receipt has no file yet.')->code(ErrorCode::RECEIPT_FILE_MISSING);
 		}
 		ReceiptRules::requireContent($d);
 		[$team, $budget, $pd] = $this->currencies($m, $d);
@@ -160,10 +160,10 @@ final class ReceiptService {
 		[$rec, $d] = $this->load($m, $key);
 		$this->requireApprover($m, $d);
 		if ($this->heldBy($m->tenantId, $d) !== null) {
-			throw ApiException::conflict('This expense is settled; reverse the expense report first.');
+			throw ApiException::conflict('This expense is settled; reverse the expense report first.')->code(ErrorCode::EXPENSE_SETTLED);
 		}
 		if (($d->status ?? null) !== ReceiptRules::OPEN) {
-			throw ApiException::conflict('Only an open receipt is approved or rejected.');
+			throw ApiException::conflict('Only an open receipt is approved or rejected.')->code(ErrorCode::RECEIPT_NOT_OPEN);
 		}
 		$d->status = ReceiptRules::REJECTED;
 		$d->reject_reason = trim($reason);

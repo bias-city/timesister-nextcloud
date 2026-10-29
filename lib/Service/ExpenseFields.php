@@ -75,7 +75,7 @@ final class ExpenseFields {
 			return;
 		}
 		if (($before->person ?? null) !== $uid) {
-			throw ApiException::forbidden('Only the person and Team Admins set category, factor and rate of an expense.');
+			throw ApiException::forbidden('Only the person and Team Admins set category, factor and rate of an expense.')->code(ErrorCode::EXPENSE_FIELDS_OWNER_ONLY);
 		}
 	}
 
@@ -89,7 +89,7 @@ final class ExpenseFields {
 	 */
 	public static function requireSettled(bool $manages, array $led, \stdClass $before, ?\stdClass $after): void {
 		if ($after === null) {
-			throw ApiException::conflict('This expense is settled; reverse the expense report first.');
+			throw ApiException::conflict('This expense is settled; reverse the expense report first.')->code(ErrorCode::EXPENSE_SETTLED);
 		}
 		$changed = ReceiptRules::changed($before, $after);
 		foreach ($changed as $f) {
@@ -101,12 +101,12 @@ final class ExpenseFields {
 			return;
 		}
 		if (!$manages && !(ReceiptRules::ofLed($before, $led) && ReceiptRules::ofLed($after, $led))) {
-			throw ApiException::forbidden('Only Team Admins and the project’s Leads change a settled expense.');
+			throw ApiException::forbidden('Only Team Admins and the project’s Leads change a settled expense.')->code(ErrorCode::EXPENSE_SETTLED_LEAD_ONLY);
 		}
 		if (($before->status ?? null) === ReceiptRules::BILLED) {
 			foreach ($changed as $f) {
 				if ($f !== 'note') {
-					throw ApiException::conflict(Message::of('A billed receipt changes only in “note”; “{field}” stays.', ['field' => $f]));
+					throw ApiException::conflict(Message::of('A billed receipt changes only in “note”; “{field}” stays.', ['field' => $f]))->code(ErrorCode::RECEIPT_BILLED)->field($f);
 				}
 			}
 		}
@@ -117,6 +117,6 @@ final class ExpenseFields {
 
 	/** 409: the field of a settled receipt stays (also `file`). */
 	public static function stays(string $field): ApiException {
-		return ApiException::conflict(Message::of('This expense is settled; reverse the expense report first. “{field}” stays.', ['field' => $field]));
+		return ApiException::conflict(Message::of('This expense is settled; reverse the expense report first. “{field}” stays.', ['field' => $field]))->code(ErrorCode::EXPENSE_SETTLED)->field($field);
 	}
 }

@@ -29,7 +29,8 @@ final class ExpenseReportRules {
 	public const MAX_BYTES = 786432;
 	/** The app's files of a report (9 F): name, size, how many. */
 	public const DOCUMENT_NAME = '/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.(pdf|csv)$/';
-	public const DOCUMENT_MAX = 64 * 1024 * 1024;
+	/** A file of the app: 32 MiB since 0.31.0 (64 before). */
+	public const DOCUMENT_MAX = 32 * 1024 * 1024;
 	public const DOCUMENTS_MAX = 5;
 
 	/** What every stored report carries: `person`, and `ready_on` of 0.23.0 when set; the rest is the server's. */
@@ -40,7 +41,7 @@ final class ExpenseReportRules {
 		}
 		$person = $d->person ?? null;
 		if (!is_string($person) || $person === '' || mb_strlen($person) > ReceiptRules::UID_MAX || preg_match('/[\x00-\x1F\x7F]/', $person)) {
-			throw ApiException::invalid('“person” is required: the account’s user ID.');
+			throw ApiException::invalid('“person” is required: the account’s user ID.')->field('person');
 		}
 		$ready = $d->ready_on ?? null;
 		if ($ready !== null && (!is_string($ready) || !Time::isDay($ready))) {
@@ -112,7 +113,7 @@ final class ExpenseReportRules {
 			}
 		}
 		if ($keys === []) {
-			throw ApiException::invalid('No open expenses of this person in this period.');
+			throw ApiException::invalid('No open expenses of this person in this period.')->code(ErrorCode::REPORT_NO_EXPENSES);
 		}
 		usort($keys, static fn (string $a, string $b): int => strcmp((string)($receipts[$a]->date ?? ''), (string)($receipts[$b]->date ?? '')) ?: strcmp($a, $b));
 		if (count($keys) > self::MAX_RECEIPTS) {
@@ -122,10 +123,10 @@ final class ExpenseReportRules {
 			$p = ['key' => $k, 'date' => (string)($receipts[$k]->date ?? '')];
 			$lacks = ExpenseTable::lacks($receipts[$k], $team);
 			if ($lacks === 'category') {
-				throw ApiException::invalid(Message::of('The expense {key} of {date} has no category.', $p));
+				throw ApiException::invalid(Message::of('The expense {key} of {date} has no category.', $p))->code(ErrorCode::REPORT_NO_CATEGORY)->field('category');
 			}
 			if ($lacks === 'rate') {
-				throw ApiException::invalid(Message::of('The expense {key} of {date} has no rate to {currency}.', $p + ['currency' => $team]));
+				throw ApiException::invalid(Message::of('The expense {key} of {date} has no rate to {currency}.', $p + ['currency' => $team]))->code(ErrorCode::REPORT_NO_RATE)->field('rate');
 			}
 		}
 		return $keys;
@@ -178,28 +179,33 @@ final class ExpenseReportRules {
 	/** The name of a file of the app (9 F); 422 otherwise. */
 	public static function documentName(mixed $name): string {
 		if (!is_string($name) || preg_match(self::DOCUMENT_NAME, $name) !== 1) {
-			throw ApiException::invalid('“name” is a file name ending in .pdf or .csv.');
+			throw ApiException::invalid('“name” is a file name ending in .pdf or .csv.')->field('name');
 		}
 		return $name;
 	}
 
-	/** The file from Base64: at most 64 MiB (413); a PDF begins with `%PDF-`, a CSV is UTF-8 (422). */
+	/** The file from Base64 (the form of 0.30.0): decoded, then as {@see documentBytes()}. */
 	public static function documentContent(string $name, mixed $content): string {
 		if (!is_string($content)) {
-			throw ApiException::invalid('“content” is the file in Base64.');
+			throw ApiException::invalid('“content” is the file in Base64.')->field('content');
 		}
 		if (strlen($content) > 4 * intdiv(self::DOCUMENT_MAX + 2, 3) + 1024) {
-			throw ApiException::tooLarge('A document may be at most 64 MiB.');
+			throw ApiException::tooLarge('A document may be at most 32 MiB.');
 		}
 		$bin = base64_decode($content, true);
 		if ($bin === false) {
-			throw ApiException::invalid('“content” is the file in Base64.');
+			throw ApiException::invalid('“content” is the file in Base64.')->field('content');
 		}
+		return self::documentBytes($name, $bin);
+	}
+
+	/** The raw file (0.31.0): at most 32 MiB (413); a PDF begins with `%PDF-`, a CSV is UTF-8 (422). */
+	public static function documentBytes(string $name, string $bin): string {
 		if (strlen($bin) > self::DOCUMENT_MAX) {
-			throw ApiException::tooLarge('A document may be at most 64 MiB.');
+			throw ApiException::tooLarge('A document may be at most 32 MiB.');
 		}
 		if ((str_ends_with($name, '.pdf') && !str_starts_with($bin, '%PDF-')) || (str_ends_with($name, '.csv') && !mb_check_encoding($bin, 'UTF-8'))) {
-			throw ApiException::invalid('“content” does not fit its name (PDF or UTF-8 CSV, at most 64 MiB).');
+			throw ApiException::invalid('The file does not fit its name (PDF or UTF-8 CSV, at most 32 MiB).')->field('content');
 		}
 		return $bin;
 	}
@@ -218,13 +224,13 @@ final class ExpenseReportRules {
 		foreach ($docs as $doc) {
 			if (($doc->name ?? null) === $name) {
 				if (($doc->sha256 ?? null) !== $sha256) {
-					throw ApiException::conflict('A document of this name is stored already.');
+					throw ApiException::conflict('A document of this name is stored already.')->code(ErrorCode::REPORT_DOCUMENT_EXISTS);
 				}
 				return $doc;
 			}
 		}
 		if (count($docs) >= self::DOCUMENTS_MAX) {
-			throw ApiException::conflict(Message::of('An expense report holds at most {max} documents.', ['max' => self::DOCUMENTS_MAX]));
+			throw ApiException::conflict(Message::of('An expense report holds at most {max} documents.', ['max' => self::DOCUMENTS_MAX]))->code(ErrorCode::REPORT_DOCUMENTS_MAX);
 		}
 		return null;
 	}
@@ -262,6 +268,6 @@ final class ExpenseReportRules {
 
 	/** A client never writes a report (0.30.0): it is made and changed only through its actions. */
 	public static function requireWrite(): void {
-		throw ApiException::conflict('An expense report changes only through its actions (fix, documents, reverse).');
+		throw ApiException::conflict('An expense report changes only through its actions (fix, documents, reverse).')->code(ErrorCode::REPORT_NOT_WRITABLE);
 	}
 }

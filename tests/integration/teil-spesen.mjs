@@ -202,7 +202,7 @@ export async function spesen() {
 		head('Expenses 0.30.0: setup')
 		{
 			const cap = (await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')).data?.capabilities?.timesister
-			check('capability expense_table: 1', cap?.expense_table === 1 && cap?.version === '0.30.0', cap)
+			check('capability expense_table: 2 (0.31.0)', cap?.expense_table === 2 && cap?.version === '0.31.0', cap)
 			expect('documents.root for the test', await ocs(A, 'PUT', '/team/settings', { documents: { root: FOLDER } }), 200)
 			expect('settings: costs on, CHF, an own expense number', await ocs(A, 'PUT', '/records/setting/settings', { version: settings.status === 200 ? settings.data.version : 0, data: { ...base,
 				currency: 'CHF', modules: { ...(base.modules || {}), costs: true }, expense_number: { pattern: `SQ-${RUN}-{no:4}`, per_year: true, start: 1 } } }), 200)
@@ -340,19 +340,19 @@ export async function spesen() {
 			const c1 = await get('receipt', K(1))
 			for (const [field, over] of [['category', { category: 'food' }], ['factor', { factor: 0.5 }], ['net', { net: 200, vat: 16.2, gross: 216.2 }], ['text', { text: 'x' }], ['date', { date: `${Y}-05-09` }]]) {
 				const r = await ocs(A, 'PUT', rec('receipt', K(1)), { version: c1.version, data: { ...c1.data, ...over } })
-				check(`“${field}” stays → 409`, r.status === 409 && r.data?.message === `This expense is settled; reverse the expense report first. “${field}” stays.`, r.data)
+				check(`“${field}” stays → 409 expense_settled, field`, r.status === 409 && r.data?.message === `This expense is settled; reverse the expense report first. “${field}” stays.` && r.data?.code === 'expense_settled' && r.data?.field === field, r.data)
 			}
 			const note = await ocs(U2, 'PUT', rec('receipt', K(1)), { version: c1.version, data: { ...c1.data, note: 'mine' } })
-			check('the person changes the note → 403', note.status === 403 && note.data?.message === 'Only Team Admins and the project’s Leads change a settled expense.', note.data)
+			check('the person changes the note → 403', note.status === 403 && note.data?.message === 'Only Team Admins and the project’s Leads change a settled expense.' && note.data?.code === 'expense_settled_lead_only', note.data)
 			const lead = await ocs(L, 'PUT', rec('receipt', K(1)), { version: c1.version, data: { ...c1.data, budget: 'b1', cost: 1, note: 'assigned' } })
 			check('the project’s Lead assigns the open, settled receipt (a trust one stays open for a Team Admin)', lead.status === 200 && lead.data?.data?.status === 'open' && lead.data?.data?.cost === 1
 				&& lead.data?.data?.note === 'assigned' && lead.data?.data?.report === SB, lead.data)
 			const adm = await ocs(A, 'POST', `/receipts/${K(1)}/approve`, {})
 			check('… a Team Admin approves it; it stays settled', adm.status === 200 && adm.data?.data?.status === 'approved' && adm.data?.data?.report === SB, adm.data)
 			const del = await ocs(A, 'DELETE', `${rec('receipt', K(2))}?version=${(await get('receipt', K(2))).version}`)
-			check('a settled open receipt is not deleted → 409', del.status === 409 && del.data?.message === 'This expense is settled; reverse the expense report first.', del.data)
+			check('a settled open receipt is not deleted → 409 expense_settled', del.status === 409 && del.data?.message === 'This expense is settled; reverse the expense report first.' && del.data?.code === 'expense_settled', del.data)
 			const rj = await ocs(A, 'POST', `/receipts/${K(2)}/reject`, { reason: 'No' })
-			check('… nor rejected → 409', rj.status === 409 && rj.data?.message === 'This expense is settled; reverse the expense report first.', rj.data)
+			check('… nor rejected → 409 expense_settled', rj.status === 409 && rj.data?.message === 'This expense is settled; reverse the expense report first.' && rj.data?.code === 'expense_settled', rj.data)
 			expect('… nor reopened', await ocs(A, 'POST', `/receipts/${K(3)}/reopen`, {}), 409, 'conflict')
 		}
 
@@ -369,10 +369,11 @@ export async function spesen() {
 				['a name with a slash', 'a/b.pdf', body, '“name” is a file name ending in .pdf or .csv.'],
 				['a ZIP', 'Spesen.zip', body, '“name” is a file name ending in .pdf or .csv.'],
 				['no Base64', name, '%%%', '“content” is the file in Base64.'],
-				['a PDF that is none', name, Buffer.from('hello'), '“content” does not fit its name (PDF or UTF-8 CSV, at most 64 MiB).'],
-				['a CSV that is no UTF-8', `Spesenabrechnung_${NUM}.csv`, Buffer.from([0xff, 0xfe, 0x41]), '“content” does not fit its name (PDF or UTF-8 CSV, at most 64 MiB).'],
+				['a PDF that is none', name, Buffer.from('hello'), 'The file does not fit its name (PDF or UTF-8 CSV, at most 32 MiB).'],
+				['a CSV that is no UTF-8', `Spesenabrechnung_${NUM}.csv`, Buffer.from([0xff, 0xfe, 0x41]), 'The file does not fit its name (PDF or UTF-8 CSV, at most 32 MiB).'],
 			]) {
-				const r = await send(U2, n, content)
+				// As the Team Admin: the route takes 10 per account and minute (0.31.0), the person's calls below stay under it.
+				const r = await send(A, n, content)
 				check(`${what} → 422`, r.status === 422 && r.data?.message === message, r.data)
 			}
 			const up = await send(U2, name, body)
@@ -386,10 +387,21 @@ export async function spesen() {
 			const count = ((await ocs(A, 'GET', `/invoices/ledger?since=${(fixed?.ledger_seq ?? 1) - 1}`)).data?.entries || []).length
 			check('the same file again: 200, unchanged, no ledger entry', again.status === 200 && again.data?.version === up.data?.version && count === led.length, [again.status, again.data?.version, up.data?.version, count, led.length])
 			const other = await send(U2, name, pdf('other'))
-			check('the same name with other content → 409', other.status === 409 && other.data?.message === 'A document of this name is stored already.', other.data)
+			check('the same name with other content → 409 report_document_exists', other.status === 409 && other.data?.message === 'A document of this name is stored already.' && other.data?.code === 'report_document_exists', other.data)
 			const csv = Buffer.from(`Nr.;Datum;Was\r\n1;${Y}-05-01;160 km × 0.70\r\n`, 'utf8')
 			expect('a Team Admin stores the CSV', await send(A, `Spesenabrechnung_${NUM}.csv`, csv), 200)
-			expect('… and the receipts as PDF', await send(U2, `Belege_${NUM}.pdf`, pdf('Belege')), 200)
+			// 0.31.0: the raw form – the body is the file, the name in the query.
+			const sendRaw = (who, n, buf, type) => fetch(`${NC}${API}/expense-reports/${SB}/documents?name=${encodeURIComponent(n)}`, {
+				method: 'POST', body: buf,
+				headers: { 'OCS-APIRequest': 'true', Accept: 'application/json', 'Content-Type': type, Authorization: 'Basic ' + Buffer.from(`${who.user}:${who.pass}`).toString('base64') },
+			}).then(async (res) => { const text = await res.text(); let j = null; try { j = JSON.parse(text) } catch { j = null } return { status: res.status, data: j?.ocs?.data ?? null, text } })
+			const belege = pdf('Belege')
+			const rawUp = await sendRaw(U2, `Belege_${NUM}.pdf`, belege, 'application/pdf')
+			check('… and the receipts as PDF, raw with ?name= (0.31.0)', rawUp.status === 200 && (rawUp.data?.data?.documents || []).some((d) => d.name === `Belege_${NUM}.pdf` && d.sha256 === sha256(belege) && d.size === belege.length), rawUp.data)
+			const rawBad = await sendRaw(U2, `z_${NUM}.pdf`, Buffer.from('hello'), 'application/octet-stream')
+			check('raw: a PDF that is none → 422 with field content', rawBad.status === 422 && rawBad.data?.field === 'content' && rawBad.data?.code === undefined, rawBad.data)
+			const rawName = await sendRaw(U2, 'a/b.pdf', belege, 'application/pdf')
+			check('raw: a bad name → 422 with field name', rawName.status === 422 && rawName.data?.field === 'name', rawName.data)
 			const byName = await raw(U2, `/expense-reports/${SB}/document?name=${encodeURIComponent(`Spesenabrechnung_${NUM}.csv`)}`)
 			check('GET by name: the CSV as text/csv', byName.status === 200 && byName.buf.equals(csv) && byName.type.startsWith('text/csv'), [byName.status, byName.type])
 			const first = await raw(A, `/expense-reports/${SB}/document`)
@@ -400,26 +412,29 @@ export async function spesen() {
 			expect('a fourth', await send(U2, `x4_${NUM}.pdf`, pdf('4')), 200)
 			expect('a fifth', await send(U2, `x5_${NUM}.pdf`, pdf('5')), 200)
 			const sixth = await send(U2, `x6_${NUM}.pdf`, pdf('6'))
-			check('a sixth → 409', sixth.status === 409 && sixth.data?.message === 'An expense report holds at most 5 documents.', sixth.data)
+			check('a sixth → 409 report_documents_max', sixth.status === 409 && sixth.data?.message === 'An expense report holds at most 5 documents.' && sixth.data?.code === 'report_documents_max', sixth.data)
 		}
 
 		head('Expenses 0.30.0: what is gone, what stays (G)')
 		{
-			expect('POST /expense-reports/ready', await ocs(U2, 'POST', '/expense-reports/ready', { person: 'pbuser2' }), 404)
-			expect('POST /expense-reports/{key}/paid', await ocs(A, 'POST', `/expense-reports/${SB}/paid`, {}), 404)
-			expect('POST /expense-rules/{key}/approve', await ocs(A, 'POST', `/expense-rules/${RULE}/approve`, {}), 404)
+			// 0.31.0: the removed routes answer 410 gone with the code, so an older app learns the server is newer.
+			const ready = await ocs(U2, 'POST', '/expense-reports/ready', { person: 'pbuser2' })
+			check('POST /expense-reports/ready → 410 gone', ready.status === 410 && ready.data?.error === 'gone' && ready.data?.code === 'gone', ready.data)
+			expect('POST /expense-reports/{key}/paid', await ocs(A, 'POST', `/expense-reports/${SB}/paid`, {}), 410, 'gone')
+			expect('POST /expense-rules/{key}/approve', await ocs(A, 'POST', `/expense-rules/${RULE}/approve`, {}), 410, 'gone')
 			const del = await ocs(U2, 'DELETE', `${rec('expense_rule', RULE)}?version=${(await get('expense_rule', RULE)).version}`)
-			check('a rule with a receipt is not deleted → 409', del.status === 409 && del.data?.message === 'An expense rule with receipts is not deleted; end it by setting “to”.', del.data)
+			check('a rule with a receipt is not deleted → 409', del.status === 409 && del.data?.message === 'An expense rule with receipts is not deleted; end it by setting “to”.' && del.data?.code === 'rule_has_receipts', del.data)
 			const cur = await get('expense_report', SB)
 			const w = await ocs(A, 'PUT', rec('expense_report', SB), { version: cur.version, data: { ...cur.data, number: 'X' } })
-			check('a client writes no report → 409', w.status === 409 && w.data?.message === 'An expense report changes only through its actions (fix, documents, reverse).', w.data)
+			check('a client writes no report → 409', w.status === 409 && w.data?.message === 'An expense report changes only through its actions (fix, documents, reverse).' && w.data?.code === 'report_not_writable', w.data)
 			expect('the person reverses', await ocs(U2, 'POST', `/expense-reports/${SB}/reverse`, {}), 403, 'forbidden')
 			const rv = await ocs(A, 'POST', `/expense-reports/${SB}/reverse`, { reason: 'Test' })
 			check('a Team Admin reverses: reversed, the documents stay, the receipts are open again', rv.status === 200 && rv.data?.data?.status === 'reversed' && rv.data?.data?.documents?.length === 5
 				&& (await get('receipt', K(2)))?.data?.report === null, rv.data)
 			const c2 = await get('receipt', K(2))
 			expect('… and their expense fields change again', await ocs(U2, 'PUT', rec('receipt', K(2)), { version: c2.version, data: { ...c2.data, factor: 1 } }), 200)
-			expect('documents for a reversed report', await ocs(U2, 'POST', `/expense-reports/${SB}/documents`, { name: `y_${NUM}.pdf`, content: pdf('y').toString('base64') }), 409, 'conflict')
+			const rd = await ocs(A, 'POST', `/expense-reports/${SB}/documents`, { name: `y_${NUM}.pdf`, content: pdf('y').toString('base64') })
+			check('documents for a reversed report → 409 report_not_fixed', rd.status === 409 && rd.data?.code === 'report_not_fixed', rd.data)
 		}
 
 		head('Expenses 0.30.0: ECB rates (H)')

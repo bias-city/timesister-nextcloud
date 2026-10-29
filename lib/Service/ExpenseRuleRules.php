@@ -87,7 +87,7 @@ final class ExpenseRuleRules {
 		}
 		foreach ([$before, $after] as $d) {
 			if ($d !== null && ($d->person ?? null) !== $uid) {
-				throw ApiException::forbidden('Expense rules are written by their person and by Team Admins.');
+				throw ApiException::forbidden('Expense rules are written by their person and by Team Admins.')->code(ErrorCode::RULE_OWNER_ONLY);
 			}
 		}
 	}
@@ -95,7 +95,7 @@ final class ExpenseRuleRules {
 	/** A rule is deleted while no live receipt names it; with receipts it is ended by `to` (0.30.0). */
 	public static function requireDelete(bool $hasReceipts): void {
 		if ($hasReceipts) {
-			throw ApiException::conflict('An expense rule with receipts is not deleted; end it by setting “to”.');
+			throw ApiException::conflict('An expense rule with receipts is not deleted; end it by setting “to”.')->code(ErrorCode::RULE_HAS_RECEIPTS);
 		}
 	}
 

@@ -1,5 +1,34 @@
 # Changes
 
+## 0.31.0 – 2026-10-29
+
+Additive, `api: 2` unchanged, capability `expense_table: 2`, no migration
+(PLAN-ROBUST R1, decisions E5–E7).
+
+- **Error codes** (2026-10-28). Every error body is `{ error, message,
+  code?, field? }`: `code` is a stable snake_case identifier of the violated
+  rule, `field` the request field it concerns; the 409/403 of receipts,
+  expenses, invoices and hand-over all carry one, form errors carry `field`
+  only. The table stands in API.md «Error codes», the constants in
+  `ErrorCode`; a unit test keeps both equal and holds the ruled services to
+  it. Clients map `code` to their own sentence and to the place that
+  resolves it, never the wording.
+- **Documents raw** (2026-10-28). `POST /expense-reports/{key}/documents`
+  takes the file as the body (`application/pdf`, `text/csv`,
+  `application/octet-stream`) with `?name=`; the Base64 form stays for
+  older Macs. Both at most 32 MiB (64 before), 10 per minute.
+- **410 gone** (2026-10-28). `POST /expense-reports/ready`,
+  `POST /expense-reports/{key}/paid` and `POST /expense-rules/{key}/approve`
+  answer `410` `{ error: "gone", code: "gone" }` instead of 404, so an
+  older app learns that the server is newer.
+- **Informal German** (2026-10-28). `l10n/de_DE.json` is a copy of
+  `de.json`; the app says «du» everywhere.
+- **Rate limits on every route** (2026-10-28). `approve`, `reject`, `reopen`
+  and `reverse` were the four write routes without `UserRateLimit`; now 60
+  per minute like the other writes, and the unit test covers every verb.
+- **Batch body 16 MB** (2026-10-28; was 50). A batch of 500 records of
+  256 KB is far below; the Mac app batches only on the first upload.
+
 ## 0.30.0 – 2026-10-28
 
 `api: 2` unchanged; capability `expense_table: 1`; no migration (`occ

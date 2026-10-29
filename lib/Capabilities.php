@@ -93,6 +93,9 @@ use OCP\Capabilities\ICapability;
  * currency, sums per category and rate, payout); the app's files stored
  * with the report; no ready, paid, server PDF or rule approval any more;
  * ECB rates as records `exchange_rate` (team setting `exchange_rates`).
+ * `expense_table: 2` since 0.31.0: errors carry `code` and `field`
+ * (API.md «Error codes»), `POST /expense-reports/{key}/documents` takes
+ * the raw file (32 MiB, `?name=`), removed routes answer 410 `gone`.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -136,7 +139,7 @@ final class Capabilities implements ICapability {
 				'corrections' => 2,
 				'entry_lists' => 1,
 				'customer_types' => 1,
-				'expense_table' => 1,
+				'expense_table' => 2,
 			],
 		];
 	}

@@ -15,9 +15,9 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Translations complete: every source text – from $l->t()/$l->n() and from
- * messages of ApiException and Message – is in l10n/de.json (informal) and
- * l10n/de_DE.json (formal), and every key of js/admin.js is in the
- * dictionary of AdminSettings.
+ * messages of ApiException and Message – is in l10n/de.json and
+ * l10n/de_DE.json (both informal since 0.31.0, E7), and every key of
+ * js/admin.js is in the dictionary of AdminSettings.
  */
 class L10nTest extends TestCase {
 	private const ROOT = __DIR__ . '/../..';
@@ -97,11 +97,11 @@ class L10nTest extends TestCase {
 		}
 	}
 
+	/** The app says «du» everywhere (E7, 0.31.0): no «Sie»/«Ihr» in either German file, and de_DE equals de. */
 	public function testDuAndSie(): void {
 		$du = self::translations('de');
-		$sie = self::translations('de_DE');
 		$this->assertDoesNotMatchRegularExpression('/\bSie\b|\bIhr/', implode(' ', array_map(fn ($t) => implode(' ', (array)$t), $du)));
-		$this->assertDoesNotMatchRegularExpression('/\b(du|dein\w*)\b/i', implode(' ', array_map(fn ($t) => implode(' ', (array)$t), $sie)));
+		$this->assertSame($du, self::translations('de_DE'), 'l10n/de_DE.json is a copy of de.json');
 	}
 
 	/**
@@ -202,6 +202,7 @@ class L10nTest extends TestCase {
 		]));
 		$this->assertSame('Write 2: “data” is missing.', $e->getMessage());
 		$this->assertSame(['error' => 'invalid', 'message' => 'Write 2: “data” is missing.'], $e->toData());
+		$this->assertSame(['error' => 'invalid', 'message' => 'Write 2: “data” is missing.', 'field' => 'data'], (new ApiException(422, ApiException::INVALID, $e->getText()))->like(ApiException::missing('data'))->toData());
 		$three = Message::plural('A record was changed in the meantime; nothing was written.', '%n records were changed in the meantime; nothing was written.', 3);
 		$this->assertSame('3 records were changed in the meantime; nothing was written.', $three->text());
 		$one = Message::plural('A record was changed in the meantime; nothing was written.', '%n records were changed in the meantime; nothing was written.', 1);

@@ -341,16 +341,16 @@ final class ReceiptRules {
 	 */
 	public static function requireReopen(bool $manages, \stdClass $d, ?string $heldBy): void {
 		if (!$manages) {
-			throw ApiException::forbidden('Only Team Admins take an approval back.');
+			throw ApiException::forbidden('Only Team Admins take an approval back.')->code(ErrorCode::RECEIPT_REOPEN_ADMIN_ONLY);
 		}
 		if (($d->status ?? null) === self::BILLED || ($d->invoice ?? null) !== null) {
-			throw ApiException::conflict('This receipt is billed with an invoice; reverse the invoice first.');
+			throw ApiException::conflict('This receipt is billed with an invoice; reverse the invoice first.')->code(ErrorCode::RECEIPT_BILLED);
 		}
 		if ($heldBy !== null) {
-			throw ApiException::conflict(Message::of('This receipt is on the fixed expense report {report}; reverse the report first.', ['report' => $heldBy]));
+			throw ApiException::conflict(Message::of('This receipt is on the fixed expense report {report}; reverse the report first.', ['report' => $heldBy]))->code(ErrorCode::EXPENSE_SETTLED);
 		}
 		if (!in_array($d->status ?? null, [self::APPROVED, self::INTERNAL], true)) {
-			throw ApiException::conflict('Only an approved receipt is reopened.');
+			throw ApiException::conflict('Only an approved receipt is reopened.')->code(ErrorCode::RECEIPT_NOT_APPROVED);
 		}
 	}
 
@@ -496,12 +496,12 @@ final class ReceiptRules {
 		}
 		if ($before !== null && self::isApproved($before)) {
 			if ($after === null) {
-				throw ApiException::conflict('An approved receipt is not deleted.');
+				throw ApiException::conflict('An approved receipt is not deleted.')->code(ErrorCode::RECEIPT_APPROVED_NOT_DELETED);
 			}
 			// The person's own category, factor and rate need no Lead (checked above).
 			$other = array_values(array_diff($changed, ExpenseFields::openOn($before)));
 			if (($other !== [] || $changed === []) && !$manages && !(self::ofLed($before, $led) && self::ofLed($after, $led))) {
-				throw ApiException::forbidden('After approval only Team Admins and the project’s Leads change a receipt.');
+				throw ApiException::forbidden('After approval only Team Admins and the project’s Leads change a receipt.')->code(ErrorCode::RECEIPT_APPROVED_LEAD_ONLY);
 			}
 			$allowed = ($before->status ?? null) === self::BILLED ? ['note'] : self::CORRECTABLE;
 			foreach ($other as $f) {
@@ -509,9 +509,9 @@ final class ReceiptRules {
 					continue;
 				}
 				if (($before->status ?? null) === self::BILLED) {
-					throw ApiException::conflict(Message::of('A billed receipt changes only in “note”; “{field}” stays.', ['field' => $f]));
+					throw ApiException::conflict(Message::of('A billed receipt changes only in “note”; “{field}” stays.', ['field' => $f]))->code(ErrorCode::RECEIPT_BILLED)->field($f);
 				}
-				throw ApiException::conflict(Message::of('An approved receipt changes only in project, cost kind, budget, cost, amount for the budget, invoice effect and note; “{field}” stays.', ['field' => $f]));
+				throw ApiException::conflict(Message::of('An approved receipt changes only in project, cost kind, budget, cost, amount for the budget, invoice effect and note; “{field}” stays.', ['field' => $f]))->code(ErrorCode::RECEIPT_APPROVED_STAYS)->field($f);
 			}
 			if (($after->project ?? null) !== null && (!is_string($after->budget ?? null) || !is_int($after->cost ?? null))) {
 				throw ApiException::invalid('An approved receipt of a project keeps a budget and a cost position.');
@@ -526,7 +526,7 @@ final class ReceiptRules {
 		}
 		foreach ([$before, $after] as $d) {
 			if ($d !== null && !self::canRead(false, $uid, $led, $d)) {
-				throw ApiException::forbidden('Members write only the receipts they created or paid; Leads also those of their projects.');
+				throw ApiException::forbidden('Members write only the receipts they created or paid; Leads also those of their projects.')->code(ErrorCode::RECEIPT_NOT_OWN);
 			}
 		}
 	}

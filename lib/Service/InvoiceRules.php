@@ -77,7 +77,7 @@ final class InvoiceRules {
 		// Every invoice belongs to a budget (0.16.0, decided before release).
 		$budget = $d->budget ?? null;
 		if (!is_string($budget) || trim($budget) === '') {
-			throw ApiException::invalid('“budget” is required: every invoice belongs to a budget.');
+			throw ApiException::invalid('“budget” is required: every invoice belongs to a budget.')->code(ErrorCode::INVOICE_NO_BUDGET)->field('budget');
 		}
 		self::text($budget, 'budget', self::BUDGET_MAX, self::CONTROL);
 		$days = [];
@@ -470,16 +470,16 @@ final class InvoiceRules {
 		foreach ([$before, $after] as $d) {
 			$p = $d?->project ?? null;
 			if ($d !== null && (!is_string($p) || !isset($led[$p]))) {
-				throw ApiException::forbidden('Only Team Admins and the project’s Leads write invoices.');
+				throw ApiException::forbidden('Only Team Admins and the project’s Leads write invoices.')->code(ErrorCode::INVOICE_LEAD_ONLY);
 			}
 		}
 		foreach ([$before, $after] as $d) {
 			if ($d !== null && (($d->status ?? null) !== self::DRAFT || ($d->number ?? null) !== null)) {
-				throw ApiException::forbidden('A Lead writes only drafts without a number; issuing, payment and cancelling are for Team Admins.');
+				throw ApiException::forbidden('A Lead writes only drafts without a number; issuing, payment and cancelling are for Team Admins.')->code(ErrorCode::INVOICE_LEAD_DRAFT_ONLY);
 			}
 		}
 		if (!self::leadMayReview($before, $after)) {
-			throw ApiException::forbidden('Only Team Admins return a draft submitted for approval; a Lead submits or withdraws it.');
+			throw ApiException::forbidden('Only Team Admins return a draft submitted for approval; a Lead submits or withdraws it.')->code(ErrorCode::INVOICE_REVIEW_ADMIN_ONLY);
 		}
 	}
 }
