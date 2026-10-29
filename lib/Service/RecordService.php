@@ -520,10 +520,13 @@ final class RecordService {
 					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
 				}
 			}
-			if ($op['kind'] === InvoiceRules::KIND && !$system && $this->invoices->findByKey($m->tenantId, $op['key']) !== null) {
-				// Issued on the server (0.18.0): frozen; only a reversal changes it.
-				$e = ApiException::issued();
-				throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+			if ($op['kind'] === InvoiceRules::KIND && !$system) {
+				// Issued on the server (0.18.0): frozen; only a reversal changes it. Reserved (0.32.0): closed until the PDF or the cancel.
+				$frozen = $this->invoices->findByKey($m->tenantId, $op['key']);
+				if ($frozen !== null) {
+					$e = $frozen->isIssuing() ? IssueLock::pendingOf($frozen) : ApiException::issued();
+					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+				}
 			}
 			// The project as it was: its leads and customer decide whom to deliver again.
 			$old = $op['kind'] === 'project' && $cur !== null && !$cur->isTombstone() && $cur->getData() !== null

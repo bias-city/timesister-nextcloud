@@ -15,9 +15,9 @@ use OCP\App\IAppManager;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Invoice documents (0.19.0), the pure part: the team setting
+ * Invoice documents, the pure part: the team setting
  * `documents`, the folders and file names, the year, the chain line, the
- * watermark, the language and the labels.
+ * language and, since 0.32.0, the checks of the app's uploads.
  */
 class DocumentRulesTest extends TestCase {
 	private static function outcome(callable $fn): string {
@@ -74,43 +74,58 @@ class DocumentRulesTest extends TestCase {
 		$this->assertFalse(DocumentRules::isPath('./a'));
 	}
 
-	public function testChainLineWatermarkLanguage(): void {
-		$this->assertSame('Beleg RE-2026-0007 · Kette 3 3f9c0123abcd ← a1b2c3d4e5f6', DocumentRules::chainLine('RE-2026-0007', 3, '3f9c0123abcdef', 'a1b2c3d4e5f6a7b8'));
-		$this->assertSame('Beleg RE-1 · Kette 1 abcdef012345 ← –', DocumentRules::chainLine('RE-1', 1, 'abcdef0123456789', ''));
-		$this->assertSame('VORABZUG', DocumentRules::watermark('de'));
-		$this->assertSame('DRAFT', DocumentRules::watermark('en'));
-		$this->assertSame('de', DocumentRules::language((object)['language' => 'de_CH'], 'en'));
+	public function testLanguage(): void {
+		$this->assertSame('de', DocumentRules::language((object)['language' => 'de'], 'en'));
 		$this->assertSame('en', DocumentRules::language((object)['language' => 'en'], 'de'));
-		$this->assertSame('de', DocumentRules::language(null, 'de'));
-		$this->assertSame('en', DocumentRules::language((object)['language' => 'fr'], 'fr'));
-		// What a client may write (0.22.0): null, de or en, else 422.
-		foreach ([null, 'de', 'en'] as $ok) {
-			$this->assertSame('ok', self::outcome(fn () => DocumentRules::validateLanguage($ok)));
+		$this->assertSame('de', DocumentRules::language(null, 'de_CH'));
+		$this->assertSame('en', DocumentRules::language((object)['language' => null], 'fr'));
+		$this->assertSame('ok', self::outcome(static fn () => DocumentRules::validateLanguage(null)));
+		$this->assertStringStartsWith('422', self::outcome(static fn () => DocumentRules::validateLanguage('de_CH')));
+	}
+
+	/** 0.32.0: the app's uploads – PDF magic and size, number and chain line in the bytes, a well-formed CII/UBL XML. */
+	public function testUploads(): void {
+		$pdf = "%PDF-1.7\n% Beleg RE-2026-0017 · Kette 42 ← 3f9c1a2b7d4e\n%%EOF";
+		$this->assertSame('ok', self::outcome(static fn () => DocumentRules::requirePdf($pdf)));
+		$this->assertSame('422 The document must be a PDF.', self::outcome(static fn () => DocumentRules::requirePdf('hello')));
+		$this->assertSame('413 A file may be at most 20 MB.', self::outcome(static fn () => DocumentRules::requirePdf(str_repeat('x', DocumentRules::FILE_MAX + 1))));
+		$this->assertSame('ok', self::outcome(static fn () => DocumentRules::requireMentions($pdf, ['RE-2026-0017', 'Beleg RE-2026-0017 · Kette 42 ← 3f9c1a2b7d4e'])));
+		try {
+			DocumentRules::requireMentions($pdf, ['RE-2026-0017', 'Beleg RE-2026-0017 · Kette 41 ← 3f9c1a2b7d4e']);
+			$this->fail('an older render must not close the issue');
+		} catch (ApiException $e) {
+			$this->assertSame([422, 'document_mismatch', 'content'], [$e->getStatus(), $e->getRuleCode(), $e->getField()]);
 		}
-		foreach (['de_CH', 'DE', 'fr', '', 1, true] as $bad) {
-			$this->assertSame('422 The team’s “language” is null, “de” or “en”.', self::outcome(fn () => DocumentRules::validateLanguage($bad)));
+		$cii = '<?xml version="1.0" encoding="UTF-8"?><rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"><rsm:ExchangedDocument><ram:ID xmlns:ram="urn:x">RE-2026-0017</ram:ID></rsm:ExchangedDocument></rsm:CrossIndustryInvoice>';
+		$this->assertSame('ok', self::outcome(static fn () => DocumentRules::requireXml($cii)));
+		$this->assertSame('ok', self::outcome(static fn () => DocumentRules::requireXml('<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"><ID>1</ID></Invoice>')));
+		foreach (['', 'not xml', '<Other/>', '<Invoice><ID>1</Invoice>', "<!DOCTYPE x [<!ENTITY e SYSTEM \"file:///etc/passwd\">]><Invoice>&e;</Invoice>", "\xFF\xFE<Invoice/>"] as $bad) {
+			$this->assertSame('422 The file must be a well-formed e-invoice XML (CII or UBL).', self::outcome(static fn () => DocumentRules::requireXml($bad)), $bad);
 		}
-		$this->assertSame('ok', self::outcome(fn () => RecordValidator::validate('setting', 'settings', (object)['language' => 'de', 'currency' => 'CHF'])));
-		$this->assertStringStartsWith('422 ', self::outcome(fn () => RecordValidator::validate('setting', 'settings', (object)['language' => 'fr'])));
-		$this->assertSame('Rechnung', DocumentRules::texts('de')['invoice']);
-		$this->assertSame('Invoice', DocumentRules::texts('en')['invoice']);
-		$t = DocumentRules::texts('en');
-		$this->assertSame('Invoice RE-1', DocumentRules::title($t, 'RE-1', null, null, null));
-		$this->assertSame('Reversal of RE-1 – RE-2', DocumentRules::title($t, 'RE-2', 'inv-x', null, 'RE-1'));
-		$this->assertSame('Credit note RE-3', DocumentRules::title($t, 'RE-3', null, 'inv-x', null));
-		$this->assertSame('Advance invoice RE-4', DocumentRules::title($t, 'RE-4', null, null, null, true));
-		$this->assertSame('Akontorechnung RE-4', DocumentRules::title(DocumentRules::texts('de'), 'RE-4', null, null, null, true));
-		$this->assertSame('1’234.50', DocumentRules::money(1234.5, 'de'));
-		$this->assertSame('1,234.50', DocumentRules::money(1234.5, 'en'));
-		$this->assertSame('15.10.2026', DocumentRules::day('2026-10-15', 'de'));
-		$this->assertSame('2026-10-15', DocumentRules::day('2026-10-15T08:00:00', 'en'));
+		$this->assertSame('413 A file may be at most 20 MB.', self::outcome(static fn () => DocumentRules::requireXml(str_repeat('<a/>', DocumentRules::FILE_MAX / 4 + 1))));
+	}
+
+	/** `chain/verify?files=true`: which entries name a file, and how a difference is reported. */
+	public function testHashedFiles(): void {
+		$entries = [
+			['seq' => 1, 'action' => 'issued', 'invoice' => 7, 'payload' => '{"key":"inv-1","document":{"kind":"pdf","name":"a.pdf","size":3,"sha256":"aa"}}'],
+			['seq' => 2, 'action' => 'document', 'invoice' => 7, 'payload' => '{"key":"inv-1","kind":"xrechnung","path":"T/a.xml","sha256":"bb"}'],
+			['seq' => 3, 'action' => 'paid', 'invoice' => 7, 'payload' => '{"key":"inv-1"}'],
+			['seq' => 4, 'action' => 'issued', 'invoice' => 8, 'payload' => '{"key":"inv-2"}'],
+			['seq' => 5, 'action' => 'expense_document', 'invoice' => 0, 'payload' => '{"sha256":"cc"}'],
+		];
+		$this->assertSame([
+			['seq' => 1, 'invoice' => 7, 'path' => null, 'sha256' => 'aa'],
+			['seq' => 2, 'invoice' => 7, 'path' => 'T/a.xml', 'sha256' => 'bb'],
+		], DocumentRules::hashedFiles($entries));
+		$this->assertSame(['ok' => false, 'first_break' => 2, 'field' => 'document', 'expected' => 'bb', 'found' => 'missing'], DocumentRules::fileBreak(2, 'bb', null));
 	}
 
 	public function testCapability(): void {
 		$apps = $this->createMock(IAppManager::class);
 		$apps->method('getAppVersion')->willReturn('0.19.0');
 		$caps = (new Capabilities($apps))->getCapabilities()['timesister'];
-		$this->assertSame(1, $caps['invoice_documents']);
+		$this->assertSame(2, $caps['invoice_documents'], '0.32.0: the two-step issue, the app renders');
 		$this->assertSame([2, 1], [$caps['receipts'], $caps['document_tree']], '0.22.0; receipts 2 since 0.27.0 (reopen)');
 		$this->assertSame(1, $caps['expense_fixing'], '0.23.0');
 		$this->assertArrayNotHasKey('expense_reports', $caps, 'replaced by expense_fixing');

@@ -58,6 +58,15 @@ final class InvHourMapper extends QBMapper {
 	}
 
 	/** Deleting a team: every row of it. @return int rows */
+	/** A cancelled reservation (0.32.0): the hours of one invoice. @return int rows */
+	public function deleteByInvoice(int $tenantId, int $invoiceId): int {
+		$qb = $this->db->getQueryBuilder();
+		$qb->delete($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('invoice_id', $qb->createNamedParameter($invoiceId, IQueryBuilder::PARAM_INT)));
+		return $qb->executeStatement();
+	}
+
 	public function deleteByTenant(int $tenantId): int {
 		$qb = $this->db->getQueryBuilder();
 		$qb->delete($this->getTableName())

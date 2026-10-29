@@ -1,22 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Invoice documents (0.19.0): the team setting `documents` (since 0.22.0
-// the root of the document tree in the backup owner's files, checked on
-// writing), the admin's check endpoint,
-// the watermarked preview of a draft, the stored PDF after issuing (file
-// in the folder, ledger entry `document` with the file's hash, chain still
-// valid), rendering again, the chain head and the daily chain head file.
+// Invoice documents (0.19.0, one renderer since 0.32.0): the team setting
+// `documents` (since 0.22.0 the root of the document tree in the backup
+// owner's files, checked on writing), the admin's check endpoint, the
+// preview and render gone (410), the app's PDF filed by the close (file in
+// the folder, the `issued` entry with the file's hash, chain still valid),
+// the same bytes again, the chain head and the daily chain head file.
 // Needs the booking in the book like teil-faktura.mjs; without it the
 // issuing checks are skipped. Leaves pb as it found it (settings record,
 // team setting, project, customer, event, marks); the files in the owner's
 // folder and the ledger entries stay (append-only, test year far away).
 import { ensureTimeCalendar, dav, deleteEvent, ocs, putEvent, runJob, sql, ADMIN } from './lib.mjs'
-import { A, L, RUN, U1, check, expect, head, isObj, me, sha256 } from './harness.mjs'
+import { A, L, RUN, U1, check, expect, festschreiben, head, isObj, me, raw, sha256, stornieren } from './harness.mjs'
 
 const path = (key) => `/records/invoice/${encodeURIComponent(key)}`
 const ipath = (key) => `/invoices/${encodeURIComponent(key)}`
 const billingKey = (person, uid) => `${person}+${sha256(uid).slice(0, 32)}`
-const HEX64 = /^[0-9a-f]{64}$/
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 /** A raw GET of the app API as `who`: status, content type and body bytes. */
@@ -74,7 +73,7 @@ export async function dokumente() {
 		head('Documents: setup')
 		{
 			const cap = await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')
-			check('capability invoice_documents: 1', cap.data?.capabilities?.timesister?.invoice_documents === 1, cap.data?.capabilities?.timesister)
+			check('capability invoice_documents: 2 (0.32.0)', cap.data?.capabilities?.timesister?.invoice_documents === 2, cap.data?.capabilities?.timesister)
 			check('/me.settings.documents has root and chain_mail (0.22.0)', JSON.stringify(Object.keys((await me(A)).settings?.documents || {}).sort()) === '["chain_mail","root"]', (await me(A)).settings)
 			if (!owner) {
 				// The backup owner is the first Team Admin by default; set pbadmin explicitly through the admin page's endpoint.
@@ -140,95 +139,79 @@ export async function dokumente() {
 			}
 		}
 
-		head('Documents: the draft and its preview')
+		head('Documents: the draft; preview and render are gone (0.32.0)')
 		const d = await ocs(A, 'PUT', path(K1), { version: 0, data: draft() })
 		expect('Team Admin writes a draft', d, 200)
-		expect('preview of an unknown key', await fetchRaw(A, `${ipath(`inv-${RUN}zz`)}/preview`).then((r) => ({ status: r.status, data: null, text: '' })), 404)
-		expect('Member previews', await fetchRaw(U1, `${ipath(K1)}/preview`).then((r) => ({ status: r.status, data: null, text: '' })), 403)
+		expect('preview is gone, also for an unknown key', await fetchRaw(A, `${ipath(`inv-${RUN}zz`)}/preview`).then((r) => ({ status: r.status, data: null, text: '' })), 410)
+		expect('… for a Member too', await fetchRaw(U1, `${ipath(K1)}/preview`).then((r) => ({ status: r.status, data: null, text: '' })), 410)
+		expect('render is gone', await ocs(A, 'POST', `${ipath(K1)}/render`, {}), 410, 'gone')
 		expect('document of a draft', await fetchRaw(A, `${ipath(K1)}/document?kind=pdf`).then((r) => ({ status: r.status, data: null, text: '' })), 404)
 		expect('chain head by a Lead', await ocs(L, 'GET', '/invoices/chain/head'), 403, 'forbidden')
 		{
 			const noBudget = await ocs(A, 'PUT', path(K2), { version: 0, data: draft({ budget: 'b9' }) })
 			expect('a draft naming a budget not in the project', noBudget, 200)
-			const p = await fetchRaw(A, `${ipath(K2)}/preview`)
-			check('… its preview is 422 like issue', p.status === 422, p.status)
+			expect('… issuing it is 422 (the preview that checked this is gone)', await ocs(A, 'POST', `${ipath(K2)}/issue`, { issued_on: ISSUED_ON }), 422, 'invalid')
 		}
 		if (!inBook) {
 			console.log('    info  the booking is not in the book (no listener, no TS_OCC) – the document checks are skipped')
 			return
 		}
-		{
-			const p = await fetchRaw(A, `${ipath(K1)}/preview`)
-			check('Team Admin gets the preview as application/pdf, inline', p.status === 200 && p.type.startsWith('application/pdf') && /inline/.test(p.disposition), [p.status, p.type, p.disposition])
-			check('… a PDF with the watermark VORABZUG (team language German) in it, not yet issued', p.buf.subarray(0, 5).toString() === '%PDF-' && p.buf.includes('VORABZUG') && p.buf.includes('(noch nicht gestellt)'), p.buf.length)
-			const l = await fetchRaw(L, `${ipath(K1)}/preview`)
-			check('the project’s Lead gets it too', l.status === 200 && l.buf.subarray(0, 5).toString() === '%PDF-', l.status)
-			check('the preview is not in the ledger', !((await ocs(A, 'GET', '/invoices/ledger?limit=2000')).data?.entries || []).some((e) => e.action === 'document' && e.number === ''))
-		}
 
-		head('Documents: issue, the stored PDF, the ledger')
+		head('Documents: issue, the filed PDF, the ledger')
 		let number = null
 		let seq = null
 		let fixed = null
 		{
-			const r = await ocs(A, 'POST', `${ipath(K1)}/issue`, { issued_on: ISSUED_ON })
-			expect('Team Admin issues the draft', r, 200)
-			number = r.data?.issue?.number ?? null
-			seq = r.data?.issue?.seq ?? null
-			check('issue: document_state pending in the answer (rendered after the transaction)', ['pending', 'done'].includes(r.data?.issue?.document_state), r.data?.issue)
-			expect('preview of an issued invoice', await fetchRaw(A, `${ipath(K1)}/preview`).then((x) => ({ status: x.status, data: null, text: '' })), 409)
-			let f = await ocs(A, 'GET', `${ipath(K1)}/fixed`)
-			if (f.data?.document_state !== 'done') {
-				const again = await ocs(A, 'POST', `${ipath(K1)}/render`, {})
-				expect('render again', again, 200)
-				f = await ocs(A, 'GET', `${ipath(K1)}/fixed`)
-			}
+			const r = await festschreiben(A, K1, { issued_on: ISSUED_ON })
+			expect('Team Admin reserves', r.reserve, 200)
+			expect('… and closes with the app’s PDF', r.close, 200)
+			number = r.issue?.number ?? null
+			seq = r.issue?.seq ?? null
+			check('the reservation: no document_state, fixed without documents, chain_line', r.reserve.data?.issue?.document_state === undefined && Array.isArray(r.fixed?.documents) && r.fixed.documents.length === 0 && typeof r.fixed?.chain_line === 'string', r.reserve.data?.issue)
+			const f = await ocs(A, 'GET', `${ipath(K1)}/fixed`)
 			fixed = f.data
-			check('fixed: document_state done, no error, path <root>/Buchhaltung/<year>/Rechnungen/<date>_<number>_<customer>.pdf, sha256', fixed?.document_state === 'done' && fixed?.document_error === null && fixed?.document_path === `${FOLDER}/Buchhaltung/${Y}/Rechnungen/${ISSUED_ON}_${number}_Kunde-${RUN}.pdf` && HEX64.test(fixed?.document_sha256 ?? ''), fixed)
+			check('fixed: issued, documents[pdf] with path <root>/Buchhaltung/<year>/Rechnungen/<date>_<number>_<customer>.pdf and sha256, document_path the same', fixed?.status === 'issued' && fixed?.document_state === undefined && fixed?.documents?.[0]?.kind === 'pdf' && fixed?.documents?.[0]?.path === `${FOLDER}/Buchhaltung/${Y}/Rechnungen/${ISSUED_ON}_${number}_Kunde-${RUN}.pdf` && fixed?.documents?.[0]?.sha256 === sha256(r.pdf) && fixed?.document_path === fixed?.documents?.[0]?.path && fixed?.document_sha256 === sha256(r.pdf), fixed)
 			const doc = await fetchRaw(A, `${ipath(K1)}/document?kind=pdf`)
 			check('document: application/pdf, attachment <number>.pdf', doc.status === 200 && doc.type.startsWith('application/pdf') && doc.disposition.includes(`${number}.pdf`), [doc.status, doc.type, doc.disposition])
 			const sha = sha256(doc.buf)
-			check('… its SHA-256 is document_sha256, no watermark, the number in it', sha === fixed?.document_sha256 && !doc.buf.includes('VORABZUG') && doc.buf.includes(`Rechnung ${number}`), sha)
+			check('… the bytes as sent: the SHA-256 is document_sha256, the number in it', sha === fixed?.document_sha256 && doc.buf.equals(r.pdf) && doc.buf.includes(`Invoice ${number}`), sha)
 			check('… the chain line of the issue is in it', doc.buf.includes(`Beleg ${number} · Kette ${seq} `))
 			expect('document of another kind', await fetchRaw(A, `${ipath(K1)}/document?kind=docx`).then((x) => ({ status: x.status, data: null, text: '' })), 422)
-			expect('document?kind=xml of a customer who wants no XRechnung (0.20.0)', await fetchRaw(A, `${ipath(K1)}/document?kind=xml`).then((x) => ({ status: x.status, data: null, text: '' })), 404)
-			check('… the stored PDF carries factur-x.xml (ZUGFeRD, 0.20.0)', doc.buf.includes('factur-x.xml'))
+			expect('document?kind=xml before the app sends one (0.32.0)', await fetchRaw(A, `${ipath(K1)}/document?kind=xml`).then((x) => ({ status: x.status, data: null, text: '' })), 404)
 			expect('the Lead downloads it', await fetchRaw(L, `${ipath(K1)}/document`).then((x) => ({ status: x.status, data: null, text: '' })), 200)
 			expect('a Member does not', await fetchRaw(U1, `${ipath(K1)}/document`).then((x) => ({ status: x.status, data: null, text: '' })), 403)
 			// The file in the backup owner's files, through WebDAV as the owner.
 			const ownerDav = { user: owner, pass: `Test-2026-${owner}!` }
 			const dv = await dav(ownerDav, 'GET', `files/${encodeURIComponent(owner)}/${String(fixed?.document_path || 'none').split('/').map(encodeURIComponent).join('/')}`)
 			check('the file lies in the owner’s files (WebDAV)', dv.status === 200 && dv.text.startsWith('%PDF-'), dv.status)
-			const lg = await ocs(A, 'GET', `/invoices/ledger?since=${seq}&limit=10`)
-			const e = (lg.data?.entries || []).find((x) => x.action === 'document' && x.number === number)
-			check('ledger: action document with payload {key, number, kind: zugferd, path, size, sha256}', e !== undefined && typeof e?.payload === 'string' && (() => { const p = JSON.parse(e.payload); return p.key === K1 && p.kind === 'zugferd' && p.path === fixed.document_path && p.size === doc.buf.length && p.sha256 === sha })(), e)
+			const lg = await ocs(A, 'GET', `/invoices/ledger?since=${seq - 1}&limit=10`)
+			const e = (lg.data?.entries || []).find((x) => x.seq === seq)
+			check('ledger: the issued entry carries document {kind: pdf, name, size, sha256}, no path; no separate document entry', e?.action === 'issued' && e?.number === number && (() => { const p = JSON.parse(e?.payload ?? '{}'); return p.key === K1 && p.document?.kind === 'pdf' && p.document?.name === `${ISSUED_ON}_${number}_Kunde-${RUN}.pdf` && p.document?.size === doc.buf.length && p.document?.sha256 === sha && p.document?.path === undefined })() && !(lg.data?.entries || []).some((x) => x.action === 'document' && x.number === number), e)
 			const v = await ocs(A, 'GET', '/invoices/chain/verify')
 			check('the chain is still valid', v.data?.ok === true, v.data)
 			const hd = await ocs(A, 'GET', '/invoices/chain/head')
 			expect('chain head', hd, 200)
 			check('… seq, hash, at, entries; head = verify head', hd.data?.hash === v.data?.head && hd.data?.seq >= seq && /Z$/.test(hd.data?.at ?? '') && hd.data?.entries >= hd.data?.seq - 0 && hd.data?.entries > 0, hd.data)
-			const again = await ocs(A, 'POST', `${ipath(K1)}/render`, {})
-			expect('render again on a stored document', again, 200)
-			check('… stays done, no second ledger entry', again.data?.document_state === 'done' && ((await ocs(A, 'GET', `/invoices/ledger?since=${seq}&limit=50`)).data?.entries || []).filter((x) => x.action === 'document' && x.number === number).length === 1, again.data)
-			expect('render by a Lead', await ocs(L, 'POST', `${ipath(K1)}/render`, {}), 403, 'forbidden')
-			expect('render of a draft', await ocs(A, 'POST', `${ipath(K2)}/render`, {}), 404, 'not_found')
+			const again = await raw(A, 'PUT', `${ipath(K1)}/document?kind=pdf`, r.pdf, 'application/pdf')
+			expect('the same bytes again (the app lost the answer)', again, 200)
+			check('… stored false, no second ledger entry', again.data?.stored === false && again.data?.issue?.hash === fixed?.chain?.hash && ((await ocs(A, 'GET', `/invoices/ledger?since=${seq}&limit=50`)).data?.entries || []).filter((x) => x.number === number).length === 0, again.data)
+			expect('render is gone for an issued invoice too', await ocs(A, 'POST', `${ipath(K1)}/render`, {}), 410, 'gone')
+			expect('preview of an issued invoice is gone', await fetchRaw(A, `${ipath(K1)}/preview`).then((x) => ({ status: x.status, data: null, text: '' })), 410)
 		}
 
-		head('Documents: reversal renders too, chain head file')
+		head('Documents: the reversal’s PDF is filed too, chain head file')
 		{
-			const r = await ocs(A, 'POST', `${ipath(K1)}/reverse`, { kind: 'reversal', reason: 'Wrong hours', issued_on: ISSUED_ON })
-			expect('Team Admin reverses', r, 200)
-			const rev = r.data?.record?.key
+			const r = await stornieren(A, K1, { kind: 'reversal', reason: 'Wrong hours', issued_on: ISSUED_ON })
+			expect('Team Admin reverses', r.reserve, 200)
+			expect('… and closes the reversal with its PDF', r.close, 200)
+			const rev = r.key
 			if (rev) {
 				made.push(rev)
-				let f = await ocs(A, 'GET', `${ipath(rev)}/fixed`)
-				if (f.data?.document_state !== 'done') {
-					await ocs(A, 'POST', `${ipath(rev)}/render`, {})
-					f = await ocs(A, 'GET', `${ipath(rev)}/fixed`)
-				}
-				check('the reversal’s document is stored', f.data?.document_state === 'done' && f.data?.document_path === `${FOLDER}/Buchhaltung/${Y}/Rechnungen/${ISSUED_ON}_${f.data?.number}_Kunde-${RUN}.pdf`, f.data)
+				const f = await ocs(A, 'GET', `${ipath(rev)}/fixed`)
+				check('the reversal’s document is filed', f.data?.status === 'issued' && f.data?.documents?.[0]?.path === `${FOLDER}/Buchhaltung/${Y}/Rechnungen/${ISSUED_ON}_${f.data?.number}_Kunde-${RUN}.pdf` && f.data?.document_path === f.data?.documents?.[0]?.path, f.data)
 				const doc = await fetchRaw(A, `${ipath(rev)}/document`)
-				check('… titled “Storno zu <original>”', doc.status === 200 && doc.buf.includes(`Storno zu ${number}`), doc.status)
+				check('… the bytes as sent, with its own chain line', doc.status === 200 && doc.buf.equals(r.pdf) && doc.buf.includes(`Beleg ${f.data?.number} · Kette ${f.data?.chain?.seq} `), doc.status)
+				check('the original is cancelled now', r.original?.data?.status === 'cancelled' && r.original?.data?.reversed_by === rev, r.original?.data)
 			}
 			if (!process.env.TS_OCC) {
 				console.log('    info  TS_OCC not set – the chain head job is skipped')
@@ -240,8 +223,8 @@ export async function dokumente() {
 				const dv = await dav(ownerDav, 'GET', `files/${encodeURIComponent(owner)}/${`${FOLDER}/Buchhaltung/${day.slice(0, 4)}/Kette/chain-${day}.txt`.split('/').map(encodeURIComponent).join('/')}`)
 				const hd = (await ocs(A, 'GET', '/invoices/chain/head')).data
 				check('chain-<day>.txt lies in Buchhaltung/<year>/Kette with the head', dv.status === 200 && dv.text.includes('team: Planungsbüro') && dv.text.includes(`head hash: ${hd?.hash}`) && dv.text.includes(`head seq: ${hd?.seq}`), [dv.status, dv.text.slice(0, 200)])
-				const retry = runJob('DocumentRetry')
-				check('the DocumentRetry job runs', retry)
+				const expiry = runJob('IssueExpiry')
+				check('the IssueExpiry job runs (replaces DocumentRetry, 0.32.0)', expiry)
 			}
 		}
 	} finally {

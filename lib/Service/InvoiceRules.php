@@ -20,7 +20,8 @@ final class InvoiceRules {
 	public const KIND = 'invoice';
 	public const DRAFT = 'draft';
 	/** 0.24.0: `external`, handed over to the accounting system that issues it (set by the server only). */
-	public const STATUSES = [self::DRAFT, 'issued', 'paid', 'cancelled', HandoverRules::STATUS];
+	/** 0.32.0: `issuing` – reserved on the server, the app's PDF not filed yet. */
+	public const STATUSES = [self::DRAFT, 'issuing', 'issued', 'paid', 'cancelled', HandoverRules::STATUS];
 	public const MAX_BOOKINGS = 5000;
 	/** 5000 bookings with their event UIDs need more than the usual 256 KB. */
 	public const MAX_BYTES = 786432;

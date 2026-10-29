@@ -52,6 +52,16 @@ class QuoteRulesTest extends TestCase {
 		return 'ok';
 	}
 
+	/** The ApiException, or null when the call passes. */
+	private static function outcomeException(callable $fn): ?ApiException {
+		try {
+			$fn();
+		} catch (ApiException $e) {
+			return $e;
+		}
+		return null;
+	}
+
 	private static function check(array $over = [], array $drop = [], string $key = self::KEY): string {
 		return self::outcome(fn () => RecordValidator::validate('quote', $key, self::data($over, $drop)));
 	}
@@ -105,9 +115,28 @@ class QuoteRulesTest extends TestCase {
 		}
 	}
 
+	/** 0.32.0 (E1): a draft may be unnamed; the issue and every other status need the name. */
+	public function testDraftWithoutName(): void {
+		$this->assertSame('ok', self::check(['status' => 'draft', 'name' => '']), 'empty on a draft');
+		$this->assertSame('ok', self::check(['status' => 'draft', 'name' => null]), 'null on a draft');
+		$this->assertSame('ok', self::check(['status' => 'draft'], ['name']), 'missing on a draft');
+		$required = '422 A quote needs a name of 1 to 200 characters from the issue on; only a draft may be unnamed.';
+		foreach (['quoted', 'negotiation', 'verbal', 'declined'] as $status) {
+			$this->assertSame($required, self::check(['status' => $status, 'name' => '']), $status);
+			$this->assertSame($required, self::check(['status' => $status], ['name']), $status . ' missing');
+		}
+		$this->assertSame($required, self::check(['status' => 'accepted', 'project' => 'd200', 'name' => null]));
+		$e = self::outcomeException(fn () => RecordValidator::validate('quote', self::KEY, self::data(['name' => ''])));
+		$this->assertSame(['quote_name_required', 'name'], [$e?->getRuleCode(), $e?->getField()]);
+		$this->assertSame('422 “name” must be text of 1 to 200 characters.', self::check(['status' => 'draft', 'name' => 7]), 'a bad name on a draft is still a form error');
+	}
+
 	public function testInvalidFields(): void {
-		foreach ([[], ['name' => ''], ['name' => str_repeat('n', 201)], ['name' => "a\nb"], ['name' => 7]] as $i => $over) {
-			$this->assertSame('422 “name” must be text of 1 to 200 characters.', $i === 0 ? self::check([], ['name']) : self::check($over), (string)$i);
+		$required = '422 A quote needs a name of 1 to 200 characters from the issue on; only a draft may be unnamed.';
+		$this->assertSame($required, self::check([], ['name']), 'missing on a quoted quote');
+		$this->assertSame($required, self::check(['name' => '']), 'empty on a quoted quote');
+		foreach ([['name' => str_repeat('n', 201)], ['name' => "a\nb"], ['name' => 7]] as $i => $over) {
+			$this->assertSame('422 “name” must be text of 1 to 200 characters.', self::check($over), (string)$i);
 		}
 		$status = '422 “status” of a quote is one of draft, quoted, negotiation, verbal, accepted, declined.';
 		$this->assertSame($status, self::check([], ['status']));
@@ -225,7 +254,7 @@ class QuoteRulesTest extends TestCase {
 			$this->assertSame($code, self::check(['project' => null, 'project_draft' => ['code' => $bad, 'name' => 'X']]), var_export($bad, true));
 		}
 		$this->assertSame('422 A quote has either “project” or “project_draft”, not both.', self::check(['project' => 'd200', 'project_draft' => ['code' => 'N400', 'name' => 'X']]));
-		$this->assertSame(3, (new Capabilities($this->createMock(IAppManager::class)))->getCapabilities()['timesister']['quotes']);
+		$this->assertSame(4, (new Capabilities($this->createMock(IAppManager::class)))->getCapabilities()['timesister']['quotes']);
 	}
 
 	public function testLimits(): void {
@@ -341,6 +370,77 @@ class QuoteRulesTest extends TestCase {
 		$this->assertFalse(RecordRights::perRecordOnly([$w('quote'), $w('project')]));
 	}
 
+	/** 0.32.0: texts and attachments as written by the client; `issued` and `documents` are the server's. */
+	public function testTextsAttachmentsAndIssued(): void {
+		$this->assertSame('ok', self::check(['texts' => ['greeting' => 'Sehr geehrte Damen und Herren', 'intro' => "Gerne\nofferieren wir", 'closing' => null, 'footer' => 'Muster'], 'attachments' => "Honorarofferte\nTerminplan"]));
+		$this->assertSame('ok', self::check(['texts' => null, 'attachments' => null]));
+		$this->assertSame('422 “texts” must be null or an object with greeting, intro, closing, footer.', self::check(['texts' => 'x']));
+		$this->assertSame('422 “texts” has an unknown field “subject”; allowed are greeting, intro, closing, footer.', self::check(['texts' => ['subject' => 'x']]));
+		$this->assertSame('422 “texts.intro” must be text of at most 4000 characters.', self::check(['texts' => ['intro' => str_repeat('x', 4001)]]));
+		$this->assertSame('422 “attachments” must be text of at most 2000 characters.', self::check(['attachments' => str_repeat('x', 2001)]));
+		$this->assertSame('422 “issued” is set by the server when the quote is issued.', self::check(['issued' => 'x']));
+
+		// The frozen copy on issue: the offered part, never the live negotiation.
+		$d = (object)['status' => 'draft', 'currency' => 'chf', 'customer' => 'gemeinde-muster', 'project' => null, 'project_draft' => (object)['code' => 'N410', 'name' => 'Schulhaus'],
+			'budgets' => [(object)['id' => 'b1', 'name' => 'Vorprojekt', 'currency' => 'CHF']], 'texts' => (object)['greeting' => 'Hi'], 'attachments' => 'Plan'];
+		$i = QuoteRules::issuedCopy($d, '2026-10-29T13:05:00Z', 'pblead', 'OF-2026-012', '2026-10-29', '2026-12-15', 184.0, 33120.0, ['key' => 'gemeinde-muster', 'name' => 'Gemeinde Muster']);
+		$this->assertSame('{"at":"2026-10-29T13:05:00Z","by":"pblead","number":"OF-2026-012","date":"2026-10-29","valid_until":"2026-12-15","currency":"chf","hours":184.0,"amount":33120.0,'
+			. '"customer":{"key":"gemeinde-muster","name":"Gemeinde Muster"},"project":null,"project_draft":{"code":"N410","name":"Schulhaus"},'
+			. '"budgets":[{"id":"b1","name":"Vorprojekt","currency":"CHF"}],"texts":{"greeting":"Hi"},"attachments":"Plan"}', json_encode($i, JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION));
+		$this->assertTrue(QuoteRules::isIssued((object)['number' => 'OF-1', 'issued' => $i]));
+		$this->assertFalse(QuoteRules::isIssued((object)['number' => 'OF-1']));
+
+		// A client's write keeps the server's fields; number and `issued` of an issued quote are frozen.
+		$before = (object)['number' => 'OF-1', 'issued' => $i, 'documents' => [(object)['kind' => 'sent']], 'document' => (object)['path' => 'p']];
+		$after = (object)['number' => 'OF-1', 'status' => 'negotiation', 'documents' => [], 'issued' => json_decode(json_encode($i))];
+		QuoteRules::keepServerFields($before, $after);
+		$this->assertSame(['sent'], array_map(static fn (\stdClass $x): string => $x->kind, $after->documents));
+		$this->assertSame('p', $after->document->path);
+		$this->assertSame('negotiation', $after->status);
+		foreach ([
+			[(object)['number' => 'OF-2', 'status' => 'quoted'], 'number'],
+			[(object)['number' => 'OF-1', 'issued' => (object)['number' => 'OF-9']], 'issued'],
+		] as [$bad, $field]) {
+			try {
+				QuoteRules::keepServerFields($before, $bad);
+				$this->fail($field);
+			} catch (ApiException $e) {
+				$this->assertSame([409, 'quote_issued_frozen', $field], [$e->getStatus(), $e->getRuleCode(), $e->getField()]);
+			}
+		}
+		try {
+			QuoteRules::keepServerFields(null, (object)['issued' => (object)['number' => 'x']]);
+			$this->fail('issued on a draft');
+		} catch (ApiException $e) {
+			$this->assertSame('quote_issued_frozen', $e->getRuleCode());
+		}
+		$fresh = (object)['number' => null, 'document' => (object)['path' => 'x'], 'documents' => [1]];
+		QuoteRules::keepServerFields(null, $fresh);
+		$this->assertFalse(property_exists($fresh, 'document') || property_exists($fresh, 'documents'), 'a new quote carries no server fields');
+
+		// The request of the issue and the document kinds and names.
+		$this->assertSame(['date' => '2026-10-29', 'valid_until' => '2026-12-15', 'hours' => 184.0, 'amount' => 33120.5], QuoteRules::issueBody((object)['date' => '2026-10-29', 'valid_until' => '2026-12-15', 'hours' => 184, 'amount' => 33120.504], 0));
+		$this->assertSame('1970-01-01', QuoteRules::issueBody(new \stdClass(), 0)['date']);
+		$this->assertStringStartsWith('422', self::outcome(static fn () => QuoteRules::issueBody((object)['hours' => -1], 0)));
+		$this->assertStringStartsWith('422', self::outcome(static fn () => QuoteRules::issueBody((object)['date' => 'today'], 0)));
+		$this->assertSame('sent', QuoteRules::addedKind('sent'));
+		$this->assertStringStartsWith('422', self::outcome(static fn () => QuoteRules::addedKind('timesister')));
+		$this->assertSame('timesister', QuoteRules::readKind(null));
+		$this->assertSame('signed', QuoteRules::readKind('signed'));
+		$this->assertSame('2026-10-29_OF-2026-012_Gemeinde-Muster.pdf', QuoteRules::documentName('2026-10-29', 'OF-2026-012', 'Gemeinde Muster', 'timesister'));
+		$this->assertSame('2026-10-29_OF-2026-012_Gemeinde-Muster_gesendet.pdf', QuoteRules::documentName('2026-10-29', 'OF-2026-012', 'Gemeinde Muster', 'sent'));
+		$this->assertSame('2026-10-29_OF-2026-012_Gemeinde-Muster_unterschrieben.pdf', QuoteRules::documentName('2026-10-29', 'OF-2026-012', 'Gemeinde Muster', 'signed'));
+		$this->assertSame(10, QuoteRules::DOCUMENTS_MAX);
+		try {
+			QuoteRules::requireLead(false, (object)['leads' => ['other']], ['me'], []);
+			$this->fail('a Lead not named');
+		} catch (ApiException $e) {
+			$this->assertSame([403, 'quote_lead_only'], [$e->getStatus(), $e->getRuleCode()]);
+		}
+		QuoteRules::requireLead(false, (object)['leads' => ['me']], ['me'], []);
+		QuoteRules::requireLead(true, null, [], []);
+	}
+
 	public function testNamesAny(): void {
 		$raw = Json::encode(self::data(['leads' => ['p-lea', 'luca']]));
 		$this->assertTrue(QuoteRules::namesAny($raw, ['p-lea' => true]));
@@ -351,7 +451,8 @@ class QuoteRulesTest extends TestCase {
 
 	public function testCapabilityAndZip(): void {
 		$cap = (new Capabilities($this->createMock(IAppManager::class)))->getCapabilities()['timesister'];
-		$this->assertSame(3, $cap['quotes']);
+		$this->assertSame(4, $cap['quotes'], 'texts, attachments, issue since 0.32.0');
+		$this->assertSame(1, $cap['quote_documents']);
 		$mapped = ZipRules::mapData(self::data(), ['pblead' => 'lea', 'pbadmin' => 'petra']);
 		$this->assertInstanceOf(\stdClass::class, $mapped);
 		$this->assertSame(['lea'], $mapped->leads, 'a team ZIP moved to other accounts: the leads follow');

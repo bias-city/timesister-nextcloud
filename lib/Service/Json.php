@@ -53,6 +53,15 @@ final class Json {
 	}
 
 	/** Reads `php://input`, but never more than `$maxBytes + 1` bytes. */
+	/** An associative array as a stdClass (typed, unlike a cast). @param array<string,mixed> $a */
+	public static function object(array $a): \stdClass {
+		$o = new \stdClass();
+		foreach ($a as $k => $v) {
+			$o->{$k} = $v;
+		}
+		return $o;
+	}
+
 	public static function readInput(int $maxBytes): string {
 		$raw = @file_get_contents('php://input', false, null, 0, $maxBytes + 1);
 		return $raw === false ? '' : $raw;

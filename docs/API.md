@@ -26,7 +26,7 @@ deviates from it changes this file first. Plan and rationale: `PLAN-NC-APP.md`.
   to the place that resolves it.
 - Times as ISO 8601 in UTC (`2026-09-26T08:15:00Z`), days as `YYYY-MM-DD`.
 
-## Error codes (0.31.0)
+## Error codes (0.31.0, extended 0.32.0)
 
 `data = { "error", "message", "code"?, "field"?, … }`. `error` stays the
 coarse class (`no_team`, `ambiguous_team`, `forbidden`, `not_found`,
@@ -96,7 +96,20 @@ as *retired*. Message wording may change at any time.
 | `handover_pdf_exists` | 409 conflict | the accounting system's PDF of this invoice is stored already; it stays |
 | `exchange_rate_server_only` | 403 forbidden | exchange rates are written by the server only |
 | `version_conflict` | 409 conflict | the record changed in the meantime (`current` is present; in a batch `conflicts[]`) |
-| `gone` | 410 gone | the route was removed; the client is older than the server (`expense-reports/ready`, `…/paid`, `expense-rules/{key}/approve` since 0.30.0) |
+| `gone` | 410 gone | the route was removed; the client is older than the server (`expense-reports/ready`, `…/paid`, `expense-rules/{key}/approve` since 0.30.0; `invoices/{key}/preview`, `invoices/{key}/render` since 0.32.0) |
+| `issue_pending` | 409 conflict | since 0.32.0: an issue of the team is open (`pending: { key, number, expires_at }`) – no second reservation, no other ledger write, no `next-number`, no write to the record being issued; close it with the PDF, cancel it or wait for its expiry |
+| `not_issuing` | 409 conflict | since 0.32.0: the document or the cancel needs an invoice in status `issuing` (a PDF after the expiry, a second cancel) |
+| `document_missing` | 409 conflict | since 0.32.0: the invoice has no filed PDF yet – `GET …/document` while `issuing`, the XML before the PDF |
+| `number_not_last` | 409 conflict | since 0.32.0: cancelling would leave a gap – the reserved number is no longer the counter's last (`number`, `last`); the reservation stays, deliver the PDF |
+| `document_mismatch` | 422 invalid | since 0.32.0: the uploaded file does not name this invoice – the PDF must contain the number and the `chain_line` of the reservation (uncompressed XMP), the XML the number (`field: content`) |
+| `document_exists` | 409 conflict | since 0.32.0: a document of this kind with other content is filed already (the invoice's PDF after the close, its XML) |
+| `quote_lead_only` | 403 forbidden | since 0.32.0: only Team Admins and the quote's or project's Leads issue a quote and store its documents (the write rule of `quotes: 2`, now with a code) |
+| `quote_not_draft` | 409 conflict | since 0.32.0: only a draft quote is issued; a changed offer is a duplicate with its own number |
+| `quote_not_issued` | 409 conflict | since 0.32.0: quote documents need an issued quote (a `number`) |
+| `quote_issued_frozen` | 409 conflict | since 0.32.0: `number` and `issued` of an issued quote do not change (`field` names the one that stays) |
+| `quote_number_taken` | 409 conflict | since 0.32.0: the next quote number is taken; check the quote number pattern (`quote_number`) |
+| `quote_documents_max` | 409 conflict | since 0.32.0: a quote holds at most 10 documents |
+| `quote_name_required` | 422 invalid | since 0.32.0: only a `draft` may be unnamed; `POST /quotes/{key}/issue` and every other status need `name` (`field: name`) |
 
 The server app adds codes release by release; every new `ApiException`
 for a rule gets one (a unit test holds the services of receipts, expenses,
@@ -2253,7 +2266,7 @@ Everything of “Quotes, 0.16.0” above (project statuses `draft`, `quoted`,
 | Field | Rule |
 |---|---|
 | `schema` | optional integer 1–1000 |
-| `name` | **required**, text of 1–200 characters, no control characters |
+| `name` | **required**, text of 1–200 characters, no control characters (since 0.32.0 a `draft` may be unnamed, see «One renderer» B) |
 | `status` | **required**: `draft`, `quoted`, `accepted` or `declined` |
 | `customer` | `null` or a customer's key (record key pattern) |
 | `project` | `null` or a project's key (record key pattern); **required** once `status` is `accepted`: `422` “An accepted quote needs “project”: the project that took over its budget.” |
@@ -5569,3 +5582,474 @@ stays; capability `expense_table: 2` (1 before); no migration.
   that the server is newer rather than seeing a 404.
 - **Informal German.** `l10n/de_DE.json` is a copy of `de.json`; the app
   says «du» everywhere.
+
+## One renderer, 0.32.0 (2026-10-29) – the app's PDF closes the issue, quotes with number and texts, layout appendices
+
+PLAN-FAKTURA §11.4, §11.5 and §12, PLAN-SPESEN §1 and §8 (decisions E1–E6
+of 2026-10-29): there is **one renderer, the Mac app**. The server renders
+nothing any more – no invoice PDF, no preview, no ZUGFeRD, no XRechnung.
+It assigns the number and the chain link, takes the app's PDF, checks it,
+writes its hash into the ledger and files it in the document tree.
+Capabilities `invoice_documents: 2`, `quotes: 4`, `quote_documents: 1`,
+`invoice_layout: 2`; `api: 2` stays. **Not additive for issuing**
+(development without transition): a client of `invoice_documents: 1` must
+not call `issue` against this server – it would get a reservation it does
+not understand and leave the invoice `issuing` until the server releases
+it after 15 minutes. The Mac app checks `invoice_documents >= 2` before it
+issues.
+
+### A. Issuing in two steps (`invoice_documents: 2`)
+
+```text
+POST /invoices/{key}/issue        reserve: number, dates, chain link      → status issuing
+   (the app renders the PDF with number, dates and chain line)
+PUT  /invoices/{key}/document     close: hash into the ledger, file filed  → status issued
+POST /invoices/{key}/issue/cancel or 15 minutes without a document:
+                                  number and chain link released          → status draft
+```
+
+| Method | Route | Who | Answer |
+|---|---|---|---|
+| POST | `/invoices/{key}/issue` | Team Admins | `{ record, fixed, issue }` – the reservation (below); `409 issue_pending` while another issue of the team is open |
+| PUT | `/invoices/{key}/document` (`?kind=pdf`, default) | Team Admins | body the PDF (`application/pdf`, raw, ≤ 20 MB): closes the issue; `{ record, issue, ledger, stored }` |
+| PUT | `/invoices/{key}/document?kind=xml` | Team Admins | body the e-invoice XML (`application/xml`, raw, ≤ 20 MB) of an issued invoice; `{ record, document, ledger, stored }` |
+| POST | `/invoices/{key}/issue/cancel` | Team Admins | releases number and chain link of an `issuing` invoice; `{ record, released: { number, seq } }` |
+| POST | `/invoices/{key}/reverse` | Team Admins | now a reservation for the reversal or credit note: `{ record (issuing), original, fixed, issue }`; closed with `PUT /invoices/{new key}/document` |
+| GET | `/invoices/{key}/fixed` | Team Admins, the project's Leads | as before; while `issuing` with `status: "issuing"`, `chain.hash: null`, `expires_at`, no `documents` |
+| GET | `/invoices/{key}/document?kind=pdf\|xml` | Team Admins, the project's Leads | the filed file as before; `409 document_missing` while `issuing` |
+| GET | `/invoices/chain/verify?files=true` | Team Admins | as before, with `files` also re-hashes every filed PDF and XML against the ledger |
+| GET | `/invoices/{key}/preview` | – | **`410 gone`** |
+| POST | `/invoices/{key}/render` | – | **`410 gone`** |
+
+Rate limits per account and minute: `issue`, `issue/cancel` 60 (as the
+other invoice writes), `PUT …/document` 30 (an upload, as `render` was),
+`fixed` and `GET …/document` 120, `chain/verify` 30 (unchanged). Rights:
+issuing, closing and cancelling are Team Admins only
+(`invoice_issue_admin_only`); reading `fixed` and the documents stays with
+Team Admins and the project's Leads (`invoice_read_lead_only`). All
+answer `404` when the team setting `invoicing` is off and
+`409 invoice_issue_external` in the mode external, as before.
+
+#### `POST /invoices/{key}/issue` – the reservation
+
+Body as in 0.18.0: `{ "issued_on"?: "YYYY-MM-DD", "due_days"?: 1–365 }`
+(default today, 30). One transaction:
+
+1. The checks of 0.18.0 steps 1–2 unchanged: a `draft` without `number`
+   (`invoice_not_draft`), a `budget` (`invoice_no_budget`), at least one
+   position or booking, a resolvable customer, an issuer (`no_issuer`),
+   every booking in the book and not billed by another invoice
+   (`booking_billed`); the mode (`invoice_issue_external`).
+2. **One issue at a time per team.** Another invoice of the team is
+   `issuing`: `409 issue_pending` with
+   `"pending": { "key", "number", "expires_at" }`. The team's ledger is
+   closed while an issue is pending (below), so the reserved chain link
+   is always the next one.
+3. The number from the team's counter and pattern (0.16.0;
+   `invoice_number_taken` when the formatted number exists).
+4. Frozen into `ts_inv_invoices` exactly as 0.18.0 step 4 and its
+   additions (issuer, customer with `tax_case`, positions, the texts, the
+   period, currency, VAT lines and sums the **server** computes, `layout`
+   when set, `qr_reference` with a QR-IBAN), `ts_inv_hours` (step 5) and
+   the billing marks (step 6) – all of it now, so a cancel has a clear
+   list to undo. Row status `issuing`.
+5. **The chain link:** `seq` = the team's head `seq` + 1, `prev_hash` =
+   the head's `hash` (empty for an empty ledger). Nothing is appended yet:
+   the link is reserved on the row (`issue_seq`, `issue_prev_hash`,
+   `issue_expires_at` = now + 15 minutes).
+6. The record (the server's write, new `version`): `status: "issuing"`,
+   `number`, `issued_on`, `due_on`, `hours`, `amount`, `currency`, `vat`,
+   `ledger_seq`; `hash` stays null until the close.
+
+Answer: `{ "record", "fixed", "issue" }` – `record` as
+`GET /records/invoice/{key}`, `fixed` as `GET /invoices/{key}/fixed`
+(the frozen content the PDF is rendered from: issuer, customer, positions,
+hours, texts, layout, sums), and
+
+```json
+"issue": { "number": "RE-2026-0017", "issued_on": "2026-10-29", "due_on": "2026-11-28",
+  "seq": 42, "prev_hash": "3f9c1a2b7d4e…", "position": "42 of 42",
+  "chain_line": "Beleg RE-2026-0017 · Kette 42 ← 3f9c1a2b7d4e",
+  "net": 12000.0, "vat_amount": 972.0, "gross": 12972.0, "total": 12972.0, "currency": "CHF",
+  "tax_case": "domestic", "qr_reference": null, "language": "de", "expires_at": "2026-10-29T14:30:00Z" }
+```
+
+- `chain_line` is the sentence the app prints verbatim in the footer of
+  every page and puts into the PDF's XMP `Subject` (uncompressed, as the
+  server's PDFs did): German «Beleg <number> · Kette <seq> ← <prev_hash[0:12]>»
+  when `settings.language` is `de`, else «Document <number> · Chain <seq>
+  ← <prev_hash[0:12]>»; `← –` for the first entry of a team. The entry's
+  own `hash` cannot be in the PDF (it is computed over the PDF's hash,
+  below); the app shows it after the close and the daily chain head file
+  carries it.
+- `position` is informative: the link's `seq` and the ledger's length
+  after the close (always equal, the ledger is closed meanwhile).
+- The app renders from `fixed` and `issue` – the server's sums, never its
+  own – and uploads within 15 minutes (`expires_at`).
+
+**While an invoice is `issuing`:**
+
+- Every write to its record (`PUT`, `DELETE`, batch, restore): `409
+  issue_pending`. Reads (`GET`, delta, history, `fixed`) are free; Leads
+  of the project read `fixed` as before.
+- Every other write to the team's ledger answers `409 issue_pending` with
+  the same `pending` block: `issue` and `reverse` of another invoice,
+  `paid`, `unpaid`, `payment`, `dunning`, `external`, `handover`,
+  `external-document`, `external-cancelled`, `expense-reports/fix`,
+  `expense-reports/{key}/documents` and `…/reverse`, and
+  `POST /invoices/next-number` (the counter must not move); from the
+  implementation also `PUT …/document?kind=xml` and `POST …/external` –
+  every ledger entry goes through the same door. Record writes of other
+  kinds, receipts, quotes and their documents are not affected.
+  The window is short by construction (one upload); the Mac app shows
+  who holds it (`pending`) and when it expires.
+
+#### `PUT /invoices/{key}/document` – the close
+
+Body: the PDF, raw, `Content-Type: application/pdf`, at most 20 MB
+(`413 too_large` – the limit of `external-document` and the quote
+documents). Checks in this order: `403 invoice_issue_admin_only` →
+`404 not_found` → `409 not_issuing` (the status is not `issuing`: expired
+and released, cancelled, or closed already – see idempotence below) →
+`413` → `422 invalid` (`field: content`) when the body does not start
+with `%PDF-` → `422 document_mismatch` (`field: content`) when the bytes
+do not contain the invoice's `number` and the `chain_line` as answered by
+`issue` (the XMP is uncompressed, so the check is a plain search; it
+keeps a PDF of another invoice or an older render out of the file).
+
+Then one transaction:
+
+1. The file goes to
+   `Buchhaltung/<YYYY of issued_on>/Rechnungen/<issued_on>_<number>_<customer>.pdf`
+   (names as «The document tree», 0.22.0: `2026-10-29_RE-2026-0017_Muster-sarl.pdf`;
+   a taken name gets `_2` …).
+2. The ledger entry with the **reserved** link: `seq` and `prev_hash`
+   from the reservation, `action` `issued` (a reversal `reversal`, a
+   credit note `credit`), `at` = now (the close, not the reservation),
+   `actor` = the Team Admin who closes, `number`, and the payload below.
+   `LedgerAppender` takes the reserved `seq` instead of head + 1 and
+   refuses when the head moved (it cannot, the ledger was closed; a
+   failure here is a bug and answers `500`).
+3. Row: status `issued`, `hash`, `document_path`, `document_sha256`,
+   the reservation fields cleared. Record (the server's write):
+   `status: "issued"`, `hash`, `documents: [{ "kind": "pdf", "name",
+   "path", "size", "sha256" }]`. A reversal: the original becomes
+   `cancelled` with `reversed_by` and its billing marks are deleted **now**
+   (0.18.0 did it at issue; a cancelled reservation must leave the
+   original untouched). A credit note: as 0.18.0.
+4. Webhooks `issued` (or `reversed`) and `document` fire for this one
+   entry.
+
+Answer: `{ "record", "issue": { number, seq, prev_hash, hash, document: { kind, name, path, size, sha256 } }, "ledger": { seq, prev_hash, hash }, "stored": true }`.
+
+**Idempotent close:** the same bytes (same SHA-256) sent again to an
+`issued` invoice – the app lost the answer and retries – `200` with the
+stored answer and `stored: false`, no second entry. Other bytes for an
+invoice whose PDF is filed: `409 document_exists`. An `issued` invoice
+**without** a filed PDF exists only from releases ≤ 0.31.0 whose server
+render failed; it takes the app's PDF once, rendered from `fixed` with the
+0.19.0 footer (`Kette <seq> <hash[0:12]> ← …`, the entry exists), and gets
+a ledger `document` entry as 0.19.0 (`{ key, number, kind: "pdf", path,
+size, sha256 }`); the `document_mismatch` check then looks for the number
+only.
+
+#### What the hash covers, and how the chain stays verifiable
+
+`LedgerRules` is unchanged – every client can recompute it:
+
+- `payload_hash` = SHA-256 of the canonical JSON of the payload (keys
+  sorted by byte order, no whitespace, `/` and non-ASCII unescaped,
+  numbers as given).
+- `hash` = SHA-256 of `seq ‖ "\n" ‖ at ‖ "\n" ‖ actor ‖ "\n" ‖ action ‖ "\n" ‖ number ‖ "\n" ‖ payload_hash ‖ "\n" ‖ prev_hash`,
+  `prev_hash` the previous entry's `hash`, empty for the first; hex, lower
+  case. `verify` checks `seq` without gaps, `prev_hash`, `payload_hash`
+  against the stored payload text and `hash`.
+
+New in 0.32.0 is only **what the payload of `issued`, `reversal` and
+`credit` holds**: the frozen invoice of 0.18.0
+(`{ key, number, issued_on, issued_by, due_on, project, budget, customer_key, period, currency, vat, net, vat_amount, gross, issuer, customer, positions, hours, greeting, body, footer, reverses, credits, layout? }`)
+**plus** `"document": { "kind": "pdf", "name", "size", "sha256" }` –
+the SHA-256 of the PDF bytes as filed. So one entry hash covers the
+content *and* the document; the separate `document` entries of 0.19.0
+exist only for files that arrive after the close (the XML below, the
+repair case above) and in older chains. The PDF carries `number`, `seq`
+and `prev_hash` (footer and XMP); it cannot carry its own SHA-256 nor the
+entry hash, both are computed from it.
+
+A chain is verified three ways, as before and one more:
+
+1. `GET /invoices/chain/verify` recomputes every hash in order
+   (action-agnostic, older chains unchanged). With `?files=true` it also
+   reads every filed PDF and XML named in a payload (`document.sha256` of
+   0.32.0 entries, `sha256` of `document` entries) and compares;
+   a difference is `{ ok: false, first_break: seq, field: "document", expected, found }`
+   (`found` = `missing` when the file is gone from the tree).
+2. **A PDF in hand** (the customer's copy): its number names the entry,
+   its chain line must equal the entry's `seq` and `prev_hash[0:12]`, and
+   the SHA-256 of the file must equal the entry's `payload.document.sha256`
+   – a changed byte in the document or in the frozen content breaks the
+   entry's `payload_hash`, and every later `prev_hash`.
+3. The daily chain head file (`Buchhaltung/<YYYY>/Kette/chain-<date>.txt`)
+   and `settings.documents.chain_mail` anchor the head outside the
+   database, as before. The CSV export's «document sha256» is the PDF's
+   hash from the payload.
+
+#### `POST /invoices/{key}/issue/cancel` and the timeout
+
+- Team Admins; the status must be `issuing`, else `409 not_issuing`.
+- **Gapless numbers:** the reserved number must be the counter's last
+  (`last_no` of the invoice counter of that year); otherwise
+  `409 number_not_last` with `{ number, last }` – the reservation stays
+  and the app delivers the PDF. The ledger lock makes this a defensive
+  case (the counter moved by hand, or a client of `invoices: 1` took a
+  number through `next-number` before the lock existed).
+- One transaction: the counter back by one, `ts_inv_hours` and the
+  billing marks of the reservation deleted, the row deleted; the record
+  (the server's write) back to `status: "draft"` with `number`,
+  `issued_on`, `due_on`, `hash`, `ledger_seq` null. A reversal or credit
+  note in `issuing`: the server-created record is deleted again (a
+  tombstone), the original keeps `issued`/`paid` and its marks. Nothing
+  is written to the ledger – the `seq` was never appended, so no gap.
+- Answer `{ "record", "released": { "number", "seq" } }`.
+- **Timeout:** after `expires_at` (15 minutes) the server releases exactly
+  like a cancel: the next call that touches the team's ledger does it
+  first (and then proceeds), and the job `IssueExpiry` (every 5 minutes,
+  replaces `DocumentRetry`) sweeps the rest. A PDF arriving later gets
+  `409 not_issuing`; the app reads `record.status` (`draft` again) and
+  issues anew – a new number, since the old one was released and the
+  counter continues gapless.
+
+#### Reversal and credit note
+
+`POST /invoices/{key}/reverse` (Team Admins, body as 0.18.0) now reserves
+instead of issuing: the new invoice record (`inv-…`, server key) is
+created `issuing` with its own number and chain link, exactly as `issue`;
+the original stays as it is until the close. Answer
+`{ "record" (the new one, issuing), "original", "fixed", "issue" }`.
+The app renders the reversal or credit note from `fixed` and closes with
+`PUT /invoices/{new key}/document`; `POST /invoices/{new key}/issue/cancel`
+undoes it (above). The ledger lock applies: one reservation per team.
+From the implementation: the close of a reversal appends, right after the
+`reversal` entry with the reserved link, the original's `cancelled` entry
+as 0.18.0 did (webhook `reversed`), so the ledger is one longer than the
+reservation's `position` says for a reversal. An expired reservation whose
+number is no longer the counter's last is not released by the timeout
+either (`number_not_last` applies to cancel and expiry alike): it stays,
+keeps the ledger closed and still takes its PDF.
+
+#### The e-invoice XML (`?kind=xml`)
+
+The app builds the EN 16931 XML itself (ZUGFeRD/Factur-X embedded in the
+PDF/A-3, XRechnung CII when the customer has `e_invoice: true` or a
+`leitweg_id`) and sends the XRechnung file after the close:
+
+- `PUT /invoices/{key}/document?kind=xml` – Team Admins, 30 per minute,
+  body raw, `Content-Type: application/xml` (or `text/xml`), at most
+  20 MB. The invoice must be `issued`, `paid` or `cancelled` with a filed
+  PDF: `issuing` → `409 document_missing` (the PDF comes first); a draft
+  → `404 not_found`, as for every read of fixed content. Checks: UTF-8 and well-formed (parsed with `LIBXML_NONET`,
+  no DTD, no external entities), root element `CrossIndustryInvoice`
+  (CII) or `Invoice` (UBL), else `422 invalid` (`field: content`); the
+  invoice's `number` must appear in it, else `422 document_mismatch`.
+- Filed as `<issued_on>_<number>_<customer>.xml` next to the PDF; ledger
+  `document` `{ key, number, kind: "xrechnung", name, path, size, sha256 }`
+  (the action of 0.20.0, after the `issued` entry); the record's
+  `documents` gets `{ kind: "xml", … }`; webhook `document`.
+- The same bytes again: `200`, `stored: false`; other bytes when an XML is
+  filed: `409 document_exists`. One XML per invoice.
+- The server never opens the PDF's embedded XML and never validates
+  against KoSIT; the app's integration does (PLAN-FAKTURA §12, open).
+
+Answer `{ "record", "document": { kind, name, path, size, sha256 }, "ledger": { seq, prev_hash, hash }, "stored" }`.
+
+#### Gone, kept, and `document_state`
+
+- **Gone (`410 gone`, `code: "gone"`):** `GET /invoices/{key}/preview` and
+  `POST /invoices/{key}/render`. The preview is the app's own render
+  (the same document it uploads). Removed from the server app:
+  `InvoicePdf`, `InvoicePage`, `InvoiceDocument`, `EInvoiceXml`, the job
+  `DocumentRetry`, and the libraries `tecnickcom/tcpdf`, `setasign/fpdi`,
+  `sprain/swiss-qr-bill`, `horstoeko/zugferd` (the archive shrinks by
+  their vendor trees; `.nextcloudignore` loses their entries).
+- **Kept:** `GET /invoices/{key}/document?kind=pdf|xml` serves
+  `documents[]` (older invoices: `document_path` and the XRechnung file of
+  0.20.0), `chain/head`, `chain/verify`, `ledger`, the exports, the
+  webhooks, the daily chain head file, the tax case and the QRR reference
+  (`e_invoice: 1` stays: the server still freezes `tax_case` and
+  `qr_reference` at the reservation and hands them to the app; the XML is
+  the app's).
+- **`document_state` is gone** from `issue`, `fixed` and the record, with
+  `document_error` and `document_tries`: nothing is rendered, so there is
+  no state – an invoice is `issuing` (reserved, no PDF yet) or `issued`
+  (PDF filed). The columns stay in `ts_inv_invoices` (nothing is dropped);
+  the migration adds `issue_seq`, `issue_prev_hash`, `issue_expires_at`
+  and `documents_json`. Invoices issued by ≤ 0.31.0 read their
+  `document_path`/`document_sha256` as `documents[0]` (`kind: "pdf"`) and
+  the XRechnung as `documents[1]`; a `pending`/`failed` one at upgrade is
+  an `issued` invoice without a filed PDF – the repair case above, the
+  Mac app lists them under Accounting › Invoices with «Render and file».
+- **Running drafts** are records and stay untouched; `review` as 0.27.0.
+  A draft of a Mac of 0.9.21 issues on a 0.32.0 server only after the Mac
+  is updated (the capability check); nothing is lost meanwhile.
+- The `fixed` answer: `documents[]`, `chain_line`, while `issuing` also
+  `expires_at` and `chain: { seq, prev_hash, hash: null }`.
+
+### B. Quotes: texts, attachments and the number on issue (`quotes: 4`)
+
+Additive to «Quotes as a subtree, 0.27.0». New optional fields of the
+`quote` record, written by the client:
+
+| Field | Rule |
+|---|---|
+| `texts` | `null` or an object with any of `greeting`, `intro`, `closing`, `footer`; another member: `422` ““texts” has an unknown field “{name}”; allowed are greeting, intro, closing, footer.” |
+| `texts.greeting`, `.intro`, `.closing`, `.footer` | `null` or text up to 4000 characters each (tab and line breaks allowed), as the invoice's `greeting`/`body`/`footer`: salutation, the text before the offered part, the text after it, the page footer. Prefilled by the client from the template's texts (an offer template is a project template plus texts, E4) |
+| `attachments` | `null` or text up to 2000 characters, line breaks allowed: the attachments line of the document, one attachment per line («Honorarofferte», «Terminplan») |
+| `number` | still `null` or text of 1–64 characters; **set by the server on issue** when null (below). A client may still write its own number on a `draft` (teams with their own circle, older data); once issued it is frozen |
+| `issued` | **server field**, dropped from client writes: the frozen copy made on issue (below) |
+| `name` | a `draft` may be unnamed (`name` empty or missing – the app makes the draft first and names it later, E1); the issue below and every other status need a name of 1–200 characters: `422 quote_name_required` with `field: name` |
+
+#### `POST /quotes/{key}/issue`
+
+Team Admins and the quote's Leads (the write rule of `quotes: 2`; else
+`403 quote_lead_only`), 60 per minute, body
+`{ "date"?: "YYYY-MM-DD", "valid_until"?: "YYYY-MM-DD", "hours"?: ≥ 0, "amount"?: ≥ 0 }`
+(`date` default today; `hours`/`amount` the sums as the client computed
+them over all `budgets` – the client computes, the server checks the
+form, as for invoice positions). One transaction, one record write by the
+server (new `version`):
+
+1. The status must be `draft`: else `409 quote_not_draft` (a quoted quote
+   that changes materially is duplicated – new quote, new number on issue).
+   The draft must have a `name`: else `422 quote_name_required` (`field: name`).
+2. `number`: when null, from the team's quote counter and pattern
+   `setting/settings.quote_number` – `{ "pattern": "OF-{year}-{no:3}", "per_year": true, "start": 1 }`
+   with the rules of `invoice_number` (placeholders `{no}`, `{year}`,
+   `{yy}`, `{customer}`, `{project}` …; written by Team Admins). Missing
+   setting: pattern `OF-{year}-{no}`, per year, start 1. The formatted
+   number on another quote: `409 quote_number_taken`. A number the client
+   set stays.
+3. The record: `number`, `date`, `valid_until` (when given), `status:
+   "quoted"`, and `issued`:
+
+```json
+"issued": { "at": "2026-10-29T13:05:00Z", "by": "pblead", "number": "OF-2026-012", "date": "2026-10-29",
+  "valid_until": "2026-12-15", "currency": "CHF", "hours": 184, "amount": 33120,
+  "customer": { "key": "gemeinde-muster", "name": "Gemeinde Muster" },
+  "project": null, "project_draft": { "code": "N410", "name": "Schulhaus Muster" },
+  "budgets": [ … as sent … ], "texts": { … }, "attachments": "Honorarofferte\nTerminplan" }
+```
+
+   – the offered part as a copy, so later negotiation changes to the
+   live `budgets` never alter what was offered; the TimeSister PDF
+   (C below) is rendered from it.
+
+Afterwards a client write that changes `number` or `issued` (also
+setting `issued` on a draft): `409 quote_issued_frozen` with `field`.
+Everything else stays writable as before: `status` to `negotiation`,
+`verbal`, `accepted`, `declined`, the live `budgets`, `probability`,
+`lost_reason`, `texts`, `note` … Acceptance is unchanged (two record
+writes). A quote is no accounting record: nothing goes into the ledger.
+Answer: the record.
+
+### C. Quote documents (`quote_documents: 1`)
+
+Three files per quote, all rendered or received by the app, filed by the
+server in `Buchhaltung/<YYYY of date>/Offerten/` with the tree's names;
+`<customer>` the customer's name made safe, `<date>` the quote's `date`:
+
+| Kind | File | Meaning |
+|---|---|---|
+| `timesister` | `<date>_OF-<n>_<customer>.pdf` | the TimeSister version, rendered from `issued` |
+| `sent` | `<date>_OF-<n>_<customer>_gesendet.pdf` | what actually went to the customer (also a Word export edited by hand) |
+| `signed` | `<date>_OF-<n>_<customer>_unterschrieben.pdf` | the customer's signed copy (feeds «filing of confirmed quotes», D5) |
+
+| Method | Route | Who | Answer |
+|---|---|---|---|
+| PUT | `/quotes/{key}/document` | Team Admins, the quote's Leads | **stays** (0.22.0): the TimeSister PDF (raw, ≤ 20 MB), replaces an earlier one; now needs an issued quote (`409 quote_not_issued` without `number`); `{ document, record }` |
+| POST | `/quotes/{key}/documents?kind=sent\|signed` | Team Admins, the quote's Leads | raw PDF ≤ 20 MB; `{ record, document, stored }` |
+| GET | `/quotes/{key}/documents` | who reads the quote | `{ "documents": [ { kind, name, path, sha256, size, at, by } ] }` in filing order |
+| GET | `/quotes/{key}/document?kind=timesister\|sent\|signed&name=` | who reads the quote | the file; `kind` default `timesister`; with `name` a particular one; `404` without |
+
+- Rate limits: `PUT` and `POST` 30 per minute (uploads), the two `GET`
+  120. Rights as the quote's write rule (`quote_lead_only`) and read rule.
+- `POST …/documents`: `kind` other than `sent`/`signed`: `422 invalid`
+  (`field: kind`); no `number`: `409 quote_not_issued`; not `%PDF-`:
+  `422 invalid` (`field: content`); larger than 20 MB: `413`. The same
+  kind with the same SHA-256 again: `200`, `stored: false`. Another file
+  of the same kind is **added** (a second sent version after negotiation
+  is normal; a signed copy is never overwritten): name with `_2`, `_3` …
+  At most 10 documents per quote: `409 quote_documents_max`. The tree
+  never deletes.
+- The record gets `documents: [ { kind, name, path, sha256, size, at, by } ]`
+  (server field, dropped from client writes); `document` of 0.22.0 stays
+  and mirrors the `timesister` entry. The team ZIP carries the files as
+  the other tree documents; the project dossier lists them.
+
+### D. Invoice layout: more appendices (`invoice_layout: 2`)
+
+`layout.appendix` takes, each at most once, at most six:
+`levels`, `tags`, `budget` (0.26.0) and new `aps`, `companies`, `rates`
+(PLAN-BACKLOG 28: the invoice shown per work package, per company of the
+people, per rate/level). Anything else: `422 invalid` (`field:
+layout.appendix`).
+
+The server **renders nothing**, so it no longer computes a table: the
+client (the Mac core, D0) computes every table it lists and sends it in
+`layout` – `levels[]` and `budget{}` as 0.26.0, now also `tags[]`,
+`aps[]`, `companies[]`, `rates[]`. The server checks the form only – each
+a list of at most 500 objects (`budget` one object) whose strings are at
+most 500 characters and whose numbers are finite –, stores `layout` with
+the draft, freezes it into `layout_json` at the reservation (in the
+ledger payload when set, as before) and returns it in `fixed`. Row shapes
+as the app writes them, informative:
+
+```json
+"aps":       [ { "no": "D196.4", "name": "Vorprojekt", "hours": 62.5, "amount": 9375, "before": 3000, "remaining": 2625 } ],
+"companies": [ { "name": "Muster sàrl", "hours": 40, "amount": 6000 } ],
+"rates":     [ { "level": "Projektleitung", "rate": 150, "hours": 62.5, "amount": 9375 } ],
+"tags":      [ { "tag": "bauleitung", "hours": 12, "amount": 1800 } ]
+```
+
+A `tags` table that is missing while `tags` is listed is no error (older
+drafts); the app shows an empty appendix. `grouping` unchanged.
+
+### E. Error codes, rights and rate limits at a glance
+
+New codes are in the table «Error codes» at the top: `issue_pending`,
+`not_issuing`, `document_missing`, `number_not_last`, `document_mismatch`,
+`document_exists`, `quote_lead_only`, `quote_not_draft`,
+`quote_not_issued`, `quote_issued_frozen`, `quote_number_taken`,
+`quote_documents_max`; `gone` now also names `preview` and `render`.
+
+| Route | Who | Per minute |
+|---|---|---|
+| `POST /invoices/{key}/issue`, `…/issue/cancel`, `…/reverse` | Team Admins | 60 |
+| `PUT /invoices/{key}/document` (pdf, xml) | Team Admins | 30 |
+| `GET /invoices/{key}/fixed`, `GET …/document` | Team Admins, the project's Leads | 120 |
+| `GET /invoices/chain/verify[?files=true]` | Team Admins | 30 |
+| `POST /quotes/{key}/issue` | Team Admins, the quote's Leads | 60 |
+| `PUT /quotes/{key}/document`, `POST /quotes/{key}/documents` | Team Admins, the quote's Leads | 30 |
+| `GET /quotes/{key}/documents`, `GET /quotes/{key}/document` | who reads the quote | 120 |
+
+### Capability
+
+```json
+"timesister": { …, "invoice_documents": 2, "e_invoice": 1, "invoice_layout": 2, "quotes": 4, "quote_documents": 1 }
+```
+
+`invoice_documents: 2`: the two-step issue, `PUT …/document`, the lock,
+`410` for `preview` and `render`, no `document_state`. `quotes: 4`:
+`texts`, `attachments`, `issued`, `POST /quotes/{key}/issue`, the setting
+`quote_number`. `quote_documents: 1`: `POST /quotes/{key}/documents`,
+`GET /quotes/{key}/documents`, `documents[]` on the record.
+`invoice_layout: 2`: the six appendices, tables from the client only.
+
+### Classes
+
+Pure: `IssueRules` (the reservation's checks, the link, `chain_line`),
+`LedgerRules` (unchanged), `DocumentRules` (PDF/XML magic, size, the
+mismatch search), `QuoteRules` (`texts`, `attachments`, the frozen
+`issued`), `InvoiceLayout` (the six appendices). Services: `IssueService`
+(reserve, close, cancel, expiry; `LedgerAppender::appendReserved`),
+`DocumentService` (filing, serving, `verify?files`), `QuoteIssueService`,
+`QuoteDocumentService` (three kinds), the job `IssueExpiry`.

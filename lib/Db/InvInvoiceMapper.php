@@ -13,7 +13,9 @@ use OCP\IDBConnection;
 
 /**
  * Frozen invoices (0.18.0). Every query filters by the team. Rows change
- * only through IssueService (status, paid, reversed_by, chain fields).
+ * only through IssueService (status, paid, reversed_by, chain fields);
+ * since 0.32.0 a row is first `issuing` (reserved) and deleted again when
+ * the reservation is cancelled or expires.
  *
  * @template-extends QBMapper<InvInvoice>
  */
@@ -93,18 +95,31 @@ final class InvInvoiceMapper extends QBMapper {
 		return $this->findEntities($qb);
 	}
 
+	/** The team's open reservation (0.32.0): at most one invoice is `issuing` per team. */
+	public function findIssuing(int $tenantId): ?InvInvoice {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')->from($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('status', $qb->createNamedParameter(InvInvoice::ISSUING)))
+			->orderBy('id', 'ASC')->setMaxResults(1);
+		try {
+			return $this->findEntity($qb);
+		} catch (DoesNotExistException) {
+			return null;
+		}
+	}
+
 	/**
-	 * Invoices whose document is still to render (0.19.0): `pending` or
-	 * `failed` with fewer than `$maxTries` tries, across all teams, oldest
-	 * first – for the retry job.
+	 * Reservations past their expiry, across all teams, oldest first – for
+	 * the job IssueExpiry (0.32.0).
 	 *
 	 * @return list<InvInvoice>
 	 */
-	public function findToRender(int $maxTries, int $limit): array {
+	public function findExpired(int $now, int $limit): array {
 		$qb = $this->db->getQueryBuilder();
 		$qb->select('*')->from($this->getTableName())
-			->where($qb->expr()->in('document_state', $qb->createNamedParameter([InvInvoice::DOCUMENT_PENDING, InvInvoice::DOCUMENT_FAILED], IQueryBuilder::PARAM_STR_ARRAY)))
-			->andWhere($qb->expr()->lt('document_tries', $qb->createNamedParameter($maxTries, IQueryBuilder::PARAM_INT)))
+			->where($qb->expr()->eq('status', $qb->createNamedParameter(InvInvoice::ISSUING)))
+			->andWhere($qb->expr()->lt('issue_expires_at', $qb->createNamedParameter($now, IQueryBuilder::PARAM_INT)))
 			->orderBy('id', 'ASC')->setMaxResults($limit);
 		return $this->findEntities($qb);
 	}

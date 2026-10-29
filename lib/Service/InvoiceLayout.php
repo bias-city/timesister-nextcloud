@@ -9,15 +9,19 @@ namespace OCA\TimeSister\Service;
 /**
  * The layout of an invoice document (0.26.0), pure: the positions flat or
  * grouped by the level of their work packages (`path` of each hours
- * position), and appended tables – per level against the budget, per tag,
- * the state of the budget. The client computes the figures from the
- * budget; the server freezes them with the invoice and draws them.
+ * position), and appended tables. Since 0.32.0 (`invoice_layout: 2`) six
+ * appendices – `levels`, `tags`, `budget`, `aps`, `companies`, `rates` –
+ * and every table comes from the client: the server checks the form only
+ * (lists of at most 500 objects, strings of at most 500 characters, finite
+ * numbers), freezes the layout with the invoice and renders nothing.
  */
 final class InvoiceLayout {
 	public const FIELD = 'layout';
 	public const GROUPINGS = ['flat', 'level'];
-	public const APPENDIX = ['levels', 'tags', 'budget'];
-	public const ROWS_MAX = 200;
+	public const APPENDIX = ['levels', 'tags', 'budget', 'aps', 'companies', 'rates'];
+	/** The tables the client sends as lists of objects (the budget is one object). */
+	public const TABLES = ['tags', 'aps', 'companies', 'rates'];
+	public const ROWS_MAX = 500;
 	public const PATH_MAX = 10;
 	public const TEXT_MAX = 500;
 	public const TAGS_MAX = 20;
@@ -53,6 +57,37 @@ final class InvoiceLayout {
 		$b = $l->budget ?? null;
 		if ($b !== null) {
 			$out->budget = self::figures($b, 'layout.budget');
+		}
+		// 0.32.0: the other tables as the client computed them, form only.
+		foreach (self::TABLES as $t) {
+			$rows = $l->{$t} ?? null;
+			if ($rows !== null) {
+				$out->{$t} = self::table($rows, 'layout.' . $t);
+			}
+		}
+		return $out;
+	}
+
+	/** A list of at most 500 flat objects whose strings are short and whose numbers are finite. @return list<\stdClass> */
+	private static function table(mixed $rows, string $field): array {
+		if (!is_array($rows) || !array_is_list($rows) || count($rows) > self::ROWS_MAX) {
+			throw ApiException::invalid(Message::of('“{field}” must be a list of at most {limit} entries.', ['field' => $field, 'limit' => self::ROWS_MAX]));
+		}
+		$out = [];
+		foreach ($rows as $r) {
+			if (!($r instanceof \stdClass)) {
+				throw ApiException::invalid(Message::of('Each entry of “{field}” must be an object.', ['field' => $field]));
+			}
+			$row = new \stdClass();
+			foreach (get_object_vars($r) as $k => $v) {
+				$ok = $v === null || is_bool($v) || is_int($v) || (is_float($v) && is_finite($v))
+					|| (is_string($v) && mb_strlen($v) <= self::TEXT_MAX && preg_match(self::CONTROL, $v) !== 1 && mb_check_encoding($v, 'UTF-8'));
+				if (!$ok || preg_match('/^[A-Za-z_][A-Za-z0-9_]{0,63}$/', $k) !== 1) {
+					throw ApiException::invalid(Message::of('“{field}” takes flat objects with texts of at most {max} characters and finite numbers.', ['field' => $field, 'max' => self::TEXT_MAX]));
+				}
+				$row->{$k} = is_float($v) ? round($v, 4) : $v;
+			}
+			$out[] = $row;
 		}
 		return $out;
 	}
@@ -108,71 +143,5 @@ final class InvoiceLayout {
 			}
 			$p->{$f} = $out;
 		}
-	}
-
-	/**
-	 * The positions as drawn grouped by level: a heading where a level
-	 * begins, a subtotal where a top level ends; positions without a path
-	 * (flat fees, costs) follow ungrouped.
-	 *
-	 * @param list<array<string,mixed>> $positions
-	 * @return list<array{type:string,title?:string,depth?:int,amount?:float,p?:array<string,mixed>}>
-	 */
-	public static function grouped(array $positions): array {
-		$out = [];
-		/** @var list<string> $open */
-		$open = [];
-		$sum = 0.0;
-		$loose = [];
-		foreach ($positions as $p) {
-			$path = is_array($p['path'] ?? null) ? array_values(array_map('strval', $p['path'])) : [];
-			if (($p['kind'] ?? '') !== 'hours' || $path === []) {
-				$loose[] = $p;
-				continue;
-			}
-			if ($open !== [] && $open[0] !== $path[0]) {
-				$out[] = ['type' => 'sub', 'title' => $open[0], 'amount' => round($sum, 2)];
-				$open = [];
-				$sum = 0.0;
-			}
-			// The first level that differs from the open path begins the headings.
-			$same = 0;
-			while ($same < count($open) && $same < count($path) && $open[$same] === $path[$same]) {
-				$same++;
-			}
-			for ($i = $same; $i < count($path); $i++) {
-				$out[] = ['type' => 'head', 'title' => $path[$i], 'depth' => $i];
-			}
-			$open = $path;
-			$sum += is_numeric($p['amount'] ?? null) ? (float)$p['amount'] : 0.0;
-			$out[] = ['type' => 'pos', 'p' => $p, 'depth' => count($path)];
-		}
-		if ($open !== []) {
-			$out[] = ['type' => 'sub', 'title' => $open[0], 'amount' => round($sum, 2)];
-		}
-		foreach ($loose as $p) {
-			$out[] = ['type' => 'pos', 'p' => $p, 'depth' => 0];
-		}
-		return $out;
-	}
-
-	/**
-	 * Hours and amount per tag of this invoice's positions; a position
-	 * counts with each of its tags.
-	 *
-	 * @param list<array<string,mixed>> $positions
-	 * @return list<array{tag:string,hours:float,amount:float}>
-	 */
-	public static function tagRows(array $positions): array {
-		$rows = [];
-		foreach ($positions as $p) {
-			foreach (is_array($p['tags'] ?? null) ? $p['tags'] : [] as $tag) {
-				$k = (string)$tag;
-				$rows[$k] ??= ['tag' => $k, 'hours' => 0.0, 'amount' => 0.0];
-				$rows[$k]['hours'] += is_numeric($p['hours'] ?? null) ? (float)$p['hours'] : 0.0;
-				$rows[$k]['amount'] += is_numeric($p['amount'] ?? null) ? (float)$p['amount'] : 0.0;
-			}
-		}
-		return array_values(array_map(static fn (array $r): array => ['tag' => $r['tag'], 'hours' => round($r['hours'], 2), 'amount' => round($r['amount'], 2)], $rows));
 	}
 }

@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Invoicing on the server (0.18.0): a draft with positions, texts and
-// bookings is issued in one transaction – number, frozen content, hours,
-// billing marks, ledger entry –, then read as `fixed`, settled, reversed
-// and credited; the ledger and its chain are verified, also after a hash
-// is tampered with (TS_SQL); the team setting `invoicing` switches it off.
+// Invoicing on the server (0.18.0, two steps since 0.32.0): a draft with
+// positions, texts and bookings is issued – `issue` reserves number, frozen
+// content, hours, billing marks and the chain link, the app's PDF closes
+// it with the ledger entry (harness `festschreiben`) –, then read as
+// `fixed`, settled, reversed and credited (`stornieren`); the ledger and
+// its chain are verified, also after a hash is tampered with (TS_SQL); the
+// team setting `invoicing` switches it off.
 // Needs the booking in the book (listener on CalDAV PUT or the job through
 // TS_OCC); without it the issuing checks are skipped.
 // Leaves pb as it found it: the settings record back, project, customer,
 // events and marks removed; the frozen rows only with TS_SQL (the ledger
 // itself is append-only and stays).
 import { ensureTimeCalendar, deleteEvent, ocs, putEvent, runJob, sql } from './lib.mjs'
-import { A, L, RUN, U1, check, expect, head, isObj, me, sha256 } from './harness.mjs'
+import { A, L, RUN, U1, check, expect, festschreiben, head, isObj, me, sha256, stornieren } from './harness.mjs'
 
 const path = (key) => `/records/invoice/${encodeURIComponent(key)}`
 const ipath = (key) => `/invoices/${encodeURIComponent(key)}`
@@ -117,20 +119,24 @@ export async function faktura() {
 		let number = null
 		let seq = null
 		let hash = null
+		let version = 0
 		{
-			const r = await ocs(A, 'POST', `${ipath(K1)}/issue`, { issued_on: ISSUED_ON })
-			expect('Team Admin issues the draft', r, 200)
-			const i = r.data?.issue
+			const r = await festschreiben(A, K1, { issued_on: ISSUED_ON })
+			expect('Team Admin reserves (issue)', r.reserve, 200)
+			expect('… and closes with the PDF', r.close, 200)
+			const i = r.issue
 			number = i?.number ?? null
 			seq = i?.seq ?? null
 			hash = i?.hash ?? null
-			check('answer: the record as issued', r.data?.kind === 'invoice' && r.data?.data?.status === 'issued' && r.data?.data?.number === number && r.data?.version === 2, r.data)
+			version = r.record?.version ?? 0
+			check('answer of the reservation: the record issuing, no hash', r.reserve.data?.record?.kind === 'invoice' && r.reserve.data?.record?.data?.status === 'issuing' && r.reserve.data?.record?.data?.number === number && r.reserve.data?.record?.data?.hash === null && r.reserve.data?.record?.version === 2, r.reserve.data?.record)
+			check('answer of the close: the record issued with the hash, version 3', r.record?.kind === 'invoice' && r.record?.data?.status === 'issued' && r.record?.data?.number === number && r.record?.data?.hash === hash && version === 3, r.record)
 			check('number from the team’s pattern', typeof number === 'string' && NUMBER.test(number), number)
 			check('issue: server-computed sums (net 200, VAT 8.1 % = 16.2, gross 216.2), CHF', i?.net === 200 && i?.vat_amount === 16.2 && i?.gross === 216.2 && i?.currency === 'CHF', i)
-			check('issue: due 30 days later, document pending', i?.due_on === `${Y}-04-14` && i?.document_state === 'pending', i)
-			check('issue: seq, prev_hash, hash', Number.isInteger(seq) && typeof i?.prev_hash === 'string' && HEX64.test(hash ?? ''), i)
-			const data = r.data?.data
-			check('record: hours 1, amount = total 216.2 (0.21.0), due_on, ledger_seq, hash, vat', data?.hours === 1 && data?.amount === 216.2 && data?.due_on === i?.due_on && data?.ledger_seq === seq && data?.hash === hash && data?.vat === 8.1 && data?.issued_on === ISSUED_ON, data)
+			check('issue: due 30 days later, no document_state (0.32.0)', i?.due_on === `${Y}-04-14` && i?.document_state === undefined, i)
+			check('issue: seq, prev_hash, hash (from the close), document with the PDF’s sha256', Number.isInteger(seq) && typeof i?.prev_hash === 'string' && HEX64.test(hash ?? '') && i?.document?.kind === 'pdf' && i?.document?.sha256 === sha256(r.pdf), i)
+			const data = r.record?.data
+			check('record: hours 1, amount = total 216.2 (0.21.0), due_on, ledger_seq, hash, vat, documents[pdf]', data?.hours === 1 && data?.amount === 216.2 && data?.due_on === i?.due_on && data?.ledger_seq === seq && data?.hash === hash && data?.vat === 8.1 && data?.issued_on === ISSUED_ON && data?.documents?.[0]?.kind === 'pdf', data)
 			const mark = await ocs(A, 'GET', `/records/billing/${billingKey('pbuser1', EV1)}`)
 			expect('the billing mark exists', mark, 200)
 			check('… document = number, source timesister, by pbadmin, billed_on = issued_on', mark.data?.data?.document === number && mark.data?.data?.source === 'timesister' && mark.data?.data?.by === 'pbadmin' && mark.data?.data?.billed_on === ISSUED_ON, mark.data?.data)
@@ -155,6 +161,7 @@ export async function faktura() {
 			const e = lg.data?.entries?.[0]
 			check('entry: seq, at, actor, action issued, number, hashes', e?.seq === seq && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(e?.at ?? '') && e?.actor === 'pbadmin' && e?.action === 'issued' && e?.number === number && e?.hash === hash && HEX64.test(e?.payload_hash ?? ''), e)
 			check('entry: payload is the canonical JSON and hashes to payload_hash', typeof e?.payload === 'string' && sha256(e.payload) === e?.payload_hash && e.payload.startsWith('{"body":"Payable within 30 days.","budget":"b1"'), e?.payload?.slice(0, 120))
+			check('entry: the payload carries the document { kind pdf, name, size, sha256 } (0.32.0)', (() => { try { const d = JSON.parse(e?.payload ?? '{}').document; return d?.kind === 'pdf' && /\.pdf$/.test(d?.name ?? '') && HEX64.test(d?.sha256 ?? '') && Number.isInteger(d?.size) } catch { return false } })(), e?.payload?.slice(-200))
 			check('entry: the client recomputes the hash', e !== undefined && entryHash(e) === e.hash)
 			expect('limit out of range', await ocs(A, 'GET', '/invoices/ledger?limit=0'), 422, 'invalid')
 			const v = await ocs(A, 'GET', '/invoices/chain/verify')
@@ -165,14 +172,14 @@ export async function faktura() {
 
 		head('Invoicing: an issued invoice does not change')
 		{
-			const w = await ocs(A, 'PUT', path(K1), { version: 2, data: draft({ status: 'issued', number, note: 'changed' }) })
+			const w = await ocs(A, 'PUT', path(K1), { version, data: draft({ status: 'issued', number, note: 'changed' }) })
 			expect('Team Admin writes the issued record', w, 409, 'issued')
 			check('… with the message', w.data?.message === 'An issued invoice does not change; reverse it.', w.data)
-			expect('Team Admin deletes it', await ocs(A, 'DELETE', `${path(K1)}?version=2`), 409, 'issued')
-			const b = await ocs(A, 'POST', '/records/batch', { writes: [{ kind: 'invoice', key: K1, version: 2, data: draft({ status: 'issued', number }) }] })
+			expect('Team Admin deletes it', await ocs(A, 'DELETE', `${path(K1)}?version=${version}`), 409, 'issued')
+			const b = await ocs(A, 'POST', '/records/batch', { writes: [{ kind: 'invoice', key: K1, version, data: draft({ status: 'issued', number }) }] })
 			expect('… in a batch', b, 409, 'issued')
 			check('… naming the write', b.data?.index === 0 && /^Write 1: /.test(b.data?.message ?? ''), b.data)
-			expect('Lead writes it', await ocs(L, 'PUT', path(K1), { version: 2, data: draft() }), 403, 'forbidden')
+			expect('Lead writes it', await ocs(L, 'PUT', path(K1), { version, data: draft() }), 403, 'forbidden')
 			const same = await ocs(A, 'PUT', path(K2), { version: 1, data: draft() })
 			expect('a second draft with the same booking', same, 200)
 			const dup = await ocs(A, 'POST', `${ipath(K2)}/issue`, { issued_on: ISSUED_ON })
@@ -203,50 +210,66 @@ export async function faktura() {
 		{
 			expect('kind missing', await ocs(A, 'POST', `${ipath(K1)}/reverse`, {}), 422, 'invalid')
 			expect('reversing a draft', await ocs(A, 'POST', `${ipath(K2)}/reverse`, { kind: 'reversal' }), 422, 'invalid')
-			const r = await ocs(A, 'POST', `${ipath(K1)}/reverse`, { kind: 'reversal', reason: 'Wrong hours', issued_on: ISSUED_ON })
-			expect('Team Admin reverses', r, 200)
-			rev = r.data?.record?.key ?? null
+			const before = (await ocs(A, 'GET', path(K1))).data
+			const r = await stornieren(A, K1, { kind: 'reversal', reason: 'Wrong hours', issued_on: ISSUED_ON })
+			expect('Team Admin reverses (a reservation)', r.reserve, 200)
+			rev = r.key ?? null
 			if (rev) {
 				made.push(rev)
 			}
-			const n = r.data?.record?.data
+			check('the reservation: the new record issuing, the original untouched', r.reserve.data?.record?.data?.status === 'issuing' && r.reserve.data?.original?.data?.status === 'issued' && r.reserve.data?.original?.data?.reversed_by === undefined && r.reserve.data?.fixed?.status === 'issuing', r.reserve.data?.original?.data)
+			expect('… closed with the reversal’s PDF', r.close, 200)
+			const n = r.record?.data
 			check('the reversal: own key and number, positions negated, reverses the original', /^inv-[0-9a-f]{8}$/.test(rev ?? '') && NUMBER.test(n?.number ?? '') && n?.number !== number && n?.status === 'issued' && n?.reverses === K1
 				&& JSON.stringify(n?.positions?.map((p) => p.amount)) === '[-150,-100,50,0]' && n?.amount === -216.2 && n?.bookings?.length === 0 && n?.note === 'Wrong hours', n)
-			check('the issue block of the reversal: net -200, gross -216.2', r.data?.issue?.net === -200 && r.data?.issue?.gross === -216.2 && HEX64.test(r.data?.issue?.hash ?? ''), r.data?.issue)
-			const o = r.data?.original
-			check('the original: cancelled, reversed_by', o?.key === K1 && o?.data?.status === 'cancelled' && o?.data?.reversed_by === rev && o?.version === 5, o)
+			check('the issue block of the reversal: net -200, gross -216.2, hash from the close', r.issue?.net === -200 && r.issue?.gross === -216.2 && HEX64.test(r.issue?.hash ?? ''), r.issue)
+			const o = r.original
+			check('the original after the close: cancelled, reversed_by, one version on', o?.key === K1 && o?.data?.status === 'cancelled' && o?.data?.reversed_by === rev && o?.version === before?.version + 1, o)
 			expect('the billing mark is gone', await ocs(A, 'GET', `/records/billing/${billingKey('pbuser1', EV1)}`), 404)
 			const f = await ocs(A, 'GET', `${ipath(K1)}/fixed`)
 			check('fixed of the original: cancelled, reversed_by, positions kept', f.data?.status === 'cancelled' && f.data?.reversed_by === rev && f.data?.positions?.length === 4 && f.data?.hours?.length === 1, f.data)
 			const g = await ocs(A, 'GET', `${ipath(rev)}/fixed`)
 			check('fixed of the reversal: reverses, no hours, issuer and customer copied', g.data?.reverses === K1 && g.data?.hours?.length === 0 && g.data?.customer?.name === `Kunde ${RUN}` && g.data?.net === -200, g.data)
-			// 0.19.0 appends `document` after each issue; the sequence is read without those entries.
+			// 0.32.0: the reversal's entry carries the reserved link and the PDF's hash, the original's `cancelled` follows at the close; no `document` entries any more.
 			const lg = await ocs(A, 'GET', `/invoices/ledger?since=${unpaidSeq}`)
 			const seqNoDoc = (lg.data?.entries || []).filter((e) => e.action !== 'document')
 			check('ledger: reversal, then cancelled', seqNoDoc.map((e) => e.action).join() === 'reversal,cancelled' && seqNoDoc[1]?.number === number, lg.data?.entries?.map((e) => [e.seq, e.action, e.number]))
+			check('… the reversal entry at the reserved seq with the document’s sha256', seqNoDoc[0]?.seq === r.issue?.seq && JSON.parse(seqNoDoc[0]?.payload ?? '{}')?.document?.sha256 === sha256(r.pdf), seqNoDoc[0])
 			expect('reversing it again', await ocs(A, 'POST', `${ipath(K1)}/reverse`, { kind: 'reversal' }), 422, 'invalid')
 			expect('crediting a cancelled one', await ocs(A, 'POST', `${ipath(K1)}/reverse`, { kind: 'credit' }), 422, 'invalid')
-			expect('reversing the reversal', await ocs(A, 'POST', `${ipath(rev)}/reverse`, { kind: 'reversal' }), 200)
+			const rr = await stornieren(A, rev, { kind: 'reversal' })
+			expect('reversing the reversal', rr.reserve, 200)
+			expect('… closed', rr.close, 200)
+			if (rr.key) {
+				made.push(rr.key)
+			}
 			const back = await ocs(A, 'GET', `${ipath(K1)}/fixed`)
 			check('the original stays cancelled', back.data?.status === 'cancelled')
 		}
 
 		head('Invoicing: the hours are billable again, credit note')
 		{
-			const r = await ocs(A, 'POST', `${ipath(K2)}/issue`, { issued_on: ISSUED_ON, due_days: 10 })
-			expect('the second draft with the same booking is issued now', r, 200)
-			check('… due in 10 days', r.data?.issue?.due_on === `${Y}-03-25`, r.data?.issue)
+			const r = await festschreiben(A, K2, { issued_on: ISSUED_ON, due_days: 10 })
+			expect('the second draft with the same booking is issued now', r.reserve, 200)
+			expect('… and closed', r.close, 200)
+			check('… due in 10 days', r.issue?.due_on === `${Y}-03-25`, r.issue)
 			expect('the billing mark is back', await ocs(A, 'GET', `/records/billing/${billingKey('pbuser1', EV1)}`), 200)
 			expect('positions of a credit note checked', await ocs(A, 'POST', `${ipath(K2)}/reverse`, { kind: 'credit', positions: [{ kind: 'flat', text: 'Credit' }] }), 422, 'invalid')
-			const c = await ocs(A, 'POST', `${ipath(K2)}/reverse`, { kind: 'credit', reason: 'Goodwill', positions: [{ kind: 'flat', text: 'Credit', amount: -30 }] })
-			expect('Team Admin credits', c, 200)
-			const ck = c.data?.record?.key
+			const c = await stornieren(A, K2, { kind: 'credit', reason: 'Goodwill', positions: [{ kind: 'flat', text: 'Credit', amount: -30 }] })
+			expect('Team Admin credits', c.reserve, 200)
+			expect('… closed', c.close, 200)
+			const ck = c.key
 			if (ck) {
 				made.push(ck)
 			}
-			check('the credit note: credits the original, the given positions, net -30', c.data?.record?.data?.credits === K2 && c.data?.record?.data?.reverses === undefined && c.data?.issue?.net === -30 && c.data?.record?.data?.positions?.length === 1, c.data?.record?.data)
-			check('the original stays issued, with its mark', c.data?.original?.data?.status === 'issued' && (await ocs(A, 'GET', `/records/billing/${billingKey('pbuser1', EV1)}`)).status === 200, c.data?.original)
-			expect('a second credit note', await ocs(A, 'POST', `${ipath(K2)}/reverse`, { kind: 'credit' }), 200)
+			check('the credit note: credits the original, the given positions, net -30', c.record?.data?.credits === K2 && c.record?.data?.reverses === undefined && c.issue?.net === -30 && c.record?.data?.positions?.length === 1, c.record?.data)
+			check('the original stays issued, with its mark', c.original?.data?.status === 'issued' && (await ocs(A, 'GET', `/records/billing/${billingKey('pbuser1', EV1)}`)).status === 200, c.original)
+			const c2 = await stornieren(A, K2, { kind: 'credit' })
+			expect('a second credit note', c2.reserve, 200)
+			expect('… closed', c2.close, 200)
+			if (c2.key) {
+				made.push(c2.key)
+			}
 			const l = await ocs(A, 'GET', '/invoices/ledger?limit=2000')
 			const actions = (l.data?.entries || []).filter((e) => e.seq >= seq && e.action !== 'document').map((e) => e.action)
 			check('ledger so far', actions.join() === 'issued,paid,unpaid,reversal,cancelled,reversal,cancelled,issued,credit,credit', actions)
@@ -283,7 +306,8 @@ export async function faktura() {
 			expect('issue is 404 now', await ocs(A, 'POST', `${ipath(K3)}/issue`, {}), 404, 'not_found')
 			expect('ledger is 404 now', await ocs(A, 'GET', '/invoices/ledger'), 404, 'not_found')
 			expect('verify is 404 now', await ocs(A, 'GET', '/invoices/chain/verify'), 404, 'not_found')
-			expect('the frozen record still refuses a write', await ocs(A, 'PUT', path(K1), { version: 5, data: draft({ status: 'cancelled', number }) }), 409, 'issued')
+			const k1 = await ocs(A, 'GET', path(K1))
+			expect('the frozen record still refuses a write', await ocs(A, 'PUT', path(K1), { version: k1.data?.version ?? 5, data: draft({ status: 'cancelled', number }) }), 409, 'issued')
 			const on = await ocs(A, 'PUT', '/team/settings', { invoicing: true, entries_since: (await me(A)).settings?.entries_since ?? null })
 			expect('… and on again, together with entries_since', on, 200)
 			check('… settings', on.data?.invoicing === true, on.data)

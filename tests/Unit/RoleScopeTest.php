@@ -228,7 +228,7 @@ class RoleScopeTest extends TestCase {
 		$this->assertSame(1, $cap['lead_scope']);
 		$this->assertSame(1, $cap['booking_reports']);
 		$this->assertSame(1, $cap['job_fits']);
-		$this->assertSame(3, $cap['quotes'], 'the kind quote (0.16.0), as a subtree with budgets (0.27.0)');
+		$this->assertSame(4, $cap['quotes'], 'the kind quote (0.16.0), as a subtree with budgets (0.27.0), issued with texts (0.32.0)');
 		$this->assertSame(1, $cap['cost_rates']);
 		$this->assertSame(1, $cap['derived_lead']);
 		$this->assertArrayNotHasKey('lead_reach', $cap);

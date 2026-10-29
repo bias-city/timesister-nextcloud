@@ -96,6 +96,16 @@ use OCP\Capabilities\ICapability;
  * `expense_table: 2` since 0.31.0: errors carry `code` and `field`
  * (API.md «Error codes»), `POST /expense-reports/{key}/documents` takes
  * the raw file (32 MiB, `?name=`), removed routes answer 410 `gone`.
+ * `invoice_documents: 2` since 0.32.0 (one renderer, the Mac app): the
+ * two-step issue – `issue` reserves number and chain link, `PUT
+ * /invoices/{key}/document` files the app's PDF and closes –, `issue/cancel`,
+ * the ledger lock while an issue is pending, `410` for `preview` and
+ * `render`, no `document_state`; `?kind=xml` takes the app's XRechnung.
+ * `quotes: 4` since 0.32.0: `texts`, `attachments`, `issued`, `POST
+ * /quotes/{key}/issue`, the setting `quote_number`. `quote_documents: 1`
+ * since 0.32.0: `POST /quotes/{key}/documents?kind=sent|signed`, `GET
+ * /quotes/{key}/documents`, `documents[]` on the record. `invoice_layout: 2`
+ * since 0.32.0: six appendices, every table from the client.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -103,7 +113,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int}} */
+	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, quote_documents: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -118,14 +128,15 @@ final class Capabilities implements ICapability {
 				'lead_scope' => 1,
 				'booking_reports' => 1,
 				'job_fits' => 1,
-				'quotes' => 3,
+				'quotes' => 4,
 				'cost_rates' => 1,
 				'invoices' => 1,
 				'invoice_template' => 1,
 				'entries' => 1,
 				'invoicing' => 1,
-				'invoice_documents' => 1,
+				'invoice_documents' => 2,
 				'e_invoice' => 1,
+				'quote_documents' => 1,
 				'invoice_export' => 1,
 				'vat_lines' => 1,
 				'costs' => 1,
@@ -135,7 +146,7 @@ final class Capabilities implements ICapability {
 				'invoice_handover' => 2,
 				'templates' => 2,
 				'advances' => 1,
-				'invoice_layout' => 1,
+				'invoice_layout' => 2,
 				'corrections' => 2,
 				'entry_lists' => 1,
 				'customer_types' => 1,

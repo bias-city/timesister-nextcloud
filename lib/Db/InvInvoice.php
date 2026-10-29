@@ -110,12 +110,22 @@ use OCP\DB\Types;
  * @method void setPassThrough(?string $passThrough)
  * @method string|null getTotal()
  * @method void setTotal(?string $total)
+ * @method int|null getIssueSeq()
+ * @method void setIssueSeq(?int $issueSeq)
+ * @method string|null getIssuePrevHash()
+ * @method void setIssuePrevHash(?string $issuePrevHash)
+ * @method int|null getIssueExpiresAt()
+ * @method void setIssueExpiresAt(?int $issueExpiresAt)
+ * @method string|null getDocumentsJson()
+ * @method void setDocumentsJson(?string $documentsJson)
  * @method int getCreatedAt()
  * @method void setCreatedAt(int $createdAt)
  * @method int getModifiedAt()
  * @method void setModifiedAt(int $modifiedAt)
  */
 final class InvInvoice extends Entity {
+	/** 0.32.0: reserved – number and chain link taken, the app's PDF not filed yet. */
+	public const ISSUING = 'issuing';
 	public const ISSUED = 'issued';
 	public const PAID = 'paid';
 	public const CANCELLED = 'cancelled';
@@ -176,6 +186,11 @@ final class InvInvoice extends Entity {
 	protected ?string $vatLinesJson = null;
 	protected ?string $passThrough = null;
 	protected ?string $total = null;
+	// 0.32.0: the reserved chain link and its expiry while `issuing`; the filed documents as JSON.
+	protected ?int $issueSeq = null;
+	protected ?string $issuePrevHash = null;
+	protected ?int $issueExpiresAt = null;
+	protected ?string $documentsJson = null;
 	protected int $createdAt = 0;
 	protected int $modifiedAt = 0;
 
@@ -228,6 +243,10 @@ final class InvInvoice extends Entity {
 		$this->addType('vatLinesJson', Types::STRING);
 		$this->addType('passThrough', Types::DECIMAL);
 		$this->addType('total', Types::DECIMAL);
+		$this->addType('issueSeq', Types::INTEGER);
+		$this->addType('issuePrevHash', Types::STRING);
+		$this->addType('issueExpiresAt', Types::BIGINT);
+		$this->addType('documentsJson', Types::STRING);
 		$this->addType('createdAt', Types::INTEGER);
 		$this->addType('modifiedAt', Types::INTEGER);
 	}
@@ -235,5 +254,47 @@ final class InvInvoice extends Entity {
 	/** Issued or paid: the invoice counts, its hours are billed. */
 	public function isLive(): bool {
 		return $this->status === self::ISSUED || $this->status === self::PAID;
+	}
+
+	public function isIssuing(): bool {
+		return $this->status === self::ISSUING;
+	}
+
+	/**
+	 * The filed documents (0.32.0): `documents_json`, or for an invoice of
+	 * ≤ 0.31.0 the PDF and the XRechnung file the server rendered.
+	 *
+	 * @return list<array{kind:string,name:string,path:string,size:int,sha256:string}>
+	 */
+	public function documents(): array {
+		$json = $this->documentsJson;
+		if ($json !== null && $json !== '') {
+			$list = json_decode($json, true);
+			$out = [];
+			foreach (is_array($list) ? $list : [] as $d) {
+				if (is_array($d) && is_string($d['kind'] ?? null) && is_string($d['path'] ?? null)) {
+					$out[] = ['kind' => $d['kind'], 'name' => (string)($d['name'] ?? basename($d['path'])), 'path' => $d['path'], 'size' => (int)($d['size'] ?? 0), 'sha256' => (string)($d['sha256'] ?? '')];
+				}
+			}
+			return $out;
+		}
+		$out = [];
+		if ($this->documentPath !== null) {
+			$out[] = ['kind' => 'pdf', 'name' => basename($this->documentPath), 'path' => $this->documentPath, 'size' => 0, 'sha256' => (string)$this->documentSha256];
+		}
+		if ($this->xmlPath !== null) {
+			$out[] = ['kind' => 'xml', 'name' => basename($this->xmlPath), 'path' => $this->xmlPath, 'size' => 0, 'sha256' => (string)$this->xmlSha256];
+		}
+		return $out;
+	}
+
+	/** The filed document of a kind, or null. @return ?array{kind:string,name:string,path:string,size:int,sha256:string} */
+	public function document(string $kind): ?array {
+		foreach ($this->documents() as $d) {
+			if ($d['kind'] === $kind) {
+				return $d;
+			}
+		}
+		return null;
 	}
 }

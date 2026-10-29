@@ -12,10 +12,11 @@ use OCA\TimeSister\Db\InvInvoice;
 
 /**
  * The frozen content of an issued invoice as `GET /invoices/{key}/fixed`
- * hands it out and the team ZIP stores it; since 0.19.0 with the
- * document's state, error, path and hash; since 0.20.0 with the tax case,
- * the QR reference, the XRechnung file and the hand-over; since 0.21.0
- * with net and VAT per rate, the pass-through items and the total.
+ * hands it out and the team ZIP stores it; since 0.20.0 with the tax case,
+ * the QR reference and the hand-over; since 0.21.0 with net and VAT per
+ * rate, the pass-through items and the total; since 0.32.0 with
+ * `documents[]`, the `chain_line` of the footer and, while `issuing`, the
+ * reserved link and its expiry (the app renders from this).
  */
 final class InvoiceFixed {
 	public function __construct(
@@ -24,12 +25,15 @@ final class InvoiceFixed {
 	}
 
 	/** @return array<string,mixed> */
-	public function of(InvInvoice $row): array {
+	public function of(InvInvoice $row, string $lang = DocumentRules::EN): array {
 		$positions = json_decode((string)$row->getPositionsJson(), false);
 		$customer = InvoiceRules::decode($row->getCustomerJson());
 		$external = $row->getExternalJson() === null ? null : InvoiceRules::decode($row->getExternalJson());
 		$sums = self::sumsOf($row);
-		return [
+		$issuing = $row->isIssuing();
+		$seq = $issuing ? $row->getIssueSeq() : $row->getSeq();
+		$prev = $issuing ? $row->getIssuePrevHash() : $row->getPrevHash();
+		return ($issuing ? ['expires_at' => LedgerRules::at((int)$row->getIssueExpiresAt())] : []) + [
 			'key' => $row->getRkey(),
 			'number' => $row->getNumber(),
 			'status' => $row->getStatus(),
@@ -57,12 +61,13 @@ final class InvoiceFixed {
 			'greeting' => $row->getGreeting(),
 			'body' => $row->getBody(),
 			'footer' => $row->getFooter(),
-			'chain' => ['seq' => $row->getSeq(), 'prev_hash' => $row->getPrevHash(), 'hash' => $row->getHash()],
+			'chain' => ['seq' => $seq, 'prev_hash' => $prev, 'hash' => $issuing ? null : $row->getHash()],
+			// 0.32.0: the footer sentence the app prints, and the filed documents.
+			'chain_line' => $seq === null ? null : IssueRules::chainLine($lang, $row->getNumber(), $seq, (string)$prev),
+			'documents' => $issuing ? [] : $row->documents(),
 			'reverses' => $row->getReverses(),
 			'reversed_by' => $row->getReversedBy(),
 			'credits' => $row->getCredits(),
-			'document_state' => $row->getDocumentState(),
-			'document_error' => $row->getDocumentError(),
 			'document_path' => $row->getDocumentPath(),
 			'document_sha256' => $row->getDocumentSha256(),
 			// 0.20.0: the tax case, the QR reference, the counter, the XRechnung file, the hand-over.

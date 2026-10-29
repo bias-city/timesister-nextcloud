@@ -104,6 +104,22 @@ final class CounterMapper {
 		return $value;
 	}
 
+	/**
+	 * Gives the last number back (0.32.0, a cancelled reservation): the
+	 * counter steps down by one when `$no` is still its last; false when
+	 * it moved on (then the number stays taken). Call inside a transaction.
+	 */
+	public function giveBack(int $tenantId, string $name, int $no, int $now): bool {
+		$qb = $this->db->getQueryBuilder();
+		$qb->update(self::TABLE)
+			->set('last_no', $qb->createNamedParameter($no - 1, IQueryBuilder::PARAM_INT))
+			->set('modified_at', $qb->createNamedParameter($now, IQueryBuilder::PARAM_INT))
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('name', $qb->createNamedParameter($name)))
+			->andWhere($qb->expr()->eq('last_no', $qb->createNamedParameter($no, IQueryBuilder::PARAM_INT)));
+		return $qb->executeStatement() === 1;
+	}
+
 	/** Deleting a team (0.10.1): its counters. @return int rows */
 	public function deleteByTenant(int $tenantId): int {
 		$qb = $this->db->getQueryBuilder();

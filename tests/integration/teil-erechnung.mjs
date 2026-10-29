@@ -1,33 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// E-invoices and exports (0.20.0): the tax case from the countries and the
-// draft's override (frozen into `fixed.customer.tax_case`, VAT 0 abroad),
-// the stored PDF with `factur-x.xml` inside, the XRechnung file of a
-// customer with a Leitweg-ID, the QR reference of a QR-IBAN with the
-// BESR id, the exports (CSV, DATEV, ledger), the hand-over to an
-// accounting system, the webhook setting, its queue after an issue and
-// the status endpoint. Positions only, no bookings: no calendar needed.
-// Leaves pb as it found it (settings record, team settings, project,
-// customers); the frozen rows only with TS_SQL, the ledger stays. KoSIT
-// runs only with `java` and TS_KOSIT, otherwise the structure is checked.
-import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+// E-invoices and exports (0.20.0, one renderer since 0.32.0): the tax case
+// from the countries and the draft's override (frozen into
+// `fixed.customer.tax_case` and handed to the app in the reservation, VAT 0
+// abroad), the XRechnung XML the app sends after the close (`?kind=xml`:
+// filed, hashed into the ledger, served), the QR reference of a QR-IBAN
+// with the BESR id (frozen at the reservation), the exports (CSV, DATEV,
+// ledger), the hand-over to an accounting system, the webhook setting, its
+// queue after an issue and the status endpoint. What the server's XML and
+// PDF used to be checked for (ZUGFeRD, KoSIT, tax categories) is the Mac
+// app's now (core/src/rechnung/erechnung_xml.rs). Positions only, no
+// bookings: no calendar needed. Leaves pb as it found it (settings record,
+// team settings, project, customers); the frozen rows only with TS_SQL,
+// the ledger stays.
 import { ocs, runJob, sql } from './lib.mjs'
-import { A, L, RUN, U1, check, expect, head, isObj, me } from './harness.mjs'
+import { A, L, RUN, U1, check, expect, festschreiben, head, isObj, me, raw, sha256, stornieren } from './harness.mjs'
 
 const path = (key) => `/records/invoice/${encodeURIComponent(key)}`
 const ipath = (key) => `/invoices/${encodeURIComponent(key)}`
-
-/** A raw GET of the app API as `who`: status, content type, disposition and body bytes. */
-async function fetchRaw(who, p) {
-	const res = await fetch(`${process.env.NC_URL || 'http://localhost:8081'}/ocs/v2.php/apps/timesister/api/v1${p}`, {
-		headers: { 'OCS-APIRequest': 'true', 'Accept-Language': 'en', Authorization: 'Basic ' + Buffer.from(`${who.user}:${who.pass}`).toString('base64') },
-	})
-	const buf = Buffer.from(await res.arrayBuffer())
-	return { status: res.status, type: res.headers.get('content-type') || '', disposition: res.headers.get('content-disposition') || '', buf, text: buf.toString('utf8') }
-}
 
 /** Modulo 10 recursive (Swiss Payment Standards). */
 function qrCheckDigit(digits) {
@@ -39,52 +29,17 @@ function qrCheckDigit(digits) {
 	return (10 - carry) % 10
 }
 
-/** Issues a draft and waits for its document; returns `fixed`. */
+/** Issues a draft the 0.32.0 way (reservation, the app's PDF closes); returns the reservation, the close and `fixed` as read after the close. */
 async function issueAndFix(key, issuedOn) {
-	const r = await ocs(A, 'POST', `${ipath(key)}/issue`, { issued_on: issuedOn })
-	if (r.status !== 200) {
-		return { issue: r, fixed: null }
+	const r = await festschreiben(A, key, { issued_on: issuedOn })
+	if (r.close?.status !== 200) {
+		return { ...r, issue: r.reserve.status === 200 ? r.close : r.reserve, fixed: null }
 	}
-	let f = await ocs(A, 'GET', `${ipath(key)}/fixed`)
-	if (f.data?.document_state !== 'done') {
-		await ocs(A, 'POST', `${ipath(key)}/render`, {})
-		f = await ocs(A, 'GET', `${ipath(key)}/fixed`)
-	}
-	return { issue: r, fixed: f.data }
+	return { ...r, issue: r.close, reservation: r.reserve.data?.issue, fixed: (await ocs(A, 'GET', `${ipath(key)}/fixed`)).data }
 }
 
-/** KoSIT: `java -jar <TS_KOSIT>/validationtool-*.jar -s <scenarios.xml> -r <dir> file.xml`; null when not available. */
-function kosit(xml) {
-	const dir = process.env.TS_KOSIT
-	if (!dir || !existsSync(dir)) {
-		return null
-	}
-	let java = null
-	try {
-		java = execFileSync('which', ['java'], { encoding: 'utf8' }).trim()
-	} catch {
-		return null
-	}
-	if (!java) {
-		return null
-	}
-	const tmp = mkdtempSync(join(tmpdir(), 'ts-kosit-'))
-	try {
-		const file = join(tmp, 'invoice.xml')
-		writeFileSync(file, xml)
-		const jars = execFileSync('sh', ['-c', `ls "${dir}"/validationtool-*.jar | head -1`], { encoding: 'utf8' }).trim()
-		const scenarios = execFileSync('sh', ['-c', `ls "${dir}"/scenarios.xml "${dir}"/*/scenarios.xml 2>/dev/null | head -1`], { encoding: 'utf8' }).trim()
-		if (!jars || !scenarios) {
-			return null
-		}
-		execFileSync(java, ['-jar', jars, '-s', scenarios, '-r', dir, '-h', file], { encoding: 'utf8', stdio: 'pipe' })
-		return true
-	} catch (e) {
-		return `${e.stdout || ''}${e.stderr || ''}`.slice(0, 600)
-	} finally {
-		rmSync(tmp, { recursive: true, force: true })
-	}
-}
+/** A minimal CII XML as the app's XRechnung would carry it: the number, the buyer reference, the grand total. */
+const cii = (number, buyerReference, total) => `<?xml version="1.0" encoding="UTF-8"?><rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100" xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"><rsm:ExchangedDocumentContext><ram:GuidelineSpecifiedDocumentContextParameter><ram:ID>urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0</ram:ID></ram:GuidelineSpecifiedDocumentContextParameter></rsm:ExchangedDocumentContext><rsm:ExchangedDocument><ram:ID>${number}</ram:ID></rsm:ExchangedDocument><rsm:SupplyChainTradeTransaction><ram:ApplicableHeaderTradeAgreement><ram:BuyerReference>${buyerReference}</ram:BuyerReference></ram:ApplicableHeaderTradeAgreement><ram:ApplicableHeaderTradeSettlement><ram:SpecifiedTradeSettlementHeaderMonetarySummation><ram:GrandTotalAmount>${total}</ram:GrandTotalAmount></ram:SpecifiedTradeSettlementHeaderMonetarySummation></ram:ApplicableHeaderTradeSettlement></rsm:SupplyChainTradeTransaction></rsm:CrossIndustryInvoice>`
 
 export async function erechnung() {
 	const PF = `PE-${RUN}`
@@ -143,9 +98,10 @@ export async function erechnung() {
 			const r = await issueAndFix(keys.chch, ISSUED_ON)
 			expect('issue CH→CH', r.issue, 200)
 			chch = r.fixed
+			check('the reservation hands the app tax_case domestic, qr_reference null, language de', r.reservation?.tax_case === 'domestic' && r.reservation?.qr_reference === null && r.reservation?.language === 'de', r.reservation)
 			check('fixed: tax_case domestic, VAT 8.1 %, customer.tax_case frozen', chch?.tax_case === 'domestic' && chch?.vat === 8.1 && chch?.customer?.tax_case === 'domestic' && chch?.vat_amount === 121.5, chch)
 			check('fixed: counter_no 1, qr_reference null (plain IBAN), xml_path null', chch?.counter_no === 1 && chch?.qr_reference === null && chch?.xml_path === null && chch?.external === null, chch)
-			check('fixed: document done', chch?.document_state === 'done', chch?.document_error)
+			check('fixed: issued, documents[pdf] with the app’s PDF, no document_state (0.32.0)', chch?.status === 'issued' && chch?.documents?.length === 1 && chch?.documents?.[0]?.kind === 'pdf' && chch?.documents?.[0]?.sha256 === sha256(r.pdf) && chch?.document_state === undefined, chch?.documents)
 		}
 		{
 			expect('Team Admin sets a German issuer, VAT 19', await setIssuer('DE', {}, 19), 200)
@@ -163,7 +119,7 @@ export async function erechnung() {
 			expect('draft DE→DE with the override export', await ocs(A, 'PUT', path(keys.over), { version: 0, data: draft(customers.de, 'EUR', { tax_case: 'export' }) }), 200)
 			const over = await issueAndFix(keys.over, ISSUED_ON)
 			expect('issue with the override', over.issue, 200)
-			check('fixed: export by override, VAT 0', over.fixed?.tax_case === 'export' && over.fixed?.vat === 0, over.fixed)
+			check('fixed: export by override, VAT 0; the reservation says export too', over.fixed?.tax_case === 'export' && over.fixed?.vat === 0 && over.reservation?.tax_case === 'export', over.fixed)
 		}
 		{
 			expect('Team Admin sets the Swiss issuer again', await setIssuer('CH'), 200)
@@ -173,38 +129,43 @@ export async function erechnung() {
 			check('fixed: export (issuer outside the EU), VAT 0', r.fixed?.tax_case === 'export' && r.fixed?.vat === 0 && r.fixed?.gross === 1500, r.fixed)
 		}
 
-		head('E-invoices: ZUGFeRD and XRechnung')
+		head('E-invoices: the XRechnung the app sends (0.32.0)')
 		{
-			const doc = await fetchRaw(A, `${ipath(keys.chch)}/document?kind=pdf`)
-			check('the stored PDF is PDF/A-3 with factur-x.xml inside', doc.status === 200 && doc.buf.subarray(0, 5).toString() === '%PDF-' && doc.buf.includes('factur-x.xml') && doc.buf.includes('pdfaid:part>3<'), [doc.status, doc.buf.length])
-			check('… the chain line is still its subject', doc.buf.includes(`Beleg ${chch?.number} · Kette ${chch?.chain?.seq} `))
-			check('… no XRechnung for a Swiss customer', (await fetchRaw(A, `${ipath(keys.chch)}/document?kind=xml`)).status === 404)
-			const lg = await ocs(A, 'GET', `/invoices/ledger?since=${chch?.chain?.seq}&limit=20`)
-			const docs = (lg.data?.entries || []).filter((e) => e.action === 'document' && e.number === chch?.number)
-			check('ledger: one document entry, kind zugferd, sha256 of the stored file', docs.length === 1 && JSON.parse(docs[0].payload).kind === 'zugferd' && JSON.parse(docs[0].payload).sha256 === chch?.document_sha256, docs)
+			const doc = await raw(A, 'GET', `${ipath(keys.chch)}/document?kind=pdf`)
+			check('the filed PDF is the app’s, as sent', doc.status === 200 && doc.buf.subarray(0, 5).toString() === '%PDF-' && sha256(doc.buf) === chch?.documents?.[0]?.sha256, [doc.status, doc.buf.length])
+			check('… the chain line is in it', doc.buf.includes(`Beleg ${chch?.number} · Kette ${chch?.chain?.seq} `))
+			check('… no XRechnung for a Swiss customer (none sent)', (await raw(A, `GET`, `${ipath(keys.chch)}/document?kind=xml`)).status === 404)
+			const lg = await ocs(A, 'GET', `/invoices/ledger?since=${chch?.chain?.seq - 1}&limit=20`)
+			const issued = (lg.data?.entries || []).find((e) => e.seq === chch?.chain?.seq)
+			check('ledger: the issued entry carries the PDF’s sha256; no document entry of kind zugferd', issued?.action === 'issued' && JSON.parse(issued?.payload ?? '{}')?.document?.sha256 === chch?.documents?.[0]?.sha256 && !(lg.data?.entries || []).some((e) => e.action === 'document' && e.number === chch?.number), issued)
 			expect('project → public customer', await pointProjectTo(customers.pub), 200)
 			expect('draft CH→DE public', await ocs(A, 'PUT', path(keys.pub), { version: 0, data: draft(customers.pub, 'EUR') }), 200)
 			const r = await issueAndFix(keys.pub, ISSUED_ON)
 			expect('issue for the public customer', r.issue, 200)
-			check('fixed: xml_path <root>/Buchhaltung/<year>/Rechnungen/<date>_<number>_<customer>.xml (0.22.0) and xml_sha256', typeof r.fixed?.xml_path === 'string' && r.fixed.xml_path.includes(`/Buchhaltung/${Y}/Rechnungen/${r.fixed.issued_on}_${r.fixed.number}_`) && r.fixed.xml_path.endsWith('.xml') && /^[0-9a-f]{64}$/.test(r.fixed?.xml_sha256 || ''), r.fixed)
-			const xml = await fetchRaw(A, `${ipath(keys.pub)}/document?kind=xml`)
-			check('document?kind=xml: application/xml, <number>.xml', xml.status === 200 && xml.type.startsWith('application/xml') && xml.disposition.includes(`${r.fixed?.number}.xml`), [xml.status, xml.type, xml.disposition])
-			check('… CII, profile XRechnung 3.0, the Leitweg-ID as BuyerReference, the number, the totals', xml.text.includes('<rsm:CrossIndustryInvoice') && xml.text.includes('urn:xeinkauf.de:kosit:xrechnung_3.0') && xml.text.includes('<ram:BuyerReference>04011000-1234512345-06</ram:BuyerReference>') && xml.text.includes(`<ram:ID>${r.fixed?.number}</ram:ID>`) && xml.text.includes('<ram:GrandTotalAmount>1500.00</ram:GrandTotalAmount>'), xml.text.slice(0, 300))
-			check('… export: category G with VATEX-EU-G is not used inside the EU; E instead', xml.text.includes('<ram:CategoryCode>E</ram:CategoryCode>'))
-			const lead = await fetchRaw(L, `${ipath(keys.pub)}/document?kind=xml`)
+			check('fixed: the Leitweg-ID frozen with the customer, xml_path null until the app sends it', r.fixed?.customer?.leitweg_id === '04011000-1234512345-06' && r.fixed?.xml_path === null && r.fixed?.documents?.length === 1, r.fixed)
+			expect('document?kind=xml before the app sends it', await raw(A, 'GET', `${ipath(keys.pub)}/document?kind=xml`), 404)
+			const xmlBytes = cii(r.fixed?.number, '04011000-1234512345-06', '1500.00')
+			expect('a Lead sends the XML', await raw(L, 'PUT', `${ipath(keys.pub)}/document?kind=xml`, xmlBytes, 'application/xml'), 403, 'forbidden')
+			const mm = await raw(A, 'PUT', `${ipath(keys.pub)}/document?kind=xml`, cii('RE-OTHER', 'x', '1'), 'application/xml')
+			expect('an XML of another invoice', mm, 422, 'invalid')
+			check('… document_mismatch', mm.data?.code === 'document_mismatch', mm.data)
+			const x = await raw(A, 'PUT', `${ipath(keys.pub)}/document?kind=xml`, xmlBytes, 'application/xml')
+			expect('Team Admin files the app’s XRechnung', x, 200)
+			check('answer: document { kind xml, name <date>_<number>_<customer>.xml, sha256 }, a ledger entry, stored', x.data?.document?.kind === 'xml' && x.data?.document?.name === `${ISSUED_ON}_${r.fixed?.number}_Stadt-Beispiel-${RUN}.xml` && x.data?.document?.sha256 === sha256(xmlBytes) && Number.isInteger(x.data?.ledger?.seq) && x.data?.stored === true, x.data)
+			const fx = (await ocs(A, 'GET', `${ipath(keys.pub)}/fixed`)).data
+			check('fixed: xml_path <root>/Buchhaltung/<year>/Rechnungen/<date>_<number>_<customer>.xml (0.22.0) and xml_sha256, documents pdf and xml', typeof fx?.xml_path === 'string' && fx.xml_path.includes(`/Buchhaltung/${Y}/Rechnungen/${fx.issued_on}_${fx.number}_`) && fx.xml_path.endsWith('.xml') && fx?.xml_sha256 === sha256(xmlBytes) && fx?.documents?.map((d) => d.kind).join() === 'pdf,xml', fx)
+			const xml = await raw(A, 'GET', `${ipath(keys.pub)}/document?kind=xml`)
+			check('document?kind=xml: application/xml, <number>.xml, the bytes as sent', xml.status === 200 && xml.type.startsWith('application/xml') && xml.disposition.includes(`${r.fixed?.number}.xml`) && xml.text === xmlBytes, [xml.status, xml.type, xml.disposition])
+			const lead = await raw(L, 'GET', `${ipath(keys.pub)}/document?kind=xml`)
 			check('the project’s Lead reads the XML too', lead.status === 200)
-			check('a Member does not', (await fetchRaw(U1, `${ipath(keys.pub)}/document?kind=xml`)).status === 403)
-			const lg2 = await ocs(A, 'GET', `/invoices/ledger?since=${r.fixed?.chain?.seq}&limit=20`)
-			const kinds = (lg2.data?.entries || []).filter((e) => e.action === 'document' && e.number === r.fixed?.number).map((e) => JSON.parse(e.payload).kind).sort()
-			check('ledger: document entries zugferd and xrechnung', JSON.stringify(kinds) === '["xrechnung","zugferd"]', kinds)
+			check('a Member does not', (await raw(U1, 'GET', `${ipath(keys.pub)}/document?kind=xml`)).status === 403)
+			const lg2 = await ocs(A, 'GET', `/invoices/ledger?since=${x.data?.ledger?.seq - 1}&limit=1`)
+			const de = lg2.data?.entries?.[0]
+			check('ledger: document entry of kind xrechnung with the XML’s sha256', de?.action === 'document' && de?.number === r.fixed?.number && JSON.parse(de?.payload ?? '{}')?.kind === 'xrechnung' && JSON.parse(de?.payload ?? '{}')?.sha256 === sha256(xmlBytes), de)
+			check('the same XML again: 200, stored false, no second entry', await raw(A, 'PUT', `${ipath(keys.pub)}/document?kind=xml`, xmlBytes, 'application/xml').then((a) => a.status === 200 && a.data?.stored === false && a.data?.ledger?.seq === x.data?.ledger?.seq))
+			expect('another XML after the first', await raw(A, 'PUT', `${ipath(keys.pub)}/document?kind=xml`, xmlBytes + '<!-- v2 -->', 'application/xml'), 409, 'conflict')
 			const v = await ocs(A, 'GET', '/invoices/chain/verify')
 			check('the chain is still valid', v.data?.ok === true, v.data)
-			const k = kosit(xml.text)
-			if (k === null) {
-				console.log('    info  KoSIT validator not run (needs java and TS_KOSIT=<folder with validationtool-*.jar and scenarios.xml>) – structure checked instead')
-			} else {
-				check('KoSIT validator accepts the XRechnung', k === true, k)
-			}
 		}
 
 		head('E-invoices: QR reference with a QR-IBAN')
@@ -217,8 +178,7 @@ export async function erechnung() {
 			const ref = r.fixed?.qr_reference
 			check('fixed: qr_reference 27 digits, BESR id first, the year before the check digit', typeof ref === 'string' && /^\d{27}$/.test(ref) && ref.startsWith('123456') && ref.slice(22, 26) === String(Y), ref)
 			check('… counter zero-padded in between, valid check digit', typeof ref === 'string' && ref.slice(6, 22) === String(r.fixed?.counter_no).padStart(16, '0') && qrCheckDigit(ref.slice(0, 26)) === Number(ref[26]), ref)
-			const doc = await fetchRaw(A, `${ipath(keys.qrr)}/document`)
-			check('the document is stored with a payment part (two pages; 0.19.0 left it out for a QR-IBAN)', doc.status === 200 && (doc.buf.toString('latin1').match(/\/Type \/Page\b/g) || []).length === 2 && doc.buf.includes('factur-x.xml'), doc.status)
+			check('… the reservation handed it to the app for the payment part (0.32.0)', r.reservation?.qr_reference === ref, r.reservation)
 			const lg = await ocs(A, 'GET', `/invoices/ledger?since=${r.fixed?.chain?.seq - 1}&limit=3`)
 			const issued = (lg.data?.entries || []).find((e) => e.action === 'issued' && e.number === r.fixed?.number)
 			check('the reference is in the issue payload', issued !== undefined && JSON.parse(issued.payload).qr_reference === ref)
@@ -226,25 +186,25 @@ export async function erechnung() {
 
 		head('E-invoices: exports')
 		{
-			expect('export by a Lead', await fetchRaw(L, '/invoices/export?kind=csv').then((x) => ({ status: x.status, data: null, text: '' })), 403)
-			expect('export of an unknown kind', await fetchRaw(A, '/invoices/export?kind=xlsx').then((x) => ({ status: x.status, data: null, text: x.text })), 422)
-			expect('export with a bad day', await fetchRaw(A, '/invoices/export?kind=csv&from=2026-13-01').then((x) => ({ status: x.status, data: null, text: x.text })), 422)
-			const csv = await fetchRaw(A, `/invoices/export?kind=csv&from=${Y}-01-01&to=${Y}-12-31`)
+			expect('export by a Lead', await raw(L, 'GET', '/invoices/export?kind=csv').then((x) => ({ status: x.status, data: null, text: '' })), 403)
+			expect('export of an unknown kind', await raw(A, 'GET', '/invoices/export?kind=xlsx').then((x) => ({ status: x.status, data: null, text: x.text })), 422)
+			expect('export with a bad day', await raw(A, 'GET', '/invoices/export?kind=csv&from=2026-13-01').then((x) => ({ status: x.status, data: null, text: x.text })), 422)
+			const csv = await raw(A, 'GET', `/invoices/export?kind=csv&from=${Y}-01-01&to=${Y}-12-31`)
 			check('CSV: text/csv, BOM, semicolons, header', csv.status === 200 && csv.type.startsWith('text/csv') && csv.buf.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])) && csv.text.includes('number;status;issued_on;due_on;paid_on;customer;customer_vat_id;project;budget;currency;net;vat_rate;vat_amount;gross;tax_case;reverses;document_sha256;chain_seq;chain_hash'), [csv.status, csv.type, csv.text.slice(0, 100)])
 			const lines = csv.text.split('\r\n').filter((l) => l.startsWith(`RE-${RUN}-`))
 			check('… one row per issued invoice of the year, with the tax cases', lines.length === made.length && lines.some((l) => l.includes(';domestic;')) && lines.some((l) => l.includes(';eu_reverse;')) && lines.some((l) => l.includes(';export;')), lines.length)
-			check('… the CH→CH row: net, VAT, gross, chain seq', lines.some((l) => l.startsWith(`${chch?.number};issued;${ISSUED_ON};`) && l.includes(';CHF;1500.00;8.10;121.50;1621.50;domestic;;') && l.includes(`;${chch?.chain?.seq};${chch?.chain?.hash}`)), lines.find((l) => l.startsWith(`${chch?.number};`)))
-			expect('DATEV without accounts', await fetchRaw(A, '/invoices/export?kind=datev').then((x) => ({ status: x.status, data: null, text: x.text })), 422)
+			check('… the CH→CH row: net, VAT, gross, the PDF’s sha256 as document_sha256, chain seq', lines.some((l) => l.startsWith(`${chch?.number};issued;${ISSUED_ON};`) && l.includes(';CHF;1500.00;8.10;121.50;1621.50;domestic;;') && l.includes(`;${chch?.documents?.[0]?.sha256};${chch?.chain?.seq};${chch?.chain?.hash}`)), lines.find((l) => l.startsWith(`${chch?.number};`)))
+			expect('DATEV without accounts', await raw(A, 'GET', '/invoices/export?kind=datev').then((x) => ({ status: x.status, data: null, text: x.text })), 422)
 			expect('datev setting with a bad field', await ocs(A, 'PUT', '/team/settings', { datev: { consultant: '12345678' } }), 422, 'invalid')
 			expect('datev setting by a Lead', await ocs(L, 'PUT', '/team/settings', { datev: { consultant: '1234567' } }), 403, 'forbidden')
 			const set = await ocs(A, 'PUT', '/team/settings', { datev: { consultant: '1234567', client: '12345', fiscal_year_start: '01-01', account_length: 4, debtor_account: '10000', revenue_domestic: '8400', revenue_eu: '8336', revenue_export: '8338' } })
 			expect('Team Admin sets the DATEV accounts', set, 200)
 			check('… the answer and /team carry them', set.data?.datev?.revenue_eu === '8336' && (await ocs(A, 'GET', '/team')).data?.settings?.datev?.client === '12345', set.data?.datev)
-			const datev = await fetchRaw(A, `/invoices/export?kind=datev&from=${Y}-01-01&to=${Y}-12-31`)
+			const datev = await raw(A, 'GET', `/invoices/export?kind=datev&from=${Y}-01-01&to=${Y}-12-31`)
 			check('DATEV: EXTF 700 header, column names, one booking per invoice', datev.status === 200 && datev.text.startsWith('﻿EXTF;700;21;Buchungsstapel;12;') && datev.text.includes(';1234567;12345;' + Y + '0101;4;' + Y + '0101;' + Y + '1231;') && datev.text.includes('Umsatz (ohne Soll/Haben-Kz);Soll/Haben-Kennzeichen;') && datev.text.split('\r\n').filter((l) => l.includes(`;RE-${RUN}-`)).length === made.length, datev.text.slice(0, 200))
 			check('… CH→CH: 1621,50 Soll on 10000 against 8400, Belegdatum 1003, number, text', datev.text.includes(`1621,50;S;CHF;;;;10000;8400;;1003;${chch?.number};;;Müller AG ${RUN} E-Rechnung ${RUN}`), datev.text.split('\r\n').find((l) => l.includes(chch?.number || '-')))
 			check('… DE→DE uses the customer’s debtor account 10077; DE→FR the EU revenue account, CH→DE the export account', datev.text.includes(';10077;8400;') && datev.text.includes(';10000;8336;') && datev.text.includes(';10077;8338;'))
-			const ledger = await fetchRaw(A, `/invoices/export?kind=ledger`)
+			const ledger = await raw(A, 'GET', `/invoices/export?kind=ledger`)
 			check('ledger CSV: header and the issue entries', ledger.status === 200 && ledger.text.includes('seq;at;actor;action;number;payload_hash;prev_hash;hash') && ledger.text.includes(`;issued;${chch?.number};`), ledger.text.slice(0, 120))
 		}
 
@@ -271,10 +231,14 @@ export async function erechnung() {
 			check('the invoice record carries external, the rest unchanged', rec?.data?.external?.system === 'sevdesk' && rec?.data?.external?.id === 'SD-17' && rec?.data?.status === before?.data?.status && rec?.data?.number === before?.data?.number, rec?.data?.external)
 			expect('a client still may not write the issued invoice (external included)', await ocs(A, 'PUT', path(keys.chch), { version: rec?.version, data: { ...rec?.data, external: { system: 'datev', id: '1' } } }), 409, 'issued')
 			// 0.24.0: a credit note is a document of its own – it does not inherit the original's hand-over.
-			const cr = await ocs(A, 'POST', `${ipath(keys.chch)}/reverse`, { kind: 'credit', reason: 'Copy check' })
-			expect('a credit note of the handed-over invoice', cr, 200)
-			check('… without the original’s external; the original keeps it', (cr.data?.record?.data?.external ?? null) === null
-				&& (await ocs(A, 'GET', path(keys.chch))).data?.data?.external?.id === 'SD-17', [cr.data?.record?.data?.external])
+			const cr = await stornieren(A, keys.chch, { kind: 'credit', reason: 'Copy check' })
+			expect('a credit note of the handed-over invoice', cr.reserve, 200)
+			expect('… closed with its PDF', cr.close, 200)
+			if (cr.key) {
+				made.push(cr.key)
+			}
+			check('… without the original’s external; the original keeps it', (cr.record?.data?.external ?? null) === null
+				&& cr.original?.data?.external?.id === 'SD-17', [cr.record?.data?.external])
 		}
 
 		head('E-invoices: webhooks')
@@ -294,7 +258,7 @@ export async function erechnung() {
 			expect('draft', await ocs(A, 'PUT', path(K8), { version: 0, data: draft(customers.ch, 'CHF') }), 200)
 			const r = await issueAndFix(K8, ISSUED_ON)
 			expect('issue with a webhook listening', r.issue, 200)
-			check('the issue is not blocked by the unreachable address', r.fixed?.document_state === 'done', r.fixed?.document_error)
+			check('the close is not blocked by the unreachable address', r.fixed?.status === 'issued' && r.fixed?.documents?.length === 1, r.fixed)
 			expect('webhook status by a Lead', await ocs(L, 'GET', '/invoices/webhooks/status'), 403, 'forbidden')
 			const st = await ocs(A, 'GET', '/invoices/webhooks/status')
 			expect('webhook status', st, 200)
