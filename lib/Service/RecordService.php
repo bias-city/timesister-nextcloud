@@ -278,7 +278,7 @@ final class RecordService {
 
 	/** An error of the batch's write number `$i + 1`. */
 	private static function inWrite(ApiException $e, int $i): ApiException {
-		return (new ApiException($e->getStatus(), $e->getErrorCode(), Message::of('Write {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]), ['index' => $i]))->like($e);
+		return (new ApiException($e->getStatus(), $e->getErrorCode(), Message::of('Write {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]), ['index' => $i] + $e->getExtra()))->like($e);
 	}
 
 	/** @return list<array<string,mixed>> newest first, at most 100 */
@@ -452,6 +452,19 @@ final class RecordService {
 		$problems = [];
 		$own = null;
 		$costs = new CostBatch();
+		if (!$system) {
+			// 0.33.0: the person's corrections are checked all before any is written into an event.
+			foreach ($ops as $op) {
+				if ($op['kind'] === CorrectionRules::KIND) {
+					$cur = $this->records->findOne($m->tenantId, $op['kind'], $op['key']);
+					try {
+						$this->requireCorrectionRight($m, $op, $cur, $own ??= $this->ownKeys($m));
+					} catch (ApiException $e) {
+						throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+					}
+				}
+			}
+		}
 		foreach ($ops as $op) {
 			$cur = $this->records->findOne($m->tenantId, $op['kind'], $op['key']);
 			[$outcome, $newVersion] = VersionCheck::decide(
@@ -479,6 +492,12 @@ final class RecordService {
 			if ($op['kind'] === 'project') {
 				// 0.27.0: the progress log per work package is never lost - stored entries join the incoming ones.
 				$op['json'] = ProgressLog::merge($cur, $op['json'], $m->uid, gmdate('Y-m-d', $now));
+				// 0.33.0: a budget keeps its fee model once bookings of it are billed.
+				try {
+					$this->requireFeeModels($m->tenantId, $op['key'], $cur, $op['json']);
+				} catch (ApiException $e) {
+					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+				}
 			}
 			if ($op['kind'] === QuoteRules::KIND || $op['kind'] === InvoiceRules::KIND) {
 				// A Lead's invoice or quote against the stored state, under the team lock.
@@ -500,12 +519,15 @@ final class RecordService {
 					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
 				}
 			}
-			if ($op['kind'] === CorrectionRules::KIND && !$system && $op['json'] !== null) {
+			if ($op['kind'] === CorrectionRules::KIND && !$system) {
 				// 0.27.0 (K-Offline): the correction is applied as the record is written; the outcome goes into the record.
+				// The person's right was checked before the loop ({@see requireCorrectionRight()}).
 				try {
-					$d = Json::decode($op['json']);
-					if ($d instanceof \stdClass) {
-						$op['json'] = Json::encode($this->corrections->prepare($m, $op['key'], $d));
+					$before = $cur === null || $cur->isTombstone() ? null : InvoiceRules::decode($cur->getData());
+					$d = $op['json'] === null ? null : Json::decode($op['json']);
+					$d = $d instanceof \stdClass ? $d : null;
+					if ($d !== null) {
+						$op['json'] = Json::encode($this->corrections->prepare($m, $op['key'], $d, $before, $own ??= $this->ownKeys($m)));
 					}
 				} catch (ApiException $e) {
 					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
@@ -560,6 +582,58 @@ final class RecordService {
 		}
 		$top = $this->deliverAgain($m->tenantId, $top, $scope);
 		return ['revision' => $top, 'records' => $out];
+	}
+
+	/**
+	 * A member's correction record (0.33.0): their own booking, nothing but
+	 * `level` against the stored, applied record, and a new level – or the
+	 * deletion of a record with one – only on a booking in a budget by
+	 * category. `403 correction_lead_only`; Team Admins and Leads pass.
+	 *
+	 * @param array{kind:string,key:string,version:int,json:?string,accounts:?list<string>,index?:int} $op
+	 * @param list<string> $own
+	 */
+	private function requireCorrectionRight(Membership $m, array $op, ?Record $cur, array $own): void {
+		$before = $cur === null || $cur->isTombstone() ? null : InvoiceRules::decode($cur->getData());
+		$d = $op['json'] === null ? null : Json::decode($op['json']);
+		$d = $d instanceof \stdClass ? $d : null;
+		if (CorrectionRules::requirePersonal($m->role, $op['key'], $before, $d, $own)) {
+			$of = $d ?? $before;
+			$this->corrections->requireLevelRight($m, (string)($of?->person ?? CorrectionRules::personOf($op['key']) ?? ''),
+				(string)($of?->event_uid ?? ''), $of === null ? null : CorrectionRules::recurrenceOf($of));
+		}
+	}
+
+	/**
+	 * The lock of the fee model (0.33.0): a budget whose `fee_model` differs
+	 * from the stored one is refused while an invoice of it bills bookings –
+	 * issuing, issued or paid with billed hours, or handed over with
+	 * bookings. `409 fee_model_locked` naming the budget and one invoice.
+	 */
+	private function requireFeeModels(int $tenantId, string $project, ?Record $cur, ?string $json): void {
+		if ($json === null || $cur === null || $cur->isTombstone() || $cur->getData() === null) {
+			return;
+		}
+		$changed = FeeModelRules::changed(InvoiceRules::decode($cur->getData()), InvoiceRules::decode($json));
+		foreach ($changed as $budget) {
+			$number = $this->invoices->billingBudget($tenantId, $project, $budget) ?? $this->handedOverBilling($tenantId, $project, $budget);
+			if ($number !== null) {
+				throw FeeModelRules::locked($budget, $number);
+			}
+		}
+	}
+
+	/** The external number of a handed-over invoice of this budget that bills bookings, or null. */
+	private function handedOverBilling(int $tenantId, string $project, string $budget): ?string {
+		foreach ($this->records->findLiveByKind($tenantId, InvoiceRules::KIND) as $r) {
+			$d = InvoiceRules::decode($r->getData());
+			if ($d !== null && HandoverRules::handedOverTo($d) !== null && ($d->project ?? null) === $project
+				&& (string)($d->budget ?? '') === $budget && IssueRules::bookingsOf($d) !== []) {
+				$n = $d->external->number ?? null;
+				return is_string($n) && $n !== '' ? $n : $r->getRkey();
+			}
+		}
+		return null;
 	}
 
 	/** A template's data with `created_by` set ({@see TemplateRules::stamp()}); a deletion stays null. */

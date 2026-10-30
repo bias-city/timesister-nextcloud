@@ -6,14 +6,15 @@
 // currency computed as the Mac app does (D, E – checked against an
 // independent copy of its arithmetic), the app's documents (F), what is
 // gone (G) and the ECB rates through a local stub of Frankfurter (H, only
-// with TS_OCC; never the real service). Leaves pb as it found it
+// with TS_OCC; never the real service). Leaves zb as it found it
 // (settings, team settings, app config); records only with TS_SQL, the
 // ledger stays; the test folder in the owner's files goes.
 import { exec } from 'node:child_process'
 import http from 'node:http'
 import { promisify } from 'node:util'
 import { dav, ocs, occ, sql, NC, API } from './lib.mjs'
-import { A, L, RUN, U1, U2, check, expect, head, sha256 } from './harness.mjs'
+import { RUN, check, expect, head, sha256 } from './harness.mjs'
+import { A, L, U1, U2 } from './konten.mjs'
 
 const rec = (kind, key) => `/records/${kind}/${encodeURIComponent(key)}`
 const auth = (who) => 'Basic ' + Buffer.from(`${who.user}:${who.pass}`).toString('base64')
@@ -164,12 +165,12 @@ export async function spesen() {
 	const K = (n) => `rc-${RUN}s${n}`
 	const RULE = `er-${RUN}-sp`
 	const records = []
-	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'pb'")
+	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'zb'")
 	const settings = await ocs(A, 'GET', '/records/setting/settings')
 	const base = settings.status === 200 ? settings.data.data : {}
 	const teamBefore = (await ocs(A, 'GET', '/team')).data
 	const docsBefore = teamBefore?.settings?.documents || { root: null, chain_mail: null }
-	const owner = teamBefore?.backup_owner || 'pbadmin'
+	const owner = teamBefore?.backup_owner || 'zbadmin'
 	const ownerDav = { user: owner, pass: `Test-2026-${owner}!` }
 	const nameOf = (uid) => (teamBefore?.members || []).find((x) => x.uid === uid)?.display_name || uid
 	const safe = (s) => s.replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss').replace(/[^A-Za-z0-9.-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
@@ -181,7 +182,7 @@ export async function spesen() {
 	}
 	const receipt = (over = {}) => ({
 		schema: 1, kind: 'trust', date: `${Y}-05-02`, supplier: 'Bahn Muster', text: 'Basel–Bern', net: 100, vat_rate: 8.1, vat: 8.1, gross: 108.1, currency: 'CHF',
-		project: null, budget: null, cost: null, paid_by: 'person', person: 'pbuser2', reimburse: true, note: null, ...over,
+		project: null, budget: null, cost: null, paid_by: 'person', person: 'zbuser2', reimburse: true, note: null, ...over,
 	})
 	const newReceipt = async (who, n, over) => {
 		records.push(['receipt', K(n)])
@@ -202,11 +203,11 @@ export async function spesen() {
 		head('Expenses 0.30.0: setup')
 		{
 			const cap = (await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')).data?.capabilities?.timesister
-			check('capability expense_table: 2 (0.31.0), version 0.32.0', cap?.expense_table === 2 && cap?.version === '0.32.0', cap)
+			check('capability expense_table: 2 (0.31.0), version 0.33.0', cap?.expense_table === 2 && cap?.version === '0.33.0', cap)
 			expect('documents.root for the test', await ocs(A, 'PUT', '/team/settings', { documents: { root: FOLDER } }), 200)
 			expect('settings: costs on, CHF, an own expense number', await ocs(A, 'PUT', '/records/setting/settings', { version: settings.status === 200 ? settings.data.version : 0, data: { ...base,
 				currency: 'CHF', modules: { ...(base.modules || {}), costs: true }, expense_number: { pattern: `SQ-${RUN}-{no:4}`, per_year: true, start: 1 } } }), 200)
-			expect('a project led by pblead', await ocs(A, 'PUT', rec('project', PS), { version: 0, data: { schema: 1, id: PS, name: `Spesen ${RUN}`, codes: [CODE], status: 'active', leads: ['pblead'],
+			expect('a project led by zblead', await ocs(A, 'PUT', rec('project', PS), { version: 0, data: { schema: 1, id: PS, name: `Spesen ${RUN}`, codes: [CODE], status: 'active', leads: ['zblead'],
 				budgets: [{ id: 'b1', name: 'Phase 1', currency: 'CHF', costs: [{ no: 1, name: 'Spesen', kind: 'expense', rule: 'receipts', cap: 1500, mode: 'rebill' }] }] } }), 200)
 		}
 
@@ -263,22 +264,22 @@ export async function spesen() {
 			for (const n of [2, 4, 6]) {
 				expect(`S${n} by the person`, await newReceipt(U2, n, R[n]), 200)
 			}
-			const rule = await ocs(U2, 'PUT', rec('expense_rule', RULE), { version: 0, data: { schema: 1, person: 'pbuser2', text: 'Phone', amount: 30, vat_rate: null, period: 'monthly',
+			const rule = await ocs(U2, 'PUT', rec('expense_rule', RULE), { version: 0, data: { schema: 1, person: 'zbuser2', text: 'Phone', amount: 30, vat_rate: null, period: 'monthly',
 				from: `${Y}-05-01`, to: null, project: null, budget: null, cost: null } })
 			records.push(['expense_rule', RULE])
 			check('a rule of the person, without approval', rule.status === 200 && rule.data?.data?.approved_by === null, rule.data)
 			R[5] = receipt({ kind: 'recurring', rule: RULE, period: `${Y}-05`, date: `${Y}-05-01`, supplier: '', text: 'Phone', net: 30, vat_rate: null, vat: 0, gross: 30, category: 'phone', factor: 0.5 })
 			const s5 = await newReceipt(U2, 5, R[5])
-			check('its receipt for May: internal at once', s5.status === 200 && s5.data?.data?.status === 'internal' && s5.data?.data?.approved_by === 'pbuser2', s5.data)
+			check('its receipt for May: internal at once', s5.status === 200 && s5.data?.data?.status === 'internal' && s5.data?.data?.approved_by === 'zbuser2', s5.data)
 			// Not settled: a later month, a rejected one, one the company paid.
 			expect('S7 in June', await newReceipt(U2, 7, receipt({ date: `${Y}-06-01`, category: 'travel' })), 200)
 			expect('S8, to be rejected', await newReceipt(U2, 8, receipt({ date: `${Y}-05-08`, category: 'travel' })), 200)
 			expect('… rejected by a Team Admin', await ocs(A, 'POST', `/receipts/${K(8)}/reject`, { reason: 'Twice' }), 200)
 			expect('S9 the company paid', await newReceipt(A, 9, receipt({ date: `${Y}-05-09`, paid_by: 'company', person: null, reimburse: false, category: 'travel' })), 200)
 
-			const period = { person: 'pbuser2', from: `${Y}-05-01`, to: `${Y}-05-31` }
-			expect('another member settles for pbuser2', await ocs(U1, 'POST', '/expense-reports/fix', period), 403, 'forbidden')
-			expect('the Lead settles for pbuser2', await ocs(L, 'POST', '/expense-reports/fix', period), 403, 'forbidden')
+			const period = { person: 'zbuser2', from: `${Y}-05-01`, to: `${Y}-05-31` }
+			expect('another member settles for zbuser2', await ocs(U1, 'POST', '/expense-reports/fix', period), 403, 'forbidden')
+			expect('the Lead settles for zbuser2', await ocs(L, 'POST', '/expense-reports/fix', period), 403, 'forbidden')
 			const bad = await ocs(U2, 'POST', '/expense-reports/fix', { ...period, from: `${Y}-06-01` })
 			check('“from” after “to” → 422', bad.status === 422 && bad.data?.message === '“from” and “to” are days (YYYY-MM-DD), “from” not after “to”.', bad.data)
 			expect('a day that is none', await ocs(U2, 'POST', '/expense-reports/fix', { ...period, to: `${Y}-05-32` }), 422, 'invalid')
@@ -304,7 +305,7 @@ export async function spesen() {
 			const order = [0, 5, 1, 2, 3, 4, 6]
 			check('the person settles May: a new record, fixed, numbered, the period, who and when', fx.status === 200 && /^sb-[0-9a-f]{8}$/.test(SB ?? '')
 				&& new RegExp(`^SQ-${RUN}-\\d{4}$`).test(NUM ?? '') && fixed?.status === 'fixed' && fixed?.from === period.from && fixed?.to === period.to
-				&& fixed?.fixed_by === 'pbuser2' && fixed?.fixed_on === today && JSON.stringify(fixed?.documents) === '[]' && fixed?.document_state === undefined, fx.data)
+				&& fixed?.fixed_by === 'zbuser2' && fixed?.fixed_on === today && JSON.stringify(fixed?.documents) === '[]' && fixed?.document_state === undefined, fx.data)
 			check('… the lines by date and key: S0, S5, S1, S2, S3, S4, S6 (not June, rejected or the company’s)', JSON.stringify((fixed?.lines || []).map((l) => l.receipt)) === JSON.stringify(order.map(K)), (fixed?.lines || []).map((l) => l.receipt))
 			const want = order.map((n) => line(K(n), n === 0 ? receipt({ kind: 'trust', date: `${Y}-05-01`, supplier: 'Garage', text: '160 km × 0.70', net: 112, vat_rate: null, vat: 0, gross: 112,
 				category: 'mobility', factor: 1, template: 'km-own-car', quantity: 160, rate: null }) : R[n], 'CHF'))
@@ -326,12 +327,12 @@ export async function spesen() {
 			const payload = JSON.parse(ef?.payload ?? '{}')
 			check('ledger expense_fixed: { key, number, person, from, to, fixed_on, fixed_by, lines, sums }, keys sorted, hashed', ef?.action === 'expense_fixed' && ef?.hash === fixed?.hash && sha256(ef?.payload ?? '') === ef?.payload_hash
 				&& JSON.stringify(Object.keys(payload)) === '["fixed_by","fixed_on","from","key","lines","number","person","sums","to"]'
-				&& canon(payload) === canon({ key: SB, number: NUM, person: 'pbuser2', from: period.from, to: period.to, fixed_on: today, fixed_by: 'pbuser2', lines: fixed?.lines, sums: fixed?.sums }), ef)
-			const june = await ocs(A, 'POST', '/expense-reports/fix', { person: 'pbuser2', from: `${Y}-06-01`, to: `${Y}-06-30` })
+				&& canon(payload) === canon({ key: SB, number: NUM, person: 'zbuser2', from: period.from, to: period.to, fixed_on: today, fixed_by: 'zbuser2', lines: fixed?.lines, sums: fixed?.sums }), ef)
+			const june = await ocs(A, 'POST', '/expense-reports/fix', { person: 'zbuser2', from: `${Y}-06-01`, to: `${Y}-06-30` })
 			if (june.data?.key) {
 				records.push(['expense_report', june.data.key])
 			}
-			check('a Team Admin settles June for the person: the next number', june.status === 200 && june.data?.data?.fixed_by === 'pbadmin' && june.data?.data?.lines?.length === 1
+			check('a Team Admin settles June for the person: the next number', june.status === 200 && june.data?.data?.fixed_by === 'zbadmin' && june.data?.data?.lines?.length === 1
 				&& june.data?.data?.number === `SQ-${RUN}-${String(Number(NUM?.slice(-4)) + 1).padStart(4, '0')}`, june.data)
 		}
 
@@ -359,7 +360,7 @@ export async function spesen() {
 		head('Expenses 0.30.0: the documents of the app (F)')
 		{
 			const ty = (fixed?.fixed_on || '').slice(0, 4)
-			const dir = `${FOLDER}/Buchhaltung/${ty}/Spesen/${safe(nameOf('pbuser2'))}`
+			const dir = `${FOLDER}/Buchhaltung/${ty}/Spesen/${safe(nameOf('zbuser2'))}`
 			const name = `Spesenabrechnung_${NUM}.pdf`
 			const body = pdf(name)
 			const send = (who, n, content) => ocs(who, 'POST', `/expense-reports/${SB}/documents`, { name: n, content: typeof content === 'string' ? content : content.toString('base64') })
@@ -418,7 +419,7 @@ export async function spesen() {
 		head('Expenses 0.30.0: what is gone, what stays (G)')
 		{
 			// 0.31.0: the removed routes answer 410 gone with the code, so an older app learns the server is newer.
-			const ready = await ocs(U2, 'POST', '/expense-reports/ready', { person: 'pbuser2' })
+			const ready = await ocs(U2, 'POST', '/expense-reports/ready', { person: 'zbuser2' })
 			check('POST /expense-reports/ready → 410 gone', ready.status === 410 && ready.data?.error === 'gone' && ready.data?.code === 'gone', ready.data)
 			expect('POST /expense-reports/{key}/paid', await ocs(A, 'POST', `/expense-reports/${SB}/paid`, {}), 410, 'gone')
 			expect('POST /expense-rules/{key}/approve', await ocs(A, 'POST', `/expense-rules/${RULE}/approve`, {}), 410, 'gone')
@@ -524,6 +525,6 @@ export async function spesen() {
 		}
 		await dav(ownerDav, 'DELETE', `files/${encodeURIComponent(owner)}/${FOLDER.split('/').map(encodeURIComponent).join('/')}`)
 		const after = await ocs(A, 'GET', '/records/setting/settings')
-		check('pb left as found (settings, no exchange rates, app config)', after.data?.data?.exchange_rates === base.exchange_rates && configValue() === null, after.data?.data?.exchange_rates)
+		check('zb left as found (settings, no exchange rates, app config)', after.data?.data?.exchange_rates === base.exchange_rates && configValue() === null, after.data?.data?.exchange_rates)
 	}
 }

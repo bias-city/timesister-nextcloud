@@ -2,7 +2,7 @@
 //
 // The team's invoice template (0.16.0): /templates/invoice for Team Admins
 // only – info, download, upload and delete –, the Word check, the 10 MB
-// limit and the template in the team ZIP. Leaves pb as it found it: a
+// limit and the template in the team ZIP. Leaves zb as it found it: a
 // template that was there is put back (with a new modified_at).
 // The team's own project templates (0.25.0): the record kind `template`
 // (format, key, size, no person fields; Leads and Team Admins read, a Lead
@@ -10,7 +10,8 @@
 // 0.25.1: the owner `created_by` kept by the server (a Lead keeps their own
 // after a Team Admin's change) and the team setting `catalogs` (put back).
 import { ADMIN, API, NC, ocs, sql } from './lib.mjs'
-import { A, AA, L, RUN, U1, V, check, expect, head, isObj, ISO, keysOf, sha256 } from './harness.mjs'
+import { RUN, check, expect, head, isObj, ISO, keysOf, sha256 } from './harness.mjs'
+import { A, AA, L, U1, V } from './konten.mjs'
 
 const BASE = '/templates/invoice'
 const MB10 = 10 * 1024 * 1024
@@ -210,7 +211,7 @@ async function kataloge() {
 	} finally {
 		await put(A, before?.catalogs ?? null)
 		const after = (await ocs(A, 'GET', '/team')).data?.settings
-		check('pb left as found (catalogs)', JSON.stringify(after?.catalogs ?? null) === JSON.stringify(before?.catalogs ?? null), after?.catalogs)
+		check('zb left as found (catalogs)', JSON.stringify(after?.catalogs ?? null) === JSON.stringify(before?.catalogs ?? null), after?.catalogs)
 	}
 }
 
@@ -227,9 +228,9 @@ export async function projektvorlagen() {
 		{
 			const cap = await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')
 			check('capability templates: 2', cap.data?.capabilities?.timesister?.templates === 2, cap.data?.capabilities?.timesister)
-			const r = await ocs(A, 'PUT', path(K1), { version: 0, data: projektvorlage(id, '2026-10', { created_by: 'pblead' }) })
+			const r = await ocs(A, 'PUT', path(K1), { version: 0, data: projektvorlage(id, '2026-10', { created_by: 'zblead' }) })
 			expect('Team Admin writes a template', r, 200)
-			check('… created_by set by the server, the client’s value replaced (0.25.1)', r.data?.data?.created_by === 'pbadmin', r.data?.data?.created_by)
+			check('… created_by set by the server, the client’s value replaced (0.25.1)', r.data?.data?.created_by === 'zbadmin', r.data?.data?.created_by)
 			check('… stored as sent', r.data?.data?.budget_label === 'Phasen' && r.data?.data?.items?.[0]?.children?.[1]?.kind === 'meilenstein', r.data)
 			expect('Lead reads it', await ocs(L, 'GET', path(K1)), 200)
 			expect('Member reads it', await ocs(U1, 'GET', path(K1)), 403, 'forbidden')
@@ -247,7 +248,7 @@ export async function projektvorlagen() {
 			await bad('a customer field', await ocs(A, 'PUT', path(`${id}-x@1`), { version: 0, data: projektvorlage(`${id}-x`, '1', { customer: 'kanton' }) }), 422, 'invalid',
 				'A template carries no person or customer data: “customer”.')
 			const items = projektvorlage(id, '1').items
-			items[0].children[0].lead = 'pblead'
+			items[0].children[0].lead = 'zblead'
 			await bad('a lead deep in the tree', await ocs(A, 'PUT', path(`${id}-x@1`), { version: 0, data: projektvorlage(`${id}-x`, '1', { items }) }), 422, 'invalid',
 				'A template carries no person or customer data: “items[0].children[0].lead”.')
 			await bad('key and id@edition differ', await ocs(A, 'PUT', path(`${id}-x@2`), { version: 0, data: projektvorlage(`${id}-x`, '1') }), 422, 'invalid',
@@ -263,27 +264,27 @@ export async function projektvorlagen() {
 
 		head('Project templates: a Lead writes their own')
 		{
-			const neu = await ocs(L, 'PUT', path(K2), { version: 0, data: projektvorlage(`${id}-lead`, '2026-10', { created_by: 'pbadmin' }) })
+			const neu = await ocs(L, 'PUT', path(K2), { version: 0, data: projektvorlage(`${id}-lead`, '2026-10', { created_by: 'zbadmin' }) })
 			expect('Lead writes a new one', neu, 200)
-			check('… created_by is the Lead', neu.data?.data?.created_by === 'pblead', neu.data?.data?.created_by)
+			check('… created_by is the Lead', neu.data?.data?.created_by === 'zblead', neu.data?.data?.created_by)
 			expect('… and changes it', await ocs(L, 'PUT', path(K2), { version: 1, data: projektvorlage(`${id}-lead`, '2026-10', { title: 'Mine' }) }), 200)
 			const fremd = await ocs(L, 'PUT', path(K1), { version: await version(K1), data: projektvorlage(id, '2026-10', { title: 'Taken' }) })
 			expect('Lead changes the Team Admin’s', fremd, 403, 'forbidden')
 			check('… “A Lead changes and removes only their own templates.”', fremd.data?.message === 'A Lead changes and removes only their own templates.', fremd.data)
 			expect('Lead removes the Team Admin’s', await ocs(L, 'DELETE', `${path(K1)}?version=${await version(K1)}`), 403, 'forbidden')
-			const admin = await ocs(A, 'PUT', path(K2), { version: 2, data: projektvorlage(`${id}-lead`, '2026-10', { title: 'Checked', created_by: 'pbadmin' }) })
+			const admin = await ocs(A, 'PUT', path(K2), { version: 2, data: projektvorlage(`${id}-lead`, '2026-10', { title: 'Checked', created_by: 'zbadmin' }) })
 			expect('Team Admin changes the Lead’s', admin, 200)
-			check('… created_by stays the Lead (0.25.1)', admin.data?.data?.created_by === 'pblead' && admin.data?.modified_by === 'pbadmin', [admin.data?.data?.created_by, admin.data?.modified_by])
+			check('… created_by stays the Lead (0.25.1)', admin.data?.data?.created_by === 'zblead' && admin.data?.modified_by === 'zbadmin', [admin.data?.data?.created_by, admin.data?.modified_by])
 			const again = await ocs(L, 'PUT', path(K2), { version: 3, data: projektvorlage(`${id}-lead`, '2026-10') })
 			expect('… the Lead still changes their own (0.25.1)', again, 200)
-			check('… created_by still the Lead', again.data?.data?.created_by === 'pblead', again.data?.data?.created_by)
+			check('… created_by still the Lead', again.data?.data?.created_by === 'zblead', again.data?.data?.created_by)
 			expect('Team Admin changes it once more', await ocs(A, 'PUT', path(K2), { version: 4, data: projektvorlage(`${id}-lead`, '2026-10', { title: 'Checked again' }) }), 200)
 			expect('… the Lead removes their own after it', await ocs(L, 'DELETE', `${path(K2)}?version=5`), 200)
-			const fremd2 = await ocs(L, 'PUT', path(K1), { version: await version(K1), data: projektvorlage(id, '2026-10', { title: 'Taken', created_by: 'pblead' }) })
+			const fremd2 = await ocs(L, 'PUT', path(K1), { version: await version(K1), data: projektvorlage(id, '2026-10', { title: 'Taken', created_by: 'zblead' }) })
 			expect('a Lead claiming created_by of another’s', fremd2, 403, 'forbidden')
-			const batch = await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'template', key: `${id}-b@1`, version: 0, data: projektvorlage(`${id}-b`, '1', { created_by: 'pbadmin' }) }] })
+			const batch = await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'template', key: `${id}-b@1`, version: 0, data: projektvorlage(`${id}-b`, '1', { created_by: 'zbadmin' }) }] })
 			expect('a Lead’s batch with a template', batch, 200)
-			check('… created_by from the server in a batch', batch.data?.records?.[0]?.data?.created_by === 'pblead', batch.data?.records?.[0]?.data)
+			check('… created_by from the server in a batch', batch.data?.records?.[0]?.data?.created_by === 'zblead', batch.data?.records?.[0]?.data)
 			const fb = await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'template', key: K1, version: await version(K1), data: projektvorlage(id, '2026-10') }] })
 			expect('a Lead’s batch changing another’s', fb, 403, 'forbidden')
 			check('… “Write 1: A Lead changes and removes only their own templates.”', fb.data?.message === 'Write 1: A Lead changes and removes only their own templates.', fb.data?.message)
@@ -300,11 +301,11 @@ export async function projektvorlagen() {
 			expect('61 characters', lang, 422, 'invalid')
 			check('… “budget_label” must be text of 1 to 60 characters.', lang.data?.message === '“budget_label” must be text of 1 to 60 characters.', lang.data)
 			const teams = await ocs(ADMIN, 'GET', '/admin/teams')
-			const pb = (teams.data?.teams || teams.data || []).find?.((x) => x.slug === 'pb' || x.groups?.team === 'pb-team')
-			if (!pb) {
-				console.log('    (team pb not found in /admin/teams – the ZIP is not looked at)')
+			const zb = (teams.data?.teams || teams.data || []).find?.((x) => x.slug === 'zb' || x.groups?.team === 'zb-team')
+			if (!zb) {
+				console.log('    (team zb not found in /admin/teams – the ZIP is not looked at)')
 			} else {
-				const res = await fetch(`${NC}${API}/admin/teams/${pb.id}/export`, { headers: { 'OCS-APIRequest': 'true', Authorization: 'Basic ' + Buffer.from(`${ADMIN.user}:${ADMIN.pass}`).toString('base64') } })
+				const res = await fetch(`${NC}${API}/admin/teams/${zb.id}/export`, { headers: { 'OCS-APIRequest': 'true', Authorization: 'Basic ' + Buffer.from(`${ADMIN.user}:${ADMIN.pass}`).toString('base64') } })
 				const zip = Buffer.from(await res.arrayBuffer())
 				check('the team ZIP holds the template', res.status === 200 && zip.includes(`records/template/${K1}.json`), res.status)
 			}
@@ -339,7 +340,7 @@ export async function vorlagen() {
 				expect(`${role} deletes it`, await ocs(who, 'DELETE', BASE), 403, 'forbidden')
 			}
 			// The account language decides.
-			const userPath = '/ocs/v2.php/cloud/users/pbuser1'
+			const userPath = '/ocs/v2.php/cloud/users/zbuser1'
 			const langBefore = (await ocs(ADMIN, 'GET', userPath)).data?.language || 'en'
 			try {
 				await ocs(ADMIN, 'PUT', userPath, { key: 'language', value: 'de' })
@@ -362,7 +363,7 @@ export async function vorlagen() {
 			expect('Team Admin uploads Rechnung.docx', r, 200)
 			check('… answers name, size, sha256, modified_at, modified_by',
 				r.data?.name === 'Rechnung.docx' && r.data?.size === first.length && r.data?.sha256 === sha256(first)
-				&& ISO.test(r.data?.modified_at || '') && r.data?.modified_by === 'pbadmin' && Object.keys(r.data).length === 5, r.data)
+				&& ISO.test(r.data?.modified_at || '') && r.data?.modified_by === 'zbadmin' && Object.keys(r.data).length === 5, r.data)
 			const info = await ocs(A, 'GET', `${BASE}/info`)
 			expect('info', info, 200)
 			check('… the same as the upload answered', JSON.stringify(info.data) === JSON.stringify(r.data), [info.data, r.data])
@@ -370,13 +371,13 @@ export async function vorlagen() {
 			expect('the second Team Admin downloads it', got, 200)
 			const bytes = Buffer.from(got.data?.base64 || '', 'base64')
 			check('… the same bytes', bytes.equals(first) && got.data?.sha256 === sha256(bytes), got.data?.sha256)
-			check('… with the info fields', got.data?.name === 'Rechnung.docx' && got.data?.modified_by === 'pbadmin', isObj(got.data) ? Object.keys(got.data) : got.data)
+			check('… with the info fields', got.data?.name === 'Rechnung.docx' && got.data?.modified_by === 'zbadmin', isObj(got.data) ? Object.keys(got.data) : got.data)
 			expect('another team has none', await ocs(AA, 'GET', `${BASE}/info`), 404, 'not_found')
 
 			const r2 = await put(V, 'Rechnung V2.DOCX', second)
 			expect('the second Team Admin replaces it (.DOCX)', r2, 200)
 			const info2 = await ocs(A, 'GET', `${BASE}/info`)
-			check('info shows the new one', info2.data?.name === 'Rechnung V2.DOCX' && info2.data?.sha256 === sha256(second) && info2.data?.modified_by === 'pbverw', info2.data)
+			check('info shows the new one', info2.data?.name === 'Rechnung V2.DOCX' && info2.data?.sha256 === sha256(second) && info2.data?.modified_by === 'zbverw', info2.data)
 		}
 
 		head('Invoice template: refused')

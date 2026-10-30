@@ -45,6 +45,42 @@ final class IssueRules {
 		}
 	}
 
+	/**
+	 * 0.33.0: an invoice that bills hours (an `hours` line or a booking) of
+	 * a budget by role or by category needs a level in the team; every
+	 * `hours` line with a `level` needs a rate of that level in the
+	 * invoice's currency – on the last day of the period, else on the issue
+	 * day ({@see LevelRules::rateOf()}). The rate on the line may differ.
+	 *
+	 * @throws ApiException 422 `no_levels`, `level_rate_missing`
+	 */
+	public static function requireLevels(\stdClass $d, ?\stdClass $settings, ?\stdClass $project, ?\stdClass $budget, string $currency, string $issuedOn): void {
+		$positions = self::positionsOf($d);
+		$hours = self::bookingsOf($d) !== [] || array_filter($positions, static fn (\stdClass $p): bool => ($p->kind ?? null) === 'hours') !== [];
+		if ($hours && FeeModelRules::modelOf($budget) !== FeeModelRules::MEAN_RATE && !LevelRules::hasLevels($settings)) {
+			throw self::noLevels((string)($budget?->id ?? ''));
+		}
+		$to = $d->to ?? null;
+		$day = is_string($to) && Time::isDay($to) ? $to : $issuedOn;
+		foreach ($positions as $i => $p) {
+			$level = $p->level ?? null;
+			if (($p->kind ?? null) !== 'hours' || !is_string($level) || !LevelRules::isId($level)) {
+				continue;
+			}
+			if (LevelRules::rateOf($settings, $project, $level, $currency, $day) === null) {
+				throw (new ApiException(422, ApiException::INVALID, Message::of('Position {n}: the level {level} has no rate in {currency} on {day}; add it to the levels of the team or the project.',
+					['n' => $i + 1, 'level' => $level, 'currency' => $currency, 'day' => $day]), ['level' => $level]))
+					->code(ErrorCode::LEVEL_RATE_MISSING)->field('level');
+			}
+		}
+	}
+
+	/** 422 `no_levels`: a budget by role or by category, and the team has no level. */
+	public static function noLevels(string $budget): ApiException {
+		return (new ApiException(422, ApiException::INVALID, Message::of('Budget {budget} computes by level, and the team has no level yet; add one in the team settings.', ['budget' => $budget]),
+			['budget' => $budget]))->code(ErrorCode::NO_LEVELS)->field('levels');
+	}
+
 	/** @return list<\stdClass> */
 	public static function positionsOf(\stdClass $d): array {
 		$p = $d->positions ?? null;
@@ -166,10 +202,11 @@ final class IssueRules {
 
 	/**
 	 * The hours per booking: uid, event, start, hours and rate as sent (0
-	 * when missing), amount = hours × rate, code.
+	 * when missing), amount = hours × rate, code, and the level it is
+	 * billed in (0.33.0).
 	 *
 	 * @param list<\stdClass> $bookings
-	 * @return list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string}>
+	 * @return list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string,level:?string}>
 	 */
 	public static function hoursOf(array $bookings): array {
 		$out = [];
@@ -185,6 +222,7 @@ final class IssueRules {
 				'rate' => $rate,
 				'amount' => round($hours * $rate, 2),
 				'code' => is_string($code) && $code !== '' ? $code : null,
+				'level' => LevelRules::isId($b->level ?? null) ? (string)$b->level : null,
 			];
 		}
 		return $out;
@@ -302,7 +340,7 @@ final class IssueRules {
 	 * (status, paid, reversed_by, documents).
 	 *
 	 * @param list<\stdClass> $positions
-	 * @param list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string}> $hours
+	 * @param list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string,level?:?string}> $hours
 	 * @return array<string,mixed>
 	 */
 	public static function payload(string $key, string $number, string $issuedOn, string $issuedBy, string $dueOn, string $project, string $budget, ?string $customerKey, string $from, string $to, string $currency, VatLines $sums, \stdClass $issuer, \stdClass $customer, array $positions, array $hours, ?string $greeting, ?string $body, ?string $footer, ?string $reverses, ?string $credits, ?string $qrReference = null, ?\stdClass $layout = null): array {

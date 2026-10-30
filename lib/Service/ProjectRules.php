@@ -66,6 +66,8 @@ final class ProjectRules {
 		}
 		// 0.27.0: the rates of the levels in this project ({@see LevelRules}).
 		LevelRules::validateProject($data->{LevelRules::PROJECT_FIELD} ?? null);
+		// 0.33.0: the catalog's levels per code are derived on reading.
+		unset($data->{LevelRules::CATALOG_FIELD});
 		// 0.27.0: the project's currency (null or three letters, stored upper case);
 		// a budget's `currency` stays for older clients and follows the project's.
 		$currency = $data->{self::CURRENCY} ?? null;
@@ -191,7 +193,7 @@ final class ProjectRules {
 		}
 	}
 
-	/** One budget: currency (upper case), `rates` refused, `cap` and work package `rate` ≥ 0, `invoice_dates` days, `costs` ({@see CostRules}), `progress` 0–100, work package `addendum` bool. Also a quote's budget. */
+	/** One budget: currency (upper case), `rates` refused, `cap` and work package `rate` ≥ 0, `invoice_dates` days, `costs` ({@see CostRules}), `progress` 0–100, work package `addendum` bool, the fee fields (0.33.0). Also a quote's budget. */
 	public static function checkBudget(\stdClass $b): void {
 		// 0.24.1: the progress the Lead sets, a whole percent or null.
 		$p = $b->progress ?? null;
@@ -216,6 +218,8 @@ final class ProjectRules {
 		if ($cap !== null && !self::isRate($cap)) {
 			throw ApiException::invalid(Message::of('“{field}” must be null or a number ≥ 0.', ['field' => 'cap']));
 		}
+		// 0.33.0: the fee model, its mean rate, the cap as ceiling or price, the tolerance.
+		FeeModelRules::checkBudget($b);
 		// The planned invoice dates (forecast invoices): days, each once, at most 200.
 		$dates = $b->invoice_dates ?? null;
 		if ($dates !== null) {
@@ -265,6 +269,11 @@ final class ProjectRules {
 					}
 				}
 			}
+			// 0.33.0: the amount per milestone leads, the level presets the kind of work.
+			if ($wp instanceof \stdClass) {
+				self::checkAmount($wp, $parents);
+				LevelRules::checkId($wp->level ?? null);
+			}
 			// 0.27.0: how far the package is, a whole percent set by the Lead; null: estimated by the client.
 			if ($wp instanceof \stdClass && ($wp->progress ?? null) !== null && (!is_int($wp->progress) || $wp->progress < 0 || $wp->progress > 100)) {
 				throw ApiException::invalid('Work package “progress” must be null or a whole number from 0 to 100.');
@@ -283,6 +292,37 @@ final class ProjectRules {
 		}
 	}
 
+	/** 0.33.0: at most this many amounts per work package (one per milestone). */
+	public const AMOUNTS_MAX = 200;
+
+	/**
+	 * 0.33.0: a package's `amount` – null or at most 200 finite numbers ≥ 0
+	 * with at most two decimals; a parent has none of its own (all zero).
+	 *
+	 * @param list<string> $parents the `no` of every parent, lower case
+	 * @throws ApiException 422 (`field: amount`)
+	 */
+	private static function checkAmount(\stdClass $wp, array $parents): void {
+		$list = $wp->amount ?? null;
+		if ($list === null) {
+			return;
+		}
+		$ok = is_array($list) && array_is_list($list) && count($list) <= self::AMOUNTS_MAX;
+		foreach ($ok ? $list : [] as $v) {
+			if (!self::isRate($v) || abs($v * 100 - round($v * 100)) > 1e-6) {
+				$ok = false;
+				break;
+			}
+		}
+		if (!$ok) {
+			throw ApiException::invalid(Message::of('“amount” of a work package must be null or a list of at most {max} amounts ≥ 0 with at most two decimals.', ['max' => self::AMOUNTS_MAX]))->field('amount');
+		}
+		$no = mb_strtolower(trim((string)(is_string($wp->no ?? null) || is_int($wp->no ?? null) ? $wp->no : '')));
+		if (in_array($no, $parents, true) && array_filter($list, static fn (int|float $v): bool => $v > 0) !== []) {
+			throw ApiException::invalid('A work package with packages below has no amount of its own – move it to a package below.')->field('amount');
+		}
+	}
+
 	/** 0.27.0: at most this many addenda per budget. */
 	public const ADDENDA_MAX = 200;
 	public const ADDENDUM_STATUS = ['open', 'approved', 'rejected'];
@@ -291,7 +331,7 @@ final class ProjectRules {
 	 * 0.27.0: `addenda` null or a list of at most 200 objects – an order after
 	 * the quote. Each has an integer `no` ≥ 1 (unique), a day `date`, a
 	 * `status` from the list, a `title` (≤ 200), and exactly one target:
-	 * `package` (the `no` of a work package of this budget, with `hours` ≥ 0)
+	 * `package` (the `no` of a work package of this budget, with `hours` or – 0.33.0 – `amount` ≥ 0)
 	 * or `cost` (the `no` of a cost position, with `amount` ≥ 0). `reference`
 	 * ≤ 200 and `description` ≤ 1000 characters, both optional.
 	 *
@@ -350,8 +390,11 @@ final class ProjectRules {
 				if ((!is_string($package) && !is_int($package)) || !in_array(mb_strtolower(trim((string)$package)), $packages, true)) {
 					throw ApiException::invalid(Message::of('Addendum {n}: “package” must be the “no” of a work package of this budget.', ['n' => $n]));
 				}
-				if (!self::isRate($a->hours ?? null) || ($a->amount ?? null) !== null) {
-					throw ApiException::invalid(Message::of('Addendum {n}: a work package addendum needs “hours” ≥ 0 and no “amount”.', ['n' => $n]));
+				// 0.33.0: ordered in working time or in money, exactly one.
+				$h = $a->hours ?? null;
+				$m = $a->amount ?? null;
+				if (($h === null) === ($m === null) || !self::isRate($h ?? $m)) {
+					throw ApiException::invalid(Message::of('Addendum {n}: a work package addendum needs either “hours” ≥ 0 or “amount” ≥ 0.', ['n' => $n]));
 				}
 			} else {
 				if (!is_int($cost) || !in_array($cost, $costs, true)) {

@@ -3,21 +3,22 @@
 // Invoices (0.16.0): the kind `invoice` – Team Admins everything, a Lead
 // drafts without a number of their projects, Members nothing – the number
 // pattern in `setting/settings` and the counter of /invoices/next-number.
-// Leaves pb as it found it: invoices and projects deleted, the settings
+// Leaves zb as it found it: invoices and projects deleted, the settings
 // record back; the counters only with TS_SQL (otherwise they stay, in far
 // years of their own).
 import { ocs, sql } from './lib.mjs'
-import { A, L, RUN, U1, V, check, expect, head, keysOf, me } from './harness.mjs'
+import { RUN, check, expect, head, keysOf, me } from './harness.mjs'
+import { A, L, U1, V } from './konten.mjs'
 
 const path = (key) => `/records/invoice/${encodeURIComponent(key)}`
 const project = (id, leads, status = 'active') => ({ schema: 1, id, name: `Invoices ${id}`, codes: status === 'active' ? [`I${RUN}`] : [], status, leads })
 const invoice = (proj, more = {}) => ({
 	schema: 1, project: proj, budget: 'b1', from: '2026-09-01', to: '2026-09-30', status: 'draft', number: null,
 	bookings: [
-		{ person: 'pbuser1', uid: `7f3a-${RUN}@example.test`, start: '2026-09-02T09:00:00' },
-		{ person: 'pbuser2', uid: `8a1b-${RUN}@example.test`, start: '2026-09-03' },
+		{ person: 'zbuser1', uid: `7f3a-${RUN}@example.test`, start: '2026-09-02T09:00:00' },
+		{ person: 'zbuser2', uid: `8a1b-${RUN}@example.test`, start: '2026-09-03' },
 	],
-	note: null, created_by: 'pblead', created_on: '2026-10-13', issued_on: null, paid_on: null, ...more,
+	note: null, created_by: 'zblead', created_on: '2026-10-13', issued_on: null, paid_on: null, ...more,
 })
 const next = (who, year) => ocs(who, 'POST', '/invoices/next-number', year === undefined ? {} : { year })
 const preview = (who, year) => ocs(who, 'GET', `/invoices/next-number${year === undefined ? '' : `?year=${year}`}`)
@@ -31,7 +32,7 @@ export async function rechnungen() {
 	const K4 = `inv-${RUN}d`
 	// Far years of their own, so the test does not touch real numbering.
 	const Y = 3000 + (parseInt(RUN.slice(-4), 36) % 5000)
-	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'pb'")
+	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'zb'")
 	const counters = [`invoice:${Y}`, `invoice:${Y + 1}`, 'invoice']
 	const before = tenant === null ? null : sql(`SELECT name, last_no FROM oc_ts_counters WHERE tenant_id = ${tenant} AND name IN (${counters.map((c) => `'${c}'`).join(', ')})`)
 	const settings = await ocs(A, 'GET', '/records/setting/settings')
@@ -40,9 +41,9 @@ export async function rechnungen() {
 		{
 			const cap = await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')
 			check('capability invoices: 1', cap.data?.capabilities?.timesister?.invoices === 1, cap.data?.capabilities?.timesister)
-			expect('project led by pblead', await ocs(A, 'PUT', `/records/project/${PI}`, { version: 0, data: project(PI, ['pblead']) }), 200)
-			expect('project led by pbverw only (a quote)', await ocs(A, 'PUT', `/records/project/${PO}`, { version: 0, data: project(PO, ['pbverw'], 'draft') }), 200)
-			check('pblead leads the first', ((await me(L)).lead_of || []).some((p) => p.key === PI))
+			expect('project led by zblead', await ocs(A, 'PUT', `/records/project/${PI}`, { version: 0, data: project(PI, ['zblead']) }), 200)
+			expect('project led by zbverw only (a quote)', await ocs(A, 'PUT', `/records/project/${PO}`, { version: 0, data: project(PO, ['zbverw'], 'draft') }), 200)
+			check('zblead leads the first', ((await me(L)).lead_of || []).some((p) => p.key === PI))
 		}
 
 		head('Invoices: a Lead writes drafts of their projects')
@@ -82,7 +83,7 @@ export async function rechnungen() {
 
 		head('Invoices: who reads')
 		{
-			const r = await ocs(A, 'PUT', path(K2), { version: 0, data: invoice(PO, { status: 'issued', number: 'RE-2026-0001', issued_on: '2026-10-13', created_by: 'pbadmin' }) })
+			const r = await ocs(A, 'PUT', path(K2), { version: 0, data: invoice(PO, { status: 'issued', number: 'RE-2026-0001', issued_on: '2026-10-13', created_by: 'zbadmin' }) })
 			expect('Team Admin creates an issued invoice for the other project', r, 200)
 			expect('Lead reads their draft', await ocs(L, 'GET', path(K1)), 200)
 			expect('Lead reads the other project’s invoice', await ocs(L, 'GET', path(K2)), 403, 'forbidden')
@@ -111,7 +112,7 @@ export async function rechnungen() {
 			expect('Lead: batch with the issued one in it', b, 403, 'forbidden')
 			check('… names the write, nothing written', b.data?.index === 1 && /^Write 2: /.test(b.data?.message || '') && (await ocs(A, 'GET', path(K3))).status === 404, b.data)
 			expect('Lead: batch with a new draft', await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'invoice', key: K3, version: 0, data: invoice(PI) }] }), 200)
-			expect('Lead: batch with an invoice and a project', await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'invoice', key: K4, version: 0, data: invoice(PI) }, { kind: 'project', key: PI, version: 1, data: project(PI, ['pblead']) }] }), 403, 'forbidden')
+			expect('Lead: batch with an invoice and a project', await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'invoice', key: K4, version: 0, data: invoice(PI) }, { kind: 'project', key: PI, version: 1, data: project(PI, ['zblead']) }] }), 403, 'forbidden')
 			const rev = (await me(L)).revision
 			expect('Lead deletes their draft', await ocs(L, 'DELETE', `${path(K3)}?version=1`), 200)
 			const t = ((await ocs(L, 'GET', `/records?since=${rev}`)).data?.records || []).find((x) => x.key === K3)
@@ -124,7 +125,7 @@ export async function rechnungen() {
 		head('Invoices: a new Lead finds the project’s invoices')
 		{
 			const rev = (await me(L)).revision
-			expect('Team Admin adds pblead to the other project', await ocs(A, 'PUT', `/records/project/${PO}`, { version: 1, data: project(PO, ['pbverw', 'pblead'], 'draft') }), 200)
+			expect('Team Admin adds zblead to the other project', await ocs(A, 'PUT', `/records/project/${PO}`, { version: 1, data: project(PO, ['zbverw', 'zblead'], 'draft') }), 200)
 			const d = ((await ocs(L, 'GET', `/records?since=${rev}`)).data?.records || []).find((x) => x.key === K2)
 			check('the delta brings the invoice again (new revision, same version)', d?.version === 1 && d?.data?.number === 'RE-2026-0001', d)
 			expect('the Lead reads it now', await ocs(L, 'GET', path(K2)), 200)
@@ -220,7 +221,7 @@ export async function rechnungen() {
 			}
 			check('counters back as they were (TS_SQL)', true)
 		} else {
-			console.log(`    (without TS_SQL the counters invoice:${Y}, invoice:${Y + 1} and invoice of pb stay)`)
+			console.log(`    (without TS_SQL the counters invoice:${Y}, invoice:${Y + 1} and invoice of zb stay)`)
 		}
 		check('cleaned up', true)
 	}

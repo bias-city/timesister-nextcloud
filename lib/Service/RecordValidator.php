@@ -107,6 +107,10 @@ final class RecordValidator {
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, LevelRules::FIELD)) {
 			LevelRules::validateSettings($data->{LevelRules::FIELD});
 		}
+		// 0.33.0: the default fee model of new budgets.
+		if ($kind === 'setting' && $key === 'settings' && property_exists($data, FeeModelRules::FIELD)) {
+			FeeModelRules::validateSetting($data->{FeeModelRules::FIELD});
+		}
 		// 0.29.0: the team's own customer types.
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, CustomerRules::TYPES_FIELD)) {
 			CustomerRules::validateTypes($data->{CustomerRules::TYPES_FIELD});

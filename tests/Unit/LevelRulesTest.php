@@ -41,6 +41,9 @@ class LevelRulesTest extends TestCase {
 		self::assertStringContainsString('twice', self::outcome(fn () => LevelRules::validateSettings([self::obj('{"id":"a","name":"A"}'), self::obj('{"id":"a","name":"B"}')])));
 		self::assertStringContainsString('twice', self::outcome(fn () => LevelRules::validateSettings([self::obj('{"id":"a","name":"A","rates":[{"from":"2026-01-01","rate":1},{"from":"2026-01-01","rate":2}]}')])));
 		self::assertStringContainsString('rate', self::outcome(fn () => LevelRules::validateSettings([self::obj('{"id":"a","name":"A","rates":[{"from":"2026-01-01","rate":-1}]}')])));
+		self::assertSame('', self::outcome(fn () => LevelRules::validateSettings([self::obj('{"id":"c","name":"Kategorie C","description":"Hohe Anforderungen"}')])));
+		self::assertStringContainsString('description', self::outcome(fn () => LevelRules::validateSettings([self::obj('{"id":"c","name":"C","description":"' . str_repeat('x', 301) . '"}')])));
+		self::assertStringContainsString('description', self::outcome(fn () => LevelRules::validateSettings([self::obj('{"id":"c","name":"C","description":7}')])));
 		$many = array_map(static fn (int $i): \stdClass => self::obj('{"id":"l' . $i . '","name":"L"}'), range(1, 51));
 		self::assertStringContainsString('50', self::outcome(fn () => LevelRules::validateSettings($many)));
 	}

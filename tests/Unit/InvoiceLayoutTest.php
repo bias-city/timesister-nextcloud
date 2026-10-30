@@ -40,7 +40,7 @@ class InvoiceLayoutTest extends TestCase {
 		foreach ([
 			['"x"', '422 “layout” must be null or an object.'],
 			['{"grouping":"tree"}', '422 “layout.grouping” must be one of flat, level.'],
-			['{"appendix":["costs"]}', '422 “layout.appendix” must be a list of levels, tags, budget, aps, companies, rates.'],
+			['{"appendix":["costs"]}', '422 “layout.appendix” must be a list of levels, tags, budget, aps, companies, rates, by_level.'],
 			['{"aps":{"no":"1"}}', '422 “layout.aps” must be a list of at most 500 entries.'],
 			['{"companies":[1]}', '422 Each entry of “layout.companies” must be an object.'],
 			['{"rates":[{"level":"' . str_repeat('x', 501) . '"}]}', '422 “layout.rates” takes flat objects with texts of at most 500 characters and finite numbers.'],
@@ -72,6 +72,19 @@ class InvoiceLayoutTest extends TestCase {
 		$this->assertSame('bauleitung', $l->tags[0]->tag);
 		// A listed appendix without its table is no error (older drafts); the app shows it empty.
 		$this->assertSame('{"grouping":"flat","appendix":["tags"]}', json_encode(InvoiceLayout::check(self::obj('{"appendix":["tags"]}'))));
-		$this->assertCount(6, InvoiceLayout::APPENDIX);
+		$this->assertCount(7, InvoiceLayout::APPENDIX, '0.33.0: also by_level');
+	}
+
+	/** 0.33.0: the appendix `by_level` with its table – hours and amount per level of the team's list, form only; `categories` is gone. */
+	public function testByLevelAppendix(): void {
+		$l = InvoiceLayout::check(self::obj('{"appendix":["by_level","levels","by_level"],"by_level":[{"level":"b","name":"Kategorie B","rate":197,"hours":62.5,"amount":12312.5}]}'));
+		$this->assertNotNull($l);
+		$this->assertSame(['by_level', 'levels'], $l->appendix, 'each at most once, beside the package tree’s levels');
+		$this->assertSame('{"level":"b","name":"Kategorie B","rate":197,"hours":62.5,"amount":12312.5}', json_encode($l->by_level[0]));
+		$this->assertStringContainsString('layout.by_level', self::outcome(fn () => InvoiceLayout::check(self::obj('{"appendix":["by_level"],"by_level":[{"x":[1]}]}'))));
+		$rows = '[' . implode(',', array_fill(0, 501, '{"level":"a"}')) . ']';
+		$this->assertStringContainsString('500', self::outcome(fn () => InvoiceLayout::check(self::obj('{"by_level":' . $rows . '}'))));
+		$this->assertStringContainsString('layout.appendix', self::outcome(fn () => InvoiceLayout::check(self::obj('{"appendix":["categories"]}'))), 'the drafts’ appendix is unknown');
+		$this->assertFalse(property_exists(InvoiceLayout::check(self::obj('{"categories":[{"category":"B"}]}')) ?? new \stdClass(), 'categories'), 'its table is dropped');
 	}
 }

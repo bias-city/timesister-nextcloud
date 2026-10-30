@@ -140,6 +140,8 @@ final class IssueService {
 		$d = $r['d'];
 		$projectKey = $r['projectKey'];
 		$currency = $r['currency'];
+		// 0.33.0: a level in the team when hours of a budget by level are billed; every level of the lines has a rate in the currency.
+		IssueRules::requireLevels($d, $r['settings'], $r['project'], $r['budget'], $currency, $issuedOn);
 		$customerKey = $r['customerKey'];
 		$settings = $r['settings'];
 		$issuer = $r['issuer'];
@@ -271,7 +273,7 @@ final class IssueService {
 		return [$number, $no];
 	}
 
-	/** @param array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string} $h */
+	/** @param array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string,level:?string} $h */
 	private function insertHour(int $tenantId, int $invoiceId, array $h): void {
 		$row = new InvHour();
 		$row->setTenantId($tenantId);
@@ -283,6 +285,7 @@ final class IssueService {
 		$row->setRate(IssueRules::decimal($h['rate']));
 		$row->setAmount(IssueRules::decimal($h['amount']));
 		$row->setCode($h['code']);
+		$row->setLevel($h['level']);
 		$this->hours->insert($row);
 	}
 

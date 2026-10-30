@@ -39,6 +39,8 @@ final class InvoiceRules {
 	public const ADVANCE = 'advance';
 	public const ADVANCE_DEDUCTION = 'advance_deduction';
 	public const POSITION_KINDS = ['hours', 'flat', 'discount', 'text', 'expense_percent', 'expense_flat', 'costs', ReceiptLineRules::MARKUP, self::ADVANCE, self::ADVANCE_DEDUCTION];
+	/** 0.33.0: the level's name on an `hours` line, frozen with the positions. */
+	public const LEVEL_NAME_MAX = 60;
 	public const POSITION_TEXT_MAX = 500;
 	public const CODE_MAX = 64;
 	/** 0.27.0 (controlling): the dunning level and the payments (partial payments allowed). */
@@ -298,12 +300,42 @@ final class InvoiceRules {
 				if (!(is_int($a) || (is_float($a) && is_finite($a)))) {
 					throw ApiException::invalid('“amount” must be a number.');
 				}
+				self::checkLevel($p);
 				self::checkLineTax($p);
 				self::checkAdvance($p, $negated);
 				InvoiceLayout::checkPosition($p);
 			} catch (ApiException $e) {
-				throw ApiException::invalid(Message::of('Position {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]));
+				throw ApiException::invalid(Message::of('Position {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]))->like($e);
 			}
+		}
+	}
+
+	/**
+	 * The level of an `hours` line (0.33.0): `level` null or a level id,
+	 * `level_name` null or text of 1–60 beside a `level`; a line with a
+	 * level is the hours of one level at one rate and needs its `rate`
+	 * (`amount_without_rate`). Other kinds name no level.
+	 */
+	private static function checkLevel(\stdClass $p): void {
+		$level = $p->level ?? null;
+		$name = $p->level_name ?? null;
+		if (($p->kind ?? null) !== 'hours') {
+			if ($level !== null || $name !== null) {
+				throw ApiException::invalid('Only an “hours” line names a level.')->field($level !== null ? 'level' : 'level_name');
+			}
+			return;
+		}
+		LevelRules::checkId($level);
+		if ($name !== null) {
+			if ($level === null) {
+				throw ApiException::invalid('“level_name” goes only beside a “level”.')->field('level_name');
+			}
+			if (!is_string($name) || trim($name) === '' || mb_strlen($name) > self::LEVEL_NAME_MAX || !mb_check_encoding($name, 'UTF-8') || preg_match(self::CONTROL, $name) === 1) {
+				throw ApiException::invalid(Message::of('“{field}” must be text of 1 to {max} characters.', ['field' => 'level_name', 'max' => self::LEVEL_NAME_MAX]))->field('level_name');
+			}
+		}
+		if ($level !== null && ($p->rate ?? null) === null) {
+			throw ApiException::invalid('A line with a level needs its “rate”: the amount is hours × rate.')->code(ErrorCode::AMOUNT_WITHOUT_RATE)->field('rate');
 		}
 	}
 
@@ -414,8 +446,10 @@ final class InvoiceRules {
 					}
 				}
 				self::text($b->code ?? null, 'code', self::CODE_MAX, self::CONTROL);
+				// 0.33.0: the level the booking is billed in.
+				LevelRules::checkId($b->level ?? null);
 			} catch (ApiException $e) {
-				throw ApiException::invalid(Message::of('Booking {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]));
+				throw ApiException::invalid(Message::of('Booking {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]))->like($e);
 			}
 		}
 	}

@@ -237,7 +237,11 @@ class ProjectRulesTest extends TestCase {
 		$this->assertStringContainsString('exactly one', $bud('[{"no":1,"date":"2026-10-20","hours":1}]'));
 		$this->assertStringContainsString('exactly one', $bud('[{"no":1,"date":"2026-10-20","package":"3","cost":1,"hours":1}]'));
 		$this->assertStringContainsString('“package”', $bud('[{"no":1,"date":"2026-10-20","package":"9","hours":1}]'));
-		$this->assertStringContainsString('“hours”', $bud('[{"no":1,"date":"2026-10-20","package":"3","amount":5}]'));
+		// 0.33.0: a package addendum in money or in hours, exactly one.
+		$this->assertSame('', $bud('[{"no":1,"date":"2026-10-20","package":"3","amount":5}]'));
+		$this->assertStringContainsString('either “hours” ≥ 0 or “amount” ≥ 0', $bud('[{"no":1,"date":"2026-10-20","package":"3","amount":5,"hours":1}]'));
+		$this->assertStringContainsString('either “hours” ≥ 0 or “amount” ≥ 0', $bud('[{"no":1,"date":"2026-10-20","package":"3"}]'));
+		$this->assertStringContainsString('either “hours” ≥ 0 or “amount” ≥ 0', $bud('[{"no":1,"date":"2026-10-20","package":"3","amount":-5}]'));
 		$this->assertStringContainsString('“cost”', $bud('[{"no":1,"date":"2026-10-20","cost":7,"amount":5}]'));
 		$this->assertStringContainsString('“amount”', $bud('[{"no":1,"date":"2026-10-20","cost":1,"hours":5}]'));
 		$this->assertStringContainsString('“title”', $bud('[{"no":1,"date":"2026-10-20","package":"3","hours":1,"title":"' . str_repeat('x', 201) . '"}]'));

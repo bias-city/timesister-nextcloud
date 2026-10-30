@@ -7,10 +7,11 @@
 // everything; CSV and DATEV per rate. What the server's PDF and embedded
 // XML showed (both rates, the block, VATEX-EU-79-C) is the Mac app's now.
 // Then `costs[]` in a budget: valid, and 422 per field; the module switch.
-// Leaves pb as it found it (settings, team settings, project, customer);
+// Leaves zb as it found it (settings, team settings, project, customer);
 // the frozen rows only with TS_SQL, the ledger stays.
 import { ocs, sql } from './lib.mjs'
-import { A, RUN, check, expect, festschreiben, head, isObj, me, raw, stornieren } from './harness.mjs'
+import { RUN, check, expect, festschreiben, head, isObj, me, raw, stornieren } from './harness.mjs'
+import { A } from './konten.mjs'
 
 const path = (key) => `/records/invoice/${encodeURIComponent(key)}`
 const ipath = (key) => `/invoices/${encodeURIComponent(key)}`
@@ -25,7 +26,7 @@ export async function kosten() {
 	const made = [K1]
 	const Y = 3000 + (parseInt(RUN.slice(-4), 36) % 5000) + 11
 	const ISSUED_ON = `${Y}-04-15`
-	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'pb'")
+	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'zb'")
 	const settings = await ocs(A, 'GET', '/records/setting/settings')
 	const base = settings.status === 200 ? settings.data.data : {}
 	let settingsVersion = settings.status === 200 ? settings.data.version : 0
@@ -43,7 +44,7 @@ export async function kosten() {
 		{ no: 3, name: 'Spesen', kind: 'expense', rule: 'receipts', cap: 1500, mode: 'pass_through', description: 'nach Beleg' },
 		{ no: 4, name: 'Gebühren', kind: 'third_party', cap: 5000, mode: 'pass_through' },
 	]
-	const project = (budgetCosts) => ({ schema: 1, id: PF, name: `Kosten ${RUN}`, codes: [CODE], status: 'active', leads: ['pblead'], customer: CUST, budgets: [{ id: 'b1', name: 'Phase 1', currency: 'CHF', costs: budgetCosts }] })
+	const project = (budgetCosts) => ({ schema: 1, id: PF, name: `Kosten ${RUN}`, codes: [CODE], status: 'active', leads: ['zblead'], customer: CUST, budgets: [{ id: 'b1', name: 'Phase 1', currency: 'CHF', costs: budgetCosts }] })
 	const positions = [
 		{ kind: 'hours', text: 'Planung', hours: 10, rate: 150, amount: 1500 },
 		{ kind: 'expense_flat', text: 'Druckkosten', amount: 200, vat: 2.6, cost: 2 },
@@ -52,7 +53,7 @@ export async function kosten() {
 	]
 	const draft = (more = {}) => ({
 		schema: 1, project: PF, budget: 'b1', from: `${Y}-04-01`, to: `${Y}-04-30`, status: 'draft', number: null, bookings: [], positions,
-		greeting: 'Guten Tag', body: null, footer: null, note: null, created_by: 'pbadmin', created_on: ISSUED_ON, issued_on: null, paid_on: null, ...more,
+		greeting: 'Guten Tag', body: null, footer: null, note: null, created_by: 'zbadmin', created_on: ISSUED_ON, issued_on: null, paid_on: null, ...more,
 	})
 	try {
 		head('Costs: capabilities, module, cost positions')
@@ -170,6 +171,6 @@ export async function kosten() {
 		} else if (cur.status === 200) {
 			await ocs(A, 'DELETE', `/records/setting/settings?version=${cur.data.version}`)
 		}
-		check('pb left as found', isObj(await me(A)))
+		check('zb left as found', isObj(await me(A)))
 	}
 }

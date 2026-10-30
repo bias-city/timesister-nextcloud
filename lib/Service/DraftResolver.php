@@ -49,7 +49,7 @@ final class DraftResolver {
 	/**
 	 * The draft with everything resolved; throws what issuing would throw.
 	 *
-	 * @return array{record:Record,d:\stdClass,project:\stdClass,projectKey:string,budget:\stdClass,currency:string,customerKey:string,customer:\stdClass,customerBlock:\stdClass,settings:?\stdClass,issuer:\stdClass,vat:float,bookings:list<\stdClass>,positions:list<\stdClass>,sums:VatLines,hours:list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string}>,receipts:array<string,\stdClass>}
+	 * @return array{record:Record,d:\stdClass,project:\stdClass,projectKey:string,budget:\stdClass,currency:string,customerKey:string,customer:\stdClass,customerBlock:\stdClass,settings:?\stdClass,issuer:\stdClass,vat:float,bookings:list<\stdClass>,positions:list<\stdClass>,sums:VatLines,hours:list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string,level:?string}>,receipts:array<string,\stdClass>}
 	 */
 	public function resolve(int $tenantId, string $key): array {
 		$h = $this->head($tenantId, $key);

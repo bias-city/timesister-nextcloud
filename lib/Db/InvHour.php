@@ -33,6 +33,8 @@ use OCP\DB\Types;
  * @method void setAmount(string $amount)
  * @method string|null getCode()
  * @method void setCode(?string $code)
+ * @method string|null getLevel()
+ * @method void setLevel(?string $level)
  */
 final class InvHour extends Entity {
 	protected int $tenantId = 0;
@@ -44,6 +46,8 @@ final class InvHour extends Entity {
 	protected string $rate = '0';
 	protected string $amount = '0';
 	protected ?string $code = null;
+	/** 0.33.0: the level the booking was billed in. */
+	protected ?string $level = null;
 
 	public function __construct() {
 		$this->addType('tenantId', Types::INTEGER);
@@ -55,10 +59,17 @@ final class InvHour extends Entity {
 		$this->addType('rate', Types::DECIMAL);
 		$this->addType('amount', Types::DECIMAL);
 		$this->addType('code', Types::STRING);
+		$this->addType('level', Types::STRING);
 	}
 
-	/** As in `GET /invoices/{key}/fixed`. @return array<string,mixed> */
+	/**
+	 * As in `GET /invoices/{key}/fixed`; `level` only when set, so the
+	 * ledger payload of an invoice without levels stays as before 0.33.0.
+	 *
+	 * @return array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string,level?:string}
+	 */
 	public function present(): array {
+		$l = $this->getLevel();
 		return [
 			'uid' => $this->getUid(),
 			'event_uid' => $this->getEventUid(),
@@ -67,6 +78,6 @@ final class InvHour extends Entity {
 			'rate' => (float)$this->getRate(),
 			'amount' => (float)$this->getAmount(),
 			'code' => $this->getCode(),
-		];
+		] + ($l === null ? [] : ['level' => $l]);
 	}
 }

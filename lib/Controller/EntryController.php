@@ -45,7 +45,7 @@ final class EntryController extends BaseController {
 		return $this->run(fn () => $this->entries->statusList($this->tenants->current()));
 	}
 
-	/** POST /entries/correct – Team Admins and Leads: title, code, billable, level of bookings, written into the events (0.27.0). */
+	/** POST /entries/correct – Team Admins and Leads: title, code, billable, level of bookings, written into the events (0.27.0); the person the level of their own in a budget by category (0.33.0). */
 	#[ApiRoute(verb: 'POST', url: '/api/v1/entries/correct')]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]

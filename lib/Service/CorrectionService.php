@@ -25,7 +25,8 @@ use Psr\Log\LoggerInterface;
 /**
  * Corrections of bookings (0.27.0): the one exception to «the server never
  * writes into a named calendar». A Team Admin or the project's Lead sends
- * title, code, billable and/or level for a booking; the app rewrites the
+ * title, code, billable and/or level for a booking – the person the level
+ * of their own in a budget by category (0.33.0) –; the app rewrites the
  * calendar object through the dav backend (the same for own and foreign
  * bookings), stores it in the book at once and notes who did it when.
  *
@@ -48,6 +49,8 @@ final class CorrectionService {
 
 	/** @var array<int,array<int,array{key:string,version:int,data:\stdClass}>> live correction records per team, this request */
 	private array $cache = [];
+	/** @var array<int,list<\stdClass>> the live projects per team, this request (the person's right on a level) */
+	private array $projects = [];
 	private bool $reapplying = false;
 
 	public function __construct(
@@ -72,26 +75,53 @@ final class CorrectionService {
 	 * @return array{results:list<array<string,mixed>>}
 	 */
 	public function correct(Membership $m, \stdClass $body): array {
-		if ($m->role !== Role::LEAD && !$m->manages()) {
-			throw ApiException::forbidden('Only Team Admins and the project’s Leads correct bookings.');
-		}
 		$p = CorrectionRules::parseBody($body);
+		$personal = CorrectionRules::levelOnly($p['change']);
+		if ($m->role !== Role::LEAD && !$m->manages()) {
+			// 0.33.0: a member corrects the level of their own bookings in a budget by category, nothing else –
+			// every booking checked before any is written; one not in the book answers not_found.
+			if (!$personal) {
+				throw CorrectionRules::leadOnly(array_values(array_intersect(array_keys($p['change']), CorrectionRules::LEAD_FIELDS))[0] ?? 'level');
+			}
+			foreach ($p['entries'] as $t) {
+				if ($t['uid'] !== $m->uid) {
+					throw CorrectionRules::leadOnly('uid');
+				}
+			}
+			foreach ($p['entries'] as $t) {
+				$e = $this->entries->findByEvent($m->tenantId, $t['uid'], $t['event_uid']);
+				if ($e !== null && !$this->levelFree($m->tenantId, $e, null)) {
+					throw CorrectionRules::leadOnly('level');
+				}
+			}
+		}
 		$led = $m->role === Role::LEAD ? $this->service->ledCodesOf($m) : [];
 		$backend = $this->backend();
 		$results = [];
 		foreach ($p['entries'] as $t) {
-			$results[] = $this->one($m, $led, $backend, $t['uid'], $t['event_uid'], $p['change'], null);
+			$results[] = $this->one($m, $led, $backend, $t['uid'], $t['event_uid'], $p['change'], null, $personal);
 		}
 		return ['results' => $results];
 	}
+
 
 	/**
 	 * The record `correction`, inside the records transaction (K-Offline):
 	 * rights and lock checked, the target state written into the event, the
 	 * outcome (`status`, `message`, `by`, `at`, `etag`, `codes`) in the data
-	 * that gets stored. Members are refused before ({@see RecordRights}).
+	 * that gets stored. A member's write is checked before
+	 * ({@see CorrectionRules::requirePersonal()}, {@see requireLevelRight()}); `$before` is the
+	 * stored record's data. The person's own write (level only against the
+	 * stored record) keeps the Lead's fields it leaves out.
+	 *
+	 * @param list<string> $ownKeys
 	 */
-	public function prepare(Membership $m, string $key, \stdClass $data): \stdClass {
+	public function prepare(Membership $m, string $key, \stdClass $data, ?\stdClass $before = null, array $ownKeys = []): \stdClass {
+		$stored = CorrectionRules::appliedOnly($before);
+		$personal = in_array($data->person ?? null, $ownKeys, true) && CorrectionRules::otherThanLevel($stored, $data) === null;
+		if ($personal && !$m->manages()) {
+			$data = CorrectionRules::keepLeadFields($stored, $data);
+		}
 		$change = CorrectionRules::changeOf($data);
 		$recurrence = CorrectionRules::recurrenceOf($data);
 		$person = (string)$data->person;
@@ -108,7 +138,7 @@ final class CorrectionService {
 		// record a second time in this transaction - duplicate version in the history, 500).
 		$this->reapplying = true;
 		try {
-			$r = $this->one($m, $led, $this->backend(), $uid, $eventUid, $change, $recurrence);
+			$r = $this->one($m, $led, $this->backend(), $uid, $eventUid, $change, $recurrence, $personal);
 		} finally {
 			$this->reapplying = false;
 		}
@@ -116,6 +146,39 @@ final class CorrectionService {
 			? ['status' => CorrectionRules::APPLIED, 'etag' => $r['etag'] ?? '', 'codes' => $r['codes'] ?? []]
 			: ['status' => (string)$r['status'], 'message' => (string)($r['message'] ?? '')];
 		return CorrectionRules::withServerFields($data, $m->uid, $now, $fields);
+	}
+
+	/**
+	 * The person's right on the level of their own booking (0.33.0, the
+	 * record): the booking falls into a budget in the model `category`, by
+	 * its codes and day in the book and the stored projects. A booking not
+	 * in the book does not block (the record answers `not_found`).
+	 *
+	 * @throws ApiException 403 `correction_lead_only` (`field: level`)
+	 */
+	public function requireLevelRight(Membership $m, string $person, string $eventUid, ?string $recurrence): void {
+		[, $entry] = $this->entryOf($m->tenantId, $person, $eventUid);
+		if ($entry !== null && !$this->levelFree($m->tenantId, $entry, $recurrence)) {
+			throw CorrectionRules::leadOnly('level');
+		}
+	}
+
+	/** Does the booking fall into a budget in the model `category` (every code, on its day)? */
+	private function levelFree(int $tenantId, Entry $e, ?string $recurrence): bool {
+		$day = CorrectionRules::bookingDay($e->getFirstStart(), $recurrence);
+		if ($day === null) {
+			return false;
+		}
+		if (!isset($this->projects[$tenantId])) {
+			$this->projects[$tenantId] = [];
+			foreach ($this->records->findLiveByKind($tenantId, 'project') as $r) {
+				$d = InvoiceRules::decode($r->getData());
+				if ($d !== null) {
+					$this->projects[$tenantId][] = $d;
+				}
+			}
+		}
+		return FeeModelRules::inCategoryModel($this->projects[$tenantId], $e->codeList(), $day);
 	}
 
 	/**
@@ -144,17 +207,22 @@ final class CorrectionService {
 	}
 
 	/**
+	 * `$personal`: the person's own correction of the level (0.33.0) –
+	 * allowed on a booking of the caller's own account in any role when it
+	 * falls into a budget in the model `category`.
+	 *
 	 * @param list<string> $led
 	 * @param array<string,mixed> $change
 	 * @return array<string,mixed>
 	 */
-	private function one(Membership $m, array $led, ?CalDavBackend $backend, string $uid, string $eventUid, array $change, ?string $recurrence): array {
+	private function one(Membership $m, array $led, ?CalDavBackend $backend, string $uid, string $eventUid, array $change, ?string $recurrence, bool $personal = false): array {
 		$r = ['uid' => $uid, 'event_uid' => $eventUid];
 		$e = $this->entries->findByEvent($m->tenantId, $uid, $eventUid);
 		if ($e === null) {
 			return $r + ['status' => 'not_found', 'message' => Message::of('Booking {n} is not in the book.', ['n' => $eventUid])->text()];
 		}
-		if (!CorrectionRules::allowed($m->role, $led, $e->codeList(), isset($change['code']) ? (string)$change['code'] : null)) {
+		if (!CorrectionRules::allowed($m->role, $led, $e->codeList(), isset($change['code']) ? (string)$change['code'] : null)
+			&& !($personal && $uid === $m->uid && $this->levelFree($m->tenantId, $e, $recurrence))) {
 			return $r + ['status' => 'forbidden', 'message' => Message::of('Only Team Admins and the project’s Leads correct bookings.')->text()];
 		}
 		$lock = CorrectionRules::lockedBy($this->hours->billingsOf($m->tenantId, $uid, $eventUid), $this->service->billed($e));

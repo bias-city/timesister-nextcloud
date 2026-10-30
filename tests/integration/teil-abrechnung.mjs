@@ -4,10 +4,11 @@
 // its rights per person, the feed address only for those who may. Since
 // 0.14.0 only Team Admins write and read others' marks and see feeds; since
 // 0.17.0 there is no shares matrix (the server reads the feeds itself).
-// Leaves pb as it found it: the marks deleted, the external removed.
+// Leaves zb as it found it: the marks deleted, the external removed.
 import { createHash } from 'node:crypto'
 import { ocs } from './lib.mjs'
-import { A, L, RUN, U1, U2, V, check, expect, head } from './harness.mjs'
+import { RUN, check, expect, head } from './harness.mjs'
+import { A, L, U1, U2, V } from './konten.mjs'
 
 const key = (person, uid) => `${person}+${createHash('sha256').update(uid).digest('hex').slice(0, 32)}`
 const mark = (person, uid, more = {}) => ({ person, uid, billed_on: '2026-09-30', ...more })
@@ -18,8 +19,8 @@ export async function abrechnung() {
 	const uid1 = `u1-${RUN}@example.test`
 	const uid2 = `u2-${RUN}@example.test`
 	const uidX = `ux-${RUN}@example.test`
-	const k1 = key('pbuser1', uid1)
-	const k2 = key('pbuser1', uid2)
+	const k1 = key('zbuser1', uid1)
+	const k2 = key('zbuser1', uid2)
 	const kX = key(EXT, uidX)
 	try {
 		head('Capability and the external person')
@@ -30,7 +31,7 @@ export async function abrechnung() {
 			expect('Team Admin creates an external with a feed', r, 200)
 			// 0.17.0: the shares matrix is gone – no route any more.
 			expect('GET /team/access is gone', await ocs(A, 'GET', '/team/access'), 404)
-			expect('PUT /team/access/{viewer}/{owner} is gone', await ocs(A, 'PUT', `/team/access/pbadmin/${EXT}`, { level: 'view' }), 404)
+			expect('PUT /team/access/{viewer}/{owner} is gone', await ocs(A, 'PUT', `/team/access/zbadmin/${EXT}`, { level: 'view' }), 404)
 			expect('POST /team/access/remind is gone', await ocs(A, 'POST', '/team/access/remind', {}), 404)
 		}
 
@@ -47,22 +48,22 @@ export async function abrechnung() {
 
 		head('Billing marks: write')
 		{
-			expect('malformed key', await ocs(A, 'PUT', '/records/billing/pbuser1', { version: 0, data: mark('pbuser1', uid1) }), 422, 'invalid')
-			expect('key does not match the data', await ocs(A, 'PUT', `/records/billing/${k1}`, { version: 0, data: mark('pbuser1', uid2) }), 422, 'invalid')
-			expect('no date', await ocs(A, 'PUT', `/records/billing/${k1}`, { version: 0, data: { person: 'pbuser1', uid: uid1 } }), 422, 'invalid')
-			const r = await ocs(A, 'PUT', `/records/billing/${k1}`, { version: 0, data: mark('pbuser1', uid1, { by: 'pbadmin', checksum: 'abc', source: 'manual', external_id: 'bx-17', document: 'R-2026-001' }) })
-			expect('Team Admin bills an event of pbuser1', r, 200)
+			expect('malformed key', await ocs(A, 'PUT', '/records/billing/zbuser1', { version: 0, data: mark('zbuser1', uid1) }), 422, 'invalid')
+			expect('key does not match the data', await ocs(A, 'PUT', `/records/billing/${k1}`, { version: 0, data: mark('zbuser1', uid2) }), 422, 'invalid')
+			expect('no date', await ocs(A, 'PUT', `/records/billing/${k1}`, { version: 0, data: { person: 'zbuser1', uid: uid1 } }), 422, 'invalid')
+			const r = await ocs(A, 'PUT', `/records/billing/${k1}`, { version: 0, data: mark('zbuser1', uid1, { by: 'zbadmin', checksum: 'abc', source: 'manual', external_id: 'bx-17', document: 'R-2026-001' }) })
+			expect('Team Admin bills an event of zbuser1', r, 200)
 			check('the mark comes back with the carried-through fields', r.data?.kind === 'billing' && r.data?.data?.source === 'manual' && r.data?.data?.external_id === 'bx-17' && r.data?.data?.document === 'R-2026-001', r.data?.data)
-			expect('User bills their own event', await ocs(U1, 'PUT', `/records/billing/${k2}`, { version: 0, data: mark('pbuser1', uid2) }), 403, 'forbidden')
+			expect('User bills their own event', await ocs(U1, 'PUT', `/records/billing/${k2}`, { version: 0, data: mark('zbuser1', uid2) }), 403, 'forbidden')
 			// 0.14.0: billing marks are written by Team Admins only.
-			expect('Lead bills pbuser1', await ocs(L, 'PUT', `/records/billing/${k2}`, { version: 0, data: mark('pbuser1', uid2) }), 403, 'forbidden')
+			expect('Lead bills zbuser1', await ocs(L, 'PUT', `/records/billing/${k2}`, { version: 0, data: mark('zbuser1', uid2) }), 403, 'forbidden')
 			expect('Lead bills the external', await ocs(L, 'PUT', `/records/billing/${kX}`, { version: 0, data: mark(EXT, uidX) }), 403, 'forbidden')
-			expect('Lead: batch with billing marks only', await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'billing', key: k2, version: 0, data: mark('pbuser1', uid2, { by: 'pblead' }) }] }), 403, 'forbidden')
-			expect('second Team Admin bills pbuser1', await ocs(V, 'PUT', `/records/billing/${k2}`, { version: 0, data: mark('pbuser1', uid2) }), 200)
+			expect('Lead: batch with billing marks only', await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'billing', key: k2, version: 0, data: mark('zbuser1', uid2, { by: 'zblead' }) }] }), 403, 'forbidden')
+			expect('second Team Admin bills zbuser1', await ocs(V, 'PUT', `/records/billing/${k2}`, { version: 0, data: mark('zbuser1', uid2) }), 200)
 			expect('Team Admin bills the external', await ocs(A, 'PUT', `/records/billing/${kX}`, { version: 0, data: mark(EXT, uidX) }), 200)
-			expect('Team Admin: batch with billing marks', await ocs(V, 'POST', '/records/batch', { writes: [{ kind: 'billing', key: k2, version: 1, data: mark('pbuser1', uid2, { by: 'pbverw' }) }] }), 200)
-			expect('Lead: batch with a project in it', await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'billing', key: k2, version: 2, data: mark('pbuser1', uid2) }, { kind: 'project', key: 'P', version: 0, data: { id: 'P' } }] }), 403, 'forbidden')
-			expect('User: batch with a mark of someone else', await ocs(U1, 'POST', '/records/batch', { writes: [{ kind: 'billing', key: key('pbuser2', uid1), version: 0, data: mark('pbuser2', uid1) }] }), 403, 'forbidden')
+			expect('Team Admin: batch with billing marks', await ocs(V, 'POST', '/records/batch', { writes: [{ kind: 'billing', key: k2, version: 1, data: mark('zbuser1', uid2, { by: 'zbverw' }) }] }), 200)
+			expect('Lead: batch with a project in it', await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'billing', key: k2, version: 2, data: mark('zbuser1', uid2) }, { kind: 'project', key: 'P', version: 0, data: { id: 'P' } }] }), 403, 'forbidden')
+			expect('User: batch with a mark of someone else', await ocs(U1, 'POST', '/records/batch', { writes: [{ kind: 'billing', key: key('zbuser2', uid1), version: 0, data: mark('zbuser2', uid1) }] }), 403, 'forbidden')
 		}
 
 		head('Billing marks: read, history, undo')
@@ -74,11 +75,11 @@ export async function abrechnung() {
 			check('delta of the Lead: none of them', !lk.has(k1) && !lk.has(k2) && !lk.has(kX), [...lk].filter((k) => k.includes(RUN)))
 			const all = await ocs(U1, 'GET', '/records')
 			const keys = new Set((all.data?.records || []).filter((x) => x.kind === 'billing').map((x) => x.key))
-			check('delta of pbuser1: own marks, not the external’s', keys.has(k1) && keys.has(k2) && !keys.has(kX), [...keys].filter((k) => k.includes(RUN)))
+			check('delta of zbuser1: own marks, not the external’s', keys.has(k1) && keys.has(k2) && !keys.has(kX), [...keys].filter((k) => k.includes(RUN)))
 			const u2 = new Set(((await ocs(U2, 'GET', '/records')).data?.records || []).filter((x) => x.kind === 'billing').map((x) => x.key))
-			check('delta of pbuser2: none of them', !u2.has(k1) && !u2.has(k2) && !u2.has(kX))
+			check('delta of zbuser2: none of them', !u2.has(k1) && !u2.has(k2) && !u2.has(kX))
 			const h = await ocs(U1, 'GET', `/records/billing/${k2}/history`)
-			check('history for the person: both versions, who did what', h.status === 200 && h.data?.length === 2 && h.data?.[0]?.modified_by === 'pbverw', h.data)
+			check('history for the person: both versions, who did what', h.status === 200 && h.data?.length === 2 && h.data?.[0]?.modified_by === 'zbverw', h.data)
 			expect('history for another User', await ocs(U2, 'GET', `/records/billing/${k2}/history`), 403, 'forbidden')
 			expect('User undoes', await ocs(U1, 'DELETE', `/records/billing/${k1}?version=1`), 403, 'forbidden')
 			expect('Lead undoes', await ocs(L, 'DELETE', `/records/billing/${k1}?version=1`), 403, 'forbidden')
