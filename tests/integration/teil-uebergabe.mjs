@@ -8,10 +8,11 @@
 // client writes and reversal refused, the revocation freeing everything
 // again, and the setting back. Needs the booking in the book (listener or
 // TS_OCC); without it the hand-over checks are skipped.
-// Leaves pb as it found it; approved receipts, the invoice records and
+// Leaves zb as it found it; approved receipts, the invoice records and
 // counters go only with TS_SQL, the ledger stays (append-only).
 import { ADMIN, API, NC, dav, ensureTimeCalendar, deleteEvent, ocs, putEvent, runJob, sql } from './lib.mjs'
-import { A, L, RUN, U1, check, expect, head, isObj, me, sha256 } from './harness.mjs'
+import { RUN, check, expect, head, isObj, me, sha256 } from './harness.mjs'
+import { A, L, U1 } from './konten.mjs'
 
 const rec = (kind, key) => `/records/${kind}/${encodeURIComponent(key)}`
 const ipath = (key) => `/invoices/${encodeURIComponent(key)}`
@@ -60,7 +61,7 @@ export async function uebergabe() {
 	const NUMBER = `BX-${RUN}-1`
 	const Y = 3000 + (parseInt(RUN.slice(-4), 36) % 5000) + 17
 	const ISSUED_ON = `${Y}-03-20`
-	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'pb'")
+	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'zb'")
 	const settings = await ocs(A, 'GET', rec('setting', 'settings'))
 	const base = settings.status === 200 ? settings.data.data : {}
 	const teamBefore = (await ocs(A, 'GET', '/team')).data
@@ -69,9 +70,9 @@ export async function uebergabe() {
 	const get = async (kind, key) => ocs(A, 'GET', rec(kind, key))
 	const draft = (more = {}) => ({
 		schema: 1, project: PU, budget: 'b1', from: `${Y}-03-01`, to: `${Y}-03-31`, status: 'draft', number: null,
-		bookings: [{ person: 'pbuser1', uid: EV1, start: `${Y}-03-12T08:00:00`, hours: 1, rate: 150, code: CODE }],
-		positions: [{ kind: 'hours', text: 'Site visit', person: 'pbuser1', hours: 1, rate: 150, amount: 150 }],
-		note: null, created_by: 'pbadmin', created_on: `${Y}-03-20`, issued_on: null, paid_on: null, ...more,
+		bookings: [{ person: 'zbuser1', uid: EV1, start: `${Y}-03-12T08:00:00`, hours: 1, rate: 150, code: CODE }],
+		positions: [{ kind: 'hours', text: 'Site visit', person: 'zbuser1', hours: 1, rate: 150, amount: 150 }],
+		note: null, created_by: 'zbadmin', created_on: `${Y}-03-20`, issued_on: null, paid_on: null, ...more,
 	})
 	try {
 		head('Hand-over: setup')
@@ -83,13 +84,13 @@ export async function uebergabe() {
 			const s = await ocs(A, 'PUT', rec('setting', 'settings'), { version: settings.status === 200 ? settings.data.version : 0, data: { ...base, modules: { ...(base.modules || {}), costs: true } } })
 			expect('settings: costs on', s, 200)
 			expect('customer', await ocs(A, 'PUT', rec('customer', CU), { version: 0, data: { schema: 1, id: CU, name: `Kunde Übergabe ${RUN}`, street: 'Platz 1', postcode: '4001', city: 'Basel', country: 'CH' } }), 200)
-			expect('project with budget b1 and a cost position, led by pblead', await ocs(A, 'PUT', rec('project', PU), { version: 0, data: { schema: 1, id: PU, name: `Übergabe ${RUN}`, codes: [CODE], status: 'active', leads: ['pblead'], customer: CU,
+			expect('project with budget b1 and a cost position, led by zblead', await ocs(A, 'PUT', rec('project', PU), { version: 0, data: { schema: 1, id: PU, name: `Übergabe ${RUN}`, codes: [CODE], status: 'active', leads: ['zblead'], customer: CU,
 				budgets: [{ id: 'b1', name: 'Phase 1', currency: 'CHF', costs: [{ no: 1, name: 'Spesen', kind: 'expense', rule: 'receipts', cap: 1500, mode: 'rebill' }] }] } }), 200)
 			const r = await ocs(A, 'PUT', rec('receipt', RU), { version: 0, data: { schema: 1, kind: 'trust', date: `${Y}-03-10`, supplier: 'Hotel', text: 'Night', net: 100, vat_rate: null, vat: 0, gross: 100,
 				project: PU, budget: 'b1', cost: 1, paid_by: 'company', person: null, reimburse: false, note: null } })
 			check('a trust receipt on the budget, approved by the Team Admin’s write', r.status === 200 && r.data?.data?.status === 'approved', r.data)
-			check('pbuser1’s time calendar exists and is named', (await ensureTimeCalendar(U1)) && (await ocs(U1, 'PUT', '/me/time-calendar', { calendar_url: 'zeit-pbuser1' })).status === 200)
-			check('pbuser1 books an hour on the project', (await putEvent(U1, EV1, [`DTSTART:${Y}0312T080000Z`, `DTEND:${Y}0312T090000Z`, `SUMMARY:Site visit #${CODE}`])) === 201)
+			check('zbuser1’s time calendar exists and is named', (await ensureTimeCalendar(U1)) && (await ocs(U1, 'PUT', '/me/time-calendar', { calendar_url: 'zeit-zbuser1' })).status === 200)
+			check('zbuser1 books an hour on the project', (await putEvent(U1, EV1, [`DTSTART:${Y}0312T080000Z`, `DTEND:${Y}0312T090000Z`, `SUMMARY:Site visit #${CODE}`])) === 201)
 			await sleep(500)
 			if (!(await inBook(A, EV1))) {
 				runJob('EntryReader')
@@ -114,14 +115,14 @@ export async function uebergabe() {
 			await bad('archive_pdf not a bool (0.24.1)', { mode: 'external', system: 'bexio', archive_pdf: 'yes' }, '“invoicing_mode.archive_pdf” must be true, false or null.')
 			expect('a Lead sets it', await ocs(L, 'PUT', '/team/settings', { invoicing_mode: null }), 403, 'forbidden')
 			// The Nextcloud admin through /admin/teams, as the other settings.
-			const pb = ((await ocs(ADMIN, 'GET', '/admin/teams')).data || []).find((t) => t.slug === 'pb')
-			if (pb) {
-				const team = { name: pb.name, slug: pb.slug, groups: pb.groups }
-				expect('/admin/teams: external without system', await ocs(ADMIN, 'PUT', `/admin/teams/${pb.id}`, { ...team, settings: { invoicing_mode: { mode: 'external' } } }), 422, 'invalid')
-				const a = await ocs(ADMIN, 'PUT', `/admin/teams/${pb.id}`, { ...team, settings: { invoicing_mode: { mode: 'timesister', system: 'sevdesk', copy: 'manual' } } })
+			const zb = ((await ocs(ADMIN, 'GET', '/admin/teams')).data || []).find((t) => t.slug === 'zb')
+			if (zb) {
+				const team = { name: zb.name, slug: zb.slug, groups: zb.groups }
+				expect('/admin/teams: external without system', await ocs(ADMIN, 'PUT', `/admin/teams/${zb.id}`, { ...team, settings: { invoicing_mode: { mode: 'external' } } }), 422, 'invalid')
+				const a = await ocs(ADMIN, 'PUT', `/admin/teams/${zb.id}`, { ...team, settings: { invoicing_mode: { mode: 'timesister', system: 'sevdesk', copy: 'manual' } } })
 				check('/admin/teams: case 2 with sevdesk, shown in the answer', a.status === 200 && JSON.stringify(a.data?.settings?.invoicing_mode) === '{"mode":"timesister","system":"sevdesk","copy":"manual"}', [a.status, a.text.slice(0, 300)])
 			} else {
-				check('/admin/teams lists pb', false)
+				check('/admin/teams lists zb', false)
 			}
 			const h0 = await ocs(A, 'POST', `${ipath(K1)}/handover`, { system: 'bexio', id: '1', number: '1' })
 			check('hand-over without the mode external → 409', h0.status === 409 && h0.data?.message === 'Handing over needs the team setting invoicing_mode external.', [h0.status, h0.data])
@@ -162,21 +163,21 @@ export async function uebergabe() {
 			seq = r.data?.ledger?.seq ?? null
 			check('record: status external, no number, issued_on, version 2', r.data?.record?.kind === 'invoice' && d?.status === 'external' && d?.number === null && d?.issued_on === ISSUED_ON && r.data?.record?.version === k1.data?.version + 1, r.data?.record)
 			check('record: external { system, id as text, number, url, at, by }', d?.external?.system === 'bexio' && d?.external?.id === '4711' && d?.external?.number === NUMBER && d?.external?.url === body.url
-				&& /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(d?.external?.at ?? '') && d?.external?.by === 'pbadmin', d?.external)
+				&& /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(d?.external?.at ?? '') && d?.external?.by === 'zbadmin', d?.external)
 			check('ledger: seq, prev_hash, hash', Number.isInteger(seq) && HEX64.test(r.data?.ledger?.hash ?? '') && typeof r.data?.ledger?.prev_hash === 'string', r.data?.ledger)
 			check('billed: one booking, one receipt', r.data?.billed?.bookings === 1 && r.data?.billed?.receipts === 1, r.data?.billed)
 			const delta = ((await ocs(A, 'GET', `/records?since=${rev0}`)).data?.records || []).find((x) => x.kind === 'invoice' && x.key === K1)
 			check('the delta since before delivers K1 as external', r.data?.record?.revision > rev0 && delta?.data?.status === 'external', [rev0, r.data?.record?.revision, delta?.data?.status])
-			const mark = await get('billing', billingKey('pbuser1', EV1))
+			const mark = await get('billing', billingKey('zbuser1', EV1))
 			check('the billing mark: document = bexio’s number, source bexio, external_id, by, billed_on', mark.status === 200 && mark.data?.data?.document === NUMBER && mark.data?.data?.source === 'bexio'
-				&& mark.data?.data?.external_id === '4711' && mark.data?.data?.by === 'pbadmin' && mark.data?.data?.billed_on === ISSUED_ON, mark.data?.data)
+				&& mark.data?.data?.external_id === '4711' && mark.data?.data?.by === 'zbadmin' && mark.data?.data?.billed_on === ISSUED_ON, mark.data?.data)
 			const rc = await get('receipt', RU)
 			check('the receipt is billed by K1', rc.data?.data?.status === 'billed' && rc.data?.data?.invoice === K1, rc.data?.data)
 			const led = await ocs(A, 'GET', `/invoices/ledger?since=${seq - 1}&limit=5`)
 			const e = led.data?.entries?.find((x) => x.seq === seq)
 			const p = JSON.parse(e?.payload || '{}')
 			check('ledger entry external_issued with bexio’s number and the payload', e?.action === 'external_issued' && e?.number === NUMBER && p.key === K1 && p.system === 'bexio' && p.id === '4711'
-				&& p.customer_key === CU && p.currency === 'CHF' && p.budget === 'b1' && p.project === PU && p.bookings?.[0]?.event_uid === EV1 && p.bookings?.[0]?.uid === 'pbuser1' && JSON.stringify(p.receipts) === JSON.stringify([RU]), e)
+				&& p.customer_key === CU && p.currency === 'CHF' && p.budget === 'b1' && p.project === PU && p.bookings?.[0]?.event_uid === EV1 && p.bookings?.[0]?.uid === 'zbuser1' && JSON.stringify(p.receipts) === JSON.stringify([RU]), e)
 			check('… the payload hash is the SHA-256 of the canonical payload', e?.payload_hash === sha256(e?.payload ?? ''), e)
 			const v = await ocs(A, 'GET', '/invoices/chain/verify')
 			check('the chain verifies', v.status === 200 && v.data?.ok === true, v.data)
@@ -258,7 +259,7 @@ export async function uebergabe() {
 			const d = r.data?.record?.data
 			check('record: draft again, external null, issued_on null', d?.status === 'draft' && d?.external === null && d?.issued_on === null && d?.number === null, d)
 			check('released: one booking, one receipt', r.data?.released?.bookings === 1 && r.data?.released?.receipts === 1, r.data?.released)
-			const mark = await get('billing', billingKey('pbuser1', EV1))
+			const mark = await get('billing', billingKey('zbuser1', EV1))
 			check('the billing mark is gone', mark.status === 404 || mark.data?.deleted === true, [mark.status, mark.data])
 			const rc = await get('receipt', RU)
 			check('the receipt is approved again, without invoice', rc.data?.data?.status === 'approved' && rc.data?.data?.invoice === null, rc.data?.data)
@@ -294,9 +295,9 @@ export async function uebergabe() {
 				await ocs(A, 'DELETE', `${rec('invoice', k)}?version=${cur.data.version}`)
 			}
 		}
-		const mark = await get('billing', billingKey('pbuser1', EV1))
+		const mark = await get('billing', billingKey('zbuser1', EV1))
 		if (mark.status === 200 && !mark.data?.deleted) {
-			await ocs(A, 'DELETE', `${rec('billing', billingKey('pbuser1', EV1))}?version=${mark.data.version}`)
+			await ocs(A, 'DELETE', `${rec('billing', billingKey('zbuser1', EV1))}?version=${mark.data.version}`)
 		}
 		await deleteEvent(U1, EV1)
 		for (const r of ((await ocs(U1, 'GET', '/records?since=0')).data?.records || []).filter((x) => x.kind === 'booking-report' && x.key.includes(`+${PU}+`))) {
@@ -319,6 +320,6 @@ export async function uebergabe() {
 			await ocs(A, 'PUT', rec('setting', 'settings'), { version: cur.data.version, data: settings.data.data })
 		}
 		const after = (await ocs(A, 'GET', '/team')).data?.settings
-		check('pb left as found (invoicing_mode, invoicing)', JSON.stringify(after?.invoicing_mode ?? null) === JSON.stringify(modeBefore) && after?.invoicing === invoicingBefore && isObj(await me(A)), after)
+		check('zb left as found (invoicing_mode, invoicing)', JSON.stringify(after?.invoicing_mode ?? null) === JSON.stringify(modeBefore) && after?.invoicing === invoicingBefore && isObj(await me(A)), after)
 	}
 }

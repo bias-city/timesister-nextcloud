@@ -8,11 +8,12 @@
 // re-hashes the files; `reverse` reserves the same way. Quotes: `texts`,
 // `attachments`, `POST /quotes/{key}/issue` with the counter, the three
 // document kinds. Needs the booking in the book (listener or TS_OCC) and a
-// backup owner. Leaves pb as it found it where it can: settings, project,
+// backup owner. Leaves zb as it found it where it can: settings, project,
 // customer, events, drafts and the quote removed; frozen rows and the
 // ledger stay (append-only).
 import { ensureTimeCalendar, deleteEvent, ocs, putEvent, runJob, sql } from './lib.mjs'
-import { A, L, RUN, U1, check, expect, head, me, sha256 } from './harness.mjs'
+import { RUN, check, expect, head, me, sha256 } from './harness.mjs'
+import { A, L, U1 } from './konten.mjs'
 
 const path = (key) => `/records/invoice/${encodeURIComponent(key)}`
 const ipath = (key) => `/invoices/${encodeURIComponent(key)}`
@@ -90,10 +91,10 @@ export async function renderer() {
 	}
 	const draft = (ev, more = {}) => ({
 		schema: 1, project: PF, budget: 'b1', from: '2026-10-01', to: '2026-10-31', status: 'draft', number: null,
-		bookings: [{ person: 'pbuser1', uid: ev, start: '2026-10-14T08:00:00', hours: 2, rate: 150, code: CODE }],
-		positions: [{ kind: 'hours', text: 'Site visit', person: 'pbuser1', work_package: 0, hours: 2, rate: 150, amount: 300 }, { kind: 'flat', text: 'Travel', amount: 100 }],
+		bookings: [{ person: 'zbuser1', uid: ev, start: '2026-10-14T08:00:00', hours: 2, rate: 150, code: CODE }],
+		positions: [{ kind: 'hours', text: 'Site visit', person: 'zbuser1', work_package: 0, hours: 2, rate: 150, amount: 300 }, { kind: 'flat', text: 'Travel', amount: 100 }],
 		greeting: 'Dear team', body: 'Payable within 30 days.', footer: 'Muster · Basel', vat: 8.1, contact: 'c1', layout,
-		note: null, created_by: 'pbadmin', created_on: '2026-10-15', issued_on: null, paid_on: null, ...more,
+		note: null, created_by: 'zbadmin', created_on: '2026-10-15', issued_on: null, paid_on: null, ...more,
 	})
 	let quoteMade = false
 	try {
@@ -103,15 +104,16 @@ export async function renderer() {
 			check('capabilities invoice_documents 2, quotes 4, quote_documents 1, invoice_layout 2, e_invoice 1', cap?.invoice_documents === 2 && cap?.quotes === 4 && cap?.quote_documents === 1 && cap?.invoice_layout === 2 && cap?.e_invoice === 1, cap)
 			if (!owner) {
 				const teams = await ocs({ user: process.env.NC_ADMIN_USER || 'admin', pass: process.env.NC_ADMIN_PASS || 'admin123' }, 'GET', '/admin/teams')
-				const pb = (teams.data || []).find((t) => t.slug === 'pb')
-				if (pb) {
-					const r = await ocs({ user: process.env.NC_ADMIN_USER || 'admin', pass: process.env.NC_ADMIN_PASS || 'admin123' }, 'PUT', `/admin/teams/${pb.id}`, { name: pb.name, slug: pb.slug, groups: pb.groups, backup_owner: 'pbadmin' })
+				const zb = (teams.data || []).find((t) => t.slug === 'zb')
+				if (zb) {
+					const r = await ocs({ user: process.env.NC_ADMIN_USER || 'admin', pass: process.env.NC_ADMIN_PASS || 'admin123' }, 'PUT', `/admin/teams/${zb.id}`, { name: zb.name, slug: zb.slug, groups: zb.groups, backup_owner: 'zbadmin' })
 					owner = r.data?.backup_owner || null
 				}
 			}
-			check('pb has a backup owner', typeof owner === 'string' && owner !== '', owner)
+			check('zb has a backup owner', typeof owner === 'string' && owner !== '', owner)
 			const s = await ocs(A, 'PUT', '/records/setting/settings', { version: settingsVersion, data: { ...base, language: 'de',
-				invoice_number: { pattern: `RR-${RUN}-{no:4}`, per_year: true, start: 1 },
+				// With the year: the reversals below take today's counter, which starts at 1 in a fresh team.
+				invoice_number: { pattern: `RR-${RUN}-{year}-{no:4}`, per_year: true, start: 1 },
 				quote_number: { pattern: `OR-${RUN}-{no:3}`, per_year: true, start: 1 },
 				issuer: { name: 'Muster sàrl', street: 'Musterstrasse 12', postcode: '4000', city: 'Basel', country: 'CH', vat_id: 'CHE-123.456.789 MWST', qr: true, accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }] } } })
 			expect('Team Admin sets language, patterns (invoice and quote) and issuer', s, 200)
@@ -119,9 +121,9 @@ export async function renderer() {
 			expect('a bad quote number pattern', await ocs(A, 'PUT', '/records/setting/settings', { version: settingsVersion, data: { ...base, quote_number: { pattern: 'OF-{nope}' } } }), 422, 'invalid')
 			expect('documents root', await ocs(A, 'PUT', '/team/settings', { documents: { root: FOLDER } }), 200)
 			expect('customer', await ocs(A, 'PUT', `/records/customer/${CF}`, { version: 0, data: { schema: 1, id: CF, name: `Kunde ${RUN}`, street: 'Platz 1', postcode: '4001', city: 'Basel', country: 'CH', contacts: [{ id: 'c1', name: 'Lea Kontakt' }] } }), 200)
-			expect('project with budget b1 in CHF, led by pblead', await ocs(A, 'PUT', `/records/project/${PF}`, { version: 0, data: { schema: 1, id: PF, name: `Renderer ${RUN}`, codes: [CODE], status: 'active', leads: ['pblead'], customer: CF, budgets: [{ id: 'b1', name: 'Budget R', currency: 'CHF' }] } }), 200)
-			check('pbuser1’s time calendar exists and is named', (await ensureTimeCalendar(U1)) && (await ocs(U1, 'PUT', '/me/time-calendar', { calendar_url: 'zeit-pbuser1' })).status === 200)
-			check('pbuser1 books two hours twice', (await putEvent(U1, EV1, ['DTSTART:20261014T080000Z', 'DTEND:20261014T100000Z', `SUMMARY:Site visit #${CODE}`])) === 201
+			expect('project with budget b1 in CHF, led by zblead', await ocs(A, 'PUT', `/records/project/${PF}`, { version: 0, data: { schema: 1, id: PF, name: `Renderer ${RUN}`, codes: [CODE], status: 'active', leads: ['zblead'], customer: CF, budgets: [{ id: 'b1', name: 'Budget R', currency: 'CHF' }] } }), 200)
+			check('zbuser1’s time calendar exists and is named', (await ensureTimeCalendar(U1)) && (await ocs(U1, 'PUT', '/me/time-calendar', { calendar_url: 'zeit-zbuser1' })).status === 200)
+			check('zbuser1 books two hours twice', (await putEvent(U1, EV1, ['DTSTART:20261014T080000Z', 'DTEND:20261014T100000Z', `SUMMARY:Site visit #${CODE}`])) === 201
 				&& (await putEvent(U1, EV2, ['DTSTART:20261015T080000Z', 'DTEND:20261015T100000Z', `SUMMARY:Second visit #${CODE}`])) === 201)
 			await sleep(500)
 			if (!(await book(A)).some((e) => e.event_uid === EV1)) {
@@ -159,7 +161,7 @@ export async function renderer() {
 		const number = issue?.number
 		const seq = issue?.seq
 		check('answer: record issuing with number, ledger_seq, no hash', r.data?.record?.data?.status === 'issuing' && r.data?.record?.data?.number === number && r.data?.record?.data?.ledger_seq === seq && r.data?.record?.data?.hash === null, r.data?.record?.data)
-		check('issue: number from the pattern, seq, prev_hash, position, expires_at', new RegExp(`^RR-${RUN}-\\d{4}$`).test(number ?? '') && Number.isInteger(seq) && typeof issue?.prev_hash === 'string' && issue?.position === `${seq} of ${seq}` && /Z$/.test(issue?.expires_at ?? ''), issue)
+		check('issue: number from the pattern, seq, prev_hash, position, expires_at', new RegExp(`^RR-${RUN}-${Y}-\\d{4}$`).test(number ?? '') && Number.isInteger(seq) && typeof issue?.prev_hash === 'string' && issue?.position === `${seq} of ${seq}` && /Z$/.test(issue?.expires_at ?? ''), issue)
 		check('issue: chain_line in German, with number, seq and prev_hash[0:12]', issue?.chain_line === `Beleg ${number} · Kette ${seq} ← ${issue?.prev_hash === '' ? '–' : issue?.prev_hash.slice(0, 12)}`, issue?.chain_line)
 		check('issue: server sums (net 400, VAT 32.4, gross 432.4), CHF, tax case, language, due 30 days', issue?.net === 400 && issue?.vat_amount === 32.4 && issue?.gross === 432.4 && issue?.total === 432.4 && issue?.currency === 'CHF' && issue?.tax_case === 'domestic' && issue?.language === 'de' && issue?.due_on === `${Y}-07-15`, issue)
 		check('issue: no document_state', issue?.document_state === undefined)
@@ -221,7 +223,7 @@ export async function renderer() {
 			check('ledger: the entry issued at the reserved seq, payload with document { kind, name, size, sha256 }', e?.seq === seq && e?.action === 'issued' && e?.number === number && JSON.parse(e?.payload ?? '{}')?.document?.sha256 === sha256(pdf) && JSON.parse(e?.payload ?? '{}')?.document?.path === undefined, e)
 			const v = await ocs(A, 'GET', '/invoices/chain/verify')
 			check('the chain verifies', v.data?.ok === true, v.data)
-			// pb's ledger carries files of earlier runs whose folders are gone: a break before this run's entries is fine.
+			// zb's ledger carries files of earlier runs whose folders are gone: a break before this run's entries is fine.
 			const filesOk = (v) => v?.ok === true ? v?.files === true : v?.field === 'document' && v?.first_break < seq
 			const vf = await ocs(A, 'GET', '/invoices/chain/verify?files=true')
 			check('… also with the files (none of this run’s files breaks)', filesOk(vf.data), vf.data)
@@ -274,7 +276,7 @@ export async function renderer() {
 			expect('a PDF arriving after the release', late, 409, 'conflict')
 			check('… not_issuing', late.data?.code === 'not_issuing')
 			expect('cancel again', await ocs(A, 'POST', `${ipath(K2)}/issue/cancel`, {}), 409, 'conflict')
-			const mark = await ocs(A, 'GET', `/records/billing/pbuser1+${sha256(EV2).slice(0, 32)}`)
+			const mark = await ocs(A, 'GET', `/records/billing/zbuser1+${sha256(EV2).slice(0, 32)}`)
 			check('the billing mark of the reservation is gone', mark.status === 404 || mark.data?.deleted === true, mark.status)
 			expect('the draft is writable again', await ocs(A, 'PUT', path(K2), { version: c.data?.record?.version, data: draft(EV2, { note: 'again' }) }), 200)
 			const again = await ocs(A, 'POST', `${ipath(K2)}/issue`, { issued_on: ISSUED_ON })
@@ -311,7 +313,7 @@ export async function renderer() {
 
 		head('Renderer: expiry')
 		{
-			const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'pb'")
+			const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'zb'")
 			const rv = await ocs(A, 'POST', `${ipath(K2)}/reverse`, { kind: 'credit', reason: 'Expiry test' })
 			expect('reserve a credit note', rv, 200)
 			const rk = rv.data?.record?.key
@@ -340,10 +342,10 @@ export async function renderer() {
 		{
 			const quote = (more = {}) => ({
 				schema: 1, name: `Offerte ${RUN}`, status: 'draft', customer: CF, project: null, project_draft: { code: `N${RUN}`.toUpperCase(), name: 'Schulhaus Muster' }, number: null,
-				date: '2026-10-14', valid_until: '2026-11-30', accepted_on: null, created_on: '2026-10-14', leads: ['pblead'], currency: 'CHF',
+				date: '2026-10-14', valid_until: '2026-11-30', accepted_on: null, created_on: '2026-10-14', leads: ['zblead'], currency: 'CHF',
 				budgets: [{ id: 'bq1', name: 'Vorprojekt', currency: 'CHF', cap: 24000, work_packages: [{ no: 1, name: 'Konzept', hours: 40, rate: 180 }] }],
 				texts: { greeting: 'Sehr geehrte Damen und Herren', intro: 'Gerne offerieren wir', closing: null, footer: 'Muster sàrl' }, attachments: 'Honorarofferte\nTerminplan',
-				note: null, created_by: 'pbadmin', ...more,
+				note: null, created_by: 'zbadmin', ...more,
 			})
 			const q = await ocs(A, 'PUT', `/records/quote/${Q1}`, { version: 0, data: quote() })
 			expect('a draft quote with texts and attachments', q, 200)
@@ -373,7 +375,7 @@ export async function renderer() {
 			const qn = i.data?.data?.number
 			check('record: number from the quote pattern, status quoted, date', new RegExp(`^OR-${RUN}-\\d{3}$`).test(qn ?? '') && i.data?.data?.status === 'quoted' && i.data?.data?.date === '2026-10-29' && i.data?.data?.valid_until === '2026-12-15', i.data?.data)
 			const iss = i.data?.data?.issued
-			check('issued: at, by pblead, number, sums, customer { key, name }, project_draft, budgets, texts, attachments', /Z$/.test(iss?.at ?? '') && iss?.by === 'pblead' && iss?.number === qn && iss?.hours === 40 && iss?.amount === 7200 && iss?.customer?.key === CF && iss?.customer?.name === `Kunde ${RUN}` && iss?.project_draft?.name === 'Schulhaus Muster' && iss?.budgets?.[0]?.id === 'bq1' && iss?.texts?.greeting === 'Sehr geehrte Damen und Herren' && iss?.attachments === 'Honorarofferte\nTerminplan' && iss?.currency === 'CHF', iss)
+			check('issued: at, by zblead, number, sums, customer { key, name }, project_draft, budgets, texts, attachments', /Z$/.test(iss?.at ?? '') && iss?.by === 'zblead' && iss?.number === qn && iss?.hours === 40 && iss?.amount === 7200 && iss?.customer?.key === CF && iss?.customer?.name === `Kunde ${RUN}` && iss?.project_draft?.name === 'Schulhaus Muster' && iss?.budgets?.[0]?.id === 'bq1' && iss?.texts?.greeting === 'Sehr geehrte Damen und Herren' && iss?.attachments === 'Honorarofferte\nTerminplan' && iss?.currency === 'CHF', iss)
 			const twice = await ocs(A, 'POST', `${qpath(Q1)}/issue`, {})
 			expect('issuing it again', twice, 409, 'conflict')
 			check('… quote_not_draft', twice.data?.code === 'quote_not_draft')
@@ -395,7 +397,7 @@ export async function renderer() {
 			expect('not a PDF', await upload(A, 'POST', `${qpath(Q1)}/documents?kind=sent`, 'hello', 'application/pdf'), 422, 'invalid')
 			const s1 = await upload(A, 'POST', `${qpath(Q1)}/documents?kind=sent`, fakePdf(qn, 'sent'), 'application/pdf')
 			expect('the sent copy', s1, 200)
-			check('… name _gesendet.pdf, stored true, by pbadmin', s1.data?.document?.name === `2026-10-29_${qn}_Kunde-${RUN}_gesendet.pdf` && s1.data?.stored === true && s1.data?.document?.by === 'pbadmin', s1.data?.document)
+			check('… name _gesendet.pdf, stored true, by zbadmin', s1.data?.document?.name === `2026-10-29_${qn}_Kunde-${RUN}_gesendet.pdf` && s1.data?.stored === true && s1.data?.document?.by === 'zbadmin', s1.data?.document)
 			const s1b = await upload(A, 'POST', `${qpath(Q1)}/documents?kind=sent`, fakePdf(qn, 'sent'), 'application/pdf')
 			check('the same sent copy again: 200, stored false', s1b.status === 200 && s1b.data?.stored === false, s1b.data)
 			const s2 = await upload(A, 'POST', `${qpath(Q1)}/documents?kind=sent`, fakePdf(qn, 'sent v2'), 'application/pdf')

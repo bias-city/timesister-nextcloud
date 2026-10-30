@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// Sets up the test environment (version 2): two teams, each with one team
-// group, the accounts from lib.mjs in them, the admins as group admins of
+// Sets up the test environment (version 2): the teams from lib.mjs, each
+// with one team group, the accounts from lib.mjs in them, the admins as group admins of
 // the team group, a seed project per team whose lead is the team's Lead (0.11.0:
-// the role follows from the projects), “allow overriding” off. Only via Nextcloud's
+// the role follows from the projects), “allow overriding” off, and levels
+// for the check's own teams when they have none (0.33.0). Only via Nextcloud's
 // provisioning API and the app's admin endpoints – no occ, no SQL.
 // Idempotent; never removes anyone from a group. Old groups from
 // version 1 (pb-mitarbeitende …) stay as they are; the app does not read them.
 //
 //   NC_URL=http://localhost:8081 node tests/integration/seed.mjs
-import { ACCOUNTS, ADMIN, TEAMS, as, groupsOf, ocs, pw, seedProjectOf, teamGroupOf } from './lib.mjs'
+import { ACCOUNTS, ADMIN, CHECK_LEVELS, TEAMS, as, groupsOf, ocs, pw, seedProjectOf, teamGroupOf } from './lib.mjs'
 
 const log = (ok, msg) => console.log(`    ${ok ? '\x1b[32mok\x1b[0m' : '\x1b[33m--\x1b[0m'}  ${msg}`)
 
@@ -104,6 +105,22 @@ async function ensureLeadProject(team, leads) {
 	log(true, `project ${key} with leads ${JSON.stringify(leads)}`)
 }
 
+/** The check's teams get levels when they have none; other settings stay. */
+async function ensureLevels(team) {
+	const admin = as(ACCOUNTS.find(([, , slug, role]) => slug === team.slug && role === 'admin')[0])
+	const cur = await ocs(admin, 'GET', '/records/setting/settings')
+	const data = cur.status === 200 ? cur.data.data : {}
+	if (Array.isArray(data.levels) && data.levels.length > 0) {
+		log(false, `levels of ${team.slug} exist (${data.levels.map((l) => l.id).join(', ')})`)
+		return
+	}
+	const r = await ocs(admin, 'PUT', '/records/setting/settings', { version: cur.status === 200 ? cur.data.version : 0, data: { ...data, levels: CHECK_LEVELS } })
+	if (r.status !== 200) {
+		throw new Error(`Levels ${team.slug}: HTTP ${r.status} ${r.text.slice(0, 200)}`)
+	}
+	log(true, `levels of ${team.slug}: ${CHECK_LEVELS.map((l) => l.id).join(', ')}`)
+}
+
 console.log('\x1b[1;34m==>\x1b[0m Team groups')
 for (const team of TEAMS) {
 	await ensureGroup(teamGroupOf(team.prefix), team.name)
@@ -131,4 +148,8 @@ console.log('\x1b[1;34m==>\x1b[0m App roles')
 for (const [uid, , slug, role] of ACCOUNTS) {
 	// Team Admin stays group admin; everyone else user – Lead follows from the seed project.
 	await ensureRole(ids[slug], uid, role)
+}
+console.log('\x1b[1;34m==>\x1b[0m Levels of the integration check’s own teams')
+for (const team of TEAMS.filter((t) => t.check)) {
+	await ensureLevels(team)
 }

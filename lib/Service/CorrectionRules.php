@@ -8,11 +8,13 @@ namespace OCA\TimeSister\Service;
 
 /**
  * Corrections of bookings (0.27.0, PLAN-SAETZE S3 / B2, K-Offline, K-Serie):
- * a Team Admin or the Lead of the project changes title, code, billable and
- * level of a booking; the app writes that into the event of the person's
- * time calendar. Pure: the body, the record, the rights, the lock, and the
- * rewriting of the iCal text. Date, start and duration are never touched;
- * the level is stored as `X-TIMESISTER-LEVEL:<id>` (never a rate); billable
+ * a Team Admin or the Lead of the project changes title, code, billable
+ * and level of a booking – 0.33.0: the person the level of their own
+ * bookings that fall into a budget in the model `category` –; the app
+ * writes that into the event of the person's time calendar. Pure: the
+ * body, the record, the rights, the lock, and the rewriting of the iCal
+ * text. Date, start and duration are never touched; the level is stored
+ * as `X-TIMESISTER-LEVEL:<id>` (never a rate); billable
  * as the category `non-billable`, exactly as the clients write it.
  *
  * Since K-Serie a change may name a `recurrence` (`YYYYMMDDTHHMMSS` in the
@@ -47,6 +49,9 @@ final class CorrectionRules {
 	private const TOKEN = '/(?<![\p{L}\p{N}])#[\p{L}\p{N}.\-_\/]+(?::[0-9][0-9.,]*[%hH]?)?/u';
 	private const FIELDS = ['entries', 'title', 'code', 'billable', 'level'];
 	private const RECORD_FIELDS = ['person', 'event_uid', 'recurrence', 'title', 'code', 'billable', 'level'];
+	public const CHANGE_FIELDS = ['title', 'code', 'billable', 'level'];
+	/** 0.33.0: the fields that stay with Team Admins and Leads; `level` is also the person's in the model `category`. */
+	public const LEAD_FIELDS = ['title', 'code', 'billable'];
 	/** Invoice statuses that lock a booking (a draft does not). */
 	private const LOCKING = ['issued', 'paid', HandoverRules::STATUS];
 
@@ -172,7 +177,7 @@ final class CorrectionRules {
 	/** The change of a validated record. @return array<string,mixed> */
 	public static function changeOf(\stdClass $data): array {
 		$body = new \stdClass();
-		foreach (['title', 'code', 'billable', 'level'] as $f) {
+		foreach (self::CHANGE_FIELDS as $f) {
 			if (property_exists($data, $f)) {
 				$body->$f = $data->$f;
 			}
@@ -239,6 +244,109 @@ final class CorrectionRules {
 			}
 		}
 		return $newCode === null || self::led(mb_strtolower($newCode), $ledCodes);
+	}
+
+	/** Does the change touch the level only (the person's own right, 0.33.0)? @param array<string,mixed> $change */
+	public static function levelOnly(array $change): bool {
+		return array_keys($change) === ['level'];
+	}
+
+	/**
+	 * The stored record as far as it counts for the person's write: only an
+	 * applied one – a refused change of a Lead never passes on through it.
+	 */
+	public static function appliedOnly(?\stdClass $before): ?\stdClass {
+		return ($before?->status ?? null) === self::APPLIED ? $before : null;
+	}
+
+	/**
+	 * The person's write of a correction record (0.33.0): nothing but
+	 * `level` changes – title, code and billable are missing or equal to the
+	 * stored record's. Null when so; else the first other field.
+	 */
+	public static function otherThanLevel(?\stdClass $before, \stdClass $after): ?string {
+		foreach (self::LEAD_FIELDS as $f) {
+			if (!property_exists($after, $f)) {
+				continue;
+			}
+			if ($before === null || !property_exists($before, $f) || $before->$f !== $after->$f) {
+				return $f;
+			}
+		}
+		return null;
+	}
+
+	/** Does the person's write set a level other than the stored record's (then the booking must be in the category model)? */
+	public static function setsLevel(?\stdClass $before, \stdClass $after): bool {
+		return property_exists($after, 'level')
+			&& ($before === null || !property_exists($before, 'level') || $before->level !== $after->level);
+	}
+
+	/** The person's write keeps the stored fields of the Lead it leaves out – they stay the Lead's. */
+	public static function keepLeadFields(?\stdClass $before, \stdClass $after): \stdClass {
+		if ($before === null) {
+			return $after;
+		}
+		$out = clone $after;
+		foreach (self::LEAD_FIELDS as $f) {
+			if (!property_exists($out, $f) && property_exists($before, $f)) {
+				$out->$f = $before->$f;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * The person's right on a correction record (0.33.0), the form: a
+	 * member writes the record of their own booking and changes nothing but
+	 * `level` against the stored, applied record; deletes only a record that
+	 * holds no field of the Lead. Team Admins and Leads pass (their rights
+	 * are checked as the record is applied). `403 correction_lead_only`
+	 * otherwise. True when the write needs the booking in a budget of the
+	 * model `category` – a new level, or deleting a record with a level
+	 * ({@see CorrectionService::requireLevelRight()}).
+	 *
+	 * @param list<string> $ownKeys the caller's person keys
+	 */
+	public static function requirePersonal(string $role, string $key, ?\stdClass $before, ?\stdClass $after, array $ownKeys): bool {
+		if (Role::manages($role) || $role === Role::LEAD) {
+			return false;
+		}
+		$person = $after === null ? self::personOf($key) : ($after->person ?? null);
+		if (!is_string($person) || !in_array($person, $ownKeys, true)) {
+			throw self::leadOnly('person');
+		}
+		if ($after === null) {
+			foreach (self::LEAD_FIELDS as $f) {
+				if ($before !== null && property_exists($before, $f)) {
+					throw self::leadOnly($f);
+				}
+			}
+			return $before !== null && property_exists($before, 'level');
+		}
+		$stored = self::appliedOnly($before);
+		$field = self::otherThanLevel($stored, $after);
+		if ($field !== null) {
+			throw self::leadOnly($field);
+		}
+		return self::setsLevel($stored, $after);
+	}
+
+	/** 403 `correction_lead_only`: only Team Admins and the booking's Leads change this field. */
+	public static function leadOnly(string $field): ApiException {
+		return ApiException::forbidden('Title, code and billable of a booking, its level outside a budget by category, and anything of someone else’s booking, are corrected by Team Admins and the booking’s Leads; you correct the level of your own bookings in a budget by category.')->code(ErrorCode::CORRECTION_LEAD_ONLY)->field($field);
+	}
+
+	/**
+	 * The day of a booking for its budget: the occurrence's with a
+	 * recurrence, else the day of the entry's first start; null when neither.
+	 */
+	public static function bookingDay(?string $firstStart, ?string $recurrence): ?string {
+		if ($recurrence !== null && preg_match('/^(\d{4})(\d{2})(\d{2})/', $recurrence, $m) === 1) {
+			return $m[1] . '-' . $m[2] . '-' . $m[3];
+		}
+		$d = $firstStart === null ? '' : substr($firstStart, 0, 10);
+		return Time::isDay($d) ? $d : null;
 	}
 
 	/** @param list<string> $ledCodes */
@@ -584,7 +692,7 @@ final class CorrectionRules {
 
 	/**
 	 * The property values the change asks for: SUMMARY, LOCATION, DESCRIPTION,
-	 * X-TIMESISTER-CODE, CATEGORIES (null: none), X-TIMESISTER-LEVEL (null: none).
+	 * X-TIMESISTER-CODE, CATEGORIES (null: none) and X-TIMESISTER-LEVEL (null: none).
 	 *
 	 * @param array<string,list<array{i:int,value:string,params:array<string,string>}>> $props
 	 * @param array<string,mixed> $change

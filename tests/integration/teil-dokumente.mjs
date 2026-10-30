@@ -7,11 +7,12 @@
 // the folder, the `issued` entry with the file's hash, chain still valid),
 // the same bytes again, the chain head and the daily chain head file.
 // Needs the booking in the book like teil-faktura.mjs; without it the
-// issuing checks are skipped. Leaves pb as it found it (settings record,
+// issuing checks are skipped. Leaves zb as it found it (settings record,
 // team setting, project, customer, event, marks); the files in the owner's
 // folder and the ledger entries stay (append-only, test year far away).
 import { ensureTimeCalendar, dav, deleteEvent, ocs, putEvent, runJob, sql, ADMIN } from './lib.mjs'
-import { A, L, RUN, U1, check, expect, festschreiben, head, isObj, me, raw, sha256, stornieren } from './harness.mjs'
+import { RUN, check, expect, festschreiben, head, isObj, me, raw, sha256, stornieren } from './harness.mjs'
+import { A, L, TEAM, U1 } from './konten.mjs'
 
 const path = (key) => `/records/invoice/${encodeURIComponent(key)}`
 const ipath = (key) => `/invoices/${encodeURIComponent(key)}`
@@ -55,7 +56,7 @@ export async function dokumente() {
 	const Y = 3000 + (parseInt(RUN.slice(-4), 36) % 5000) + 7
 	const ISSUED_ON = `${Y}-05-15`
 	const FOLDER = `TimeSister Test Documents/${RUN}`
-	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'pb'")
+	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'zb'")
 	const settings = await ocs(A, 'GET', '/records/setting/settings')
 	const base = settings.status === 200 ? settings.data.data : {}
 	let settingsVersion = settings.status === 200 ? settings.data.version : 0
@@ -64,10 +65,10 @@ export async function dokumente() {
 	let owner = teamBefore?.backup_owner || null
 	const draft = (more = {}) => ({
 		schema: 1, project: PF, budget: 'b1', from: '2026-10-01', to: '2026-10-31', status: 'draft', number: null,
-		bookings: [{ person: 'pbuser1', uid: EV1, start: '2026-10-13T08:00:00', hours: 2, rate: 150, code: CODE }],
-		positions: [{ kind: 'hours', text: 'Site visit', person: 'pbuser1', work_package: 0, hours: 2, rate: 150, amount: 300 }, { kind: 'flat', text: 'Travel', amount: 100 }],
+		bookings: [{ person: 'zbuser1', uid: EV1, start: '2026-10-13T08:00:00', hours: 2, rate: 150, code: CODE }],
+		positions: [{ kind: 'hours', text: 'Site visit', person: 'zbuser1', work_package: 0, hours: 2, rate: 150, amount: 300 }, { kind: 'flat', text: 'Travel', amount: 100 }],
 		greeting: 'Dear team', body: 'Payable within 30 days.', footer: 'Muster · Basel', vat: 8.1, contact: 'c1',
-		note: null, created_by: 'pbadmin', created_on: '2026-10-15', issued_on: null, paid_on: null, ...more,
+		note: null, created_by: 'zbadmin', created_on: '2026-10-15', issued_on: null, paid_on: null, ...more,
 	})
 	try {
 		head('Documents: setup')
@@ -76,15 +77,15 @@ export async function dokumente() {
 			check('capability invoice_documents: 2 (0.32.0)', cap.data?.capabilities?.timesister?.invoice_documents === 2, cap.data?.capabilities?.timesister)
 			check('/me.settings.documents has root and chain_mail (0.22.0)', JSON.stringify(Object.keys((await me(A)).settings?.documents || {}).sort()) === '["chain_mail","root"]', (await me(A)).settings)
 			if (!owner) {
-				// The backup owner is the first Team Admin by default; set pbadmin explicitly through the admin page's endpoint.
+				// The backup owner is the first Team Admin by default; set zbadmin explicitly through the admin page's endpoint.
 				const teams = await ocs(ADMIN, 'GET', '/admin/teams')
-				const pb = (teams.data || []).find((t) => t.slug === 'pb')
-				if (pb) {
-					const r = await ocs(ADMIN, 'PUT', `/admin/teams/${pb.id}`, { name: pb.name, slug: pb.slug, groups: pb.groups, backup_owner: 'pbadmin' })
+				const zb = (teams.data || []).find((t) => t.slug === 'zb')
+				if (zb) {
+					const r = await ocs(ADMIN, 'PUT', `/admin/teams/${zb.id}`, { name: zb.name, slug: zb.slug, groups: zb.groups, backup_owner: 'zbadmin' })
 					owner = r.data?.backup_owner || null
 				}
 			}
-			check('pb has a backup owner', typeof owner === 'string' && owner !== '', owner)
+			check('zb has a backup owner', typeof owner === 'string' && owner !== '', owner)
 			const s = await ocs(A, 'PUT', '/records/setting/settings', { version: settingsVersion, data: { ...base, language: 'de',
 				invoice_number: { pattern: `RD-${RUN}-{no:4}`, per_year: true, start: 1 },
 				issuer: { name: 'Muster sàrl', street: 'Musterstrasse 12', postcode: '4000', city: 'Basel', country: 'CH', vat_id: 'CHE-123.456.789 MWST', email: 'mail@example.test', qr: true, accounts: [{ currency: 'CHF', iban: 'CH9300762011623852957', bic: '' }] } } })
@@ -93,9 +94,9 @@ export async function dokumente() {
 			// 0.22.0: the document language is null, de or en when written.
 			expect('settings.language other than null, de or en', await ocs(A, 'PUT', '/records/setting/settings', { version: settingsVersion, data: { ...base, language: 'de_CH' } }), 422, 'invalid')
 			expect('customer', await ocs(A, 'PUT', `/records/customer/${CF}`, { version: 0, data: { schema: 1, id: CF, name: `Kunde ${RUN}`, street: 'Platz 1', postcode: '4001', city: 'Basel', country: 'CH', contacts: [{ id: 'c1', name: 'Lea Kontakt' }] } }), 200)
-			expect('project with budget b1 in CHF, led by pblead', await ocs(A, 'PUT', `/records/project/${PF}`, { version: 0, data: { schema: 1, id: PF, name: `Dokumente ${RUN}`, codes: [CODE], status: 'active', leads: ['pblead'], customer: CF, budgets: [{ id: 'b1', name: 'Budget Dok', currency: 'CHF' }] } }), 200)
-			check('pbuser1’s time calendar exists and is named', (await ensureTimeCalendar(U1)) && (await ocs(U1, 'PUT', '/me/time-calendar', { calendar_url: 'zeit-pbuser1' })).status === 200)
-			check('pbuser1 books two hours on the project', (await putEvent(U1, EV1, ['DTSTART:20261013T080000Z', 'DTEND:20261013T100000Z', `SUMMARY:Site visit #${CODE}`])) === 201)
+			expect('project with budget b1 in CHF, led by zblead', await ocs(A, 'PUT', `/records/project/${PF}`, { version: 0, data: { schema: 1, id: PF, name: `Dokumente ${RUN}`, codes: [CODE], status: 'active', leads: ['zblead'], customer: CF, budgets: [{ id: 'b1', name: 'Budget Dok', currency: 'CHF' }] } }), 200)
+			check('zbuser1’s time calendar exists and is named', (await ensureTimeCalendar(U1)) && (await ocs(U1, 'PUT', '/me/time-calendar', { calendar_url: 'zeit-zbuser1' })).status === 200)
+			check('zbuser1 books two hours on the project', (await putEvent(U1, EV1, ['DTSTART:20261013T080000Z', 'DTEND:20261013T100000Z', `SUMMARY:Site visit #${CODE}`])) === 201)
 			await sleep(500)
 			if (!(await book(A)).some((e) => e.event_uid === EV1)) {
 				runJob('EntryReader')
@@ -121,18 +122,18 @@ export async function dokumente() {
 			check('… chain_mail null, root kept', partial.data?.documents?.chain_mail === null && partial.data?.documents?.root === FOLDER, partial.data)
 			// The admin side: the check endpoint and the setting through PUT /admin/teams.
 			const teams = await ocs(ADMIN, 'GET', '/admin/teams')
-			const pb = (teams.data || []).find((t) => t.slug === 'pb')
-			check('admin lists the setting', pb?.settings?.documents?.root === FOLDER, pb?.settings)
-			if (pb) {
-				const chk = await ocs(ADMIN, 'POST', `/admin/teams/${pb.id}/documents/check`, { root: FOLDER })
+			const zb = (teams.data || []).find((t) => t.slug === 'zb')
+			check('admin lists the setting', zb?.settings?.documents?.root === FOLDER, zb?.settings)
+			if (zb) {
+				const chk = await ocs(ADMIN, 'POST', `/admin/teams/${zb.id}/documents/check`, { root: FOLDER })
 				expect('admin checks the root', chk, 200)
 				check('… ok with a message and the path', chk.data?.root?.ok === true && typeof chk.data?.root?.message === 'string' && chk.data?.root?.path === FOLDER, chk.data)
-				const dflt = await ocs(ADMIN, 'POST', `/admin/teams/${pb.id}/documents/check`, {})
-				check('… without a root: TimeSister/<team>', dflt.data?.root?.path === `TimeSister/${pb.name}`, dflt.data)
-				const bad = await ocs(ADMIN, 'POST', `/admin/teams/${pb.id}/documents/check`, { root: '/abs' })
+				const dflt = await ocs(ADMIN, 'POST', `/admin/teams/${zb.id}/documents/check`, {})
+				check('… without a root: TimeSister/<team>', dflt.data?.root?.path === `TimeSister/${zb.name}`, dflt.data)
+				const bad = await ocs(ADMIN, 'POST', `/admin/teams/${zb.id}/documents/check`, { root: '/abs' })
 				expect('… a bad path', bad, 422, 'invalid')
-				expect('Team Admin calls the admin check', await ocs(A, 'POST', `/admin/teams/${pb.id}/documents/check`, {}), 403)
-				const put = await ocs(ADMIN, 'PUT', `/admin/teams/${pb.id}`, { name: pb.name, slug: pb.slug, groups: pb.groups, settings: { documents: { chain_mail: 'a@example.test' } } })
+				expect('Team Admin calls the admin check', await ocs(A, 'POST', `/admin/teams/${zb.id}/documents/check`, {}), 403)
+				const put = await ocs(ADMIN, 'PUT', `/admin/teams/${zb.id}`, { name: zb.name, slug: zb.slug, groups: zb.groups, settings: { documents: { chain_mail: 'a@example.test' } } })
 				expect('admin sets chain_mail through PUT /admin/teams', put, 200)
 				check('… merged over the stored setting', put.data?.settings?.documents?.chain_mail === 'a@example.test' && put.data?.settings?.documents?.root === FOLDER, put.data?.settings)
 				expect('… and back', await ocs(A, 'PUT', '/team/settings', { documents: { chain_mail: null } }), 200)
@@ -222,7 +223,7 @@ export async function dokumente() {
 				const ownerDav = { user: owner, pass: `Test-2026-${owner}!` }
 				const dv = await dav(ownerDav, 'GET', `files/${encodeURIComponent(owner)}/${`${FOLDER}/Buchhaltung/${day.slice(0, 4)}/Kette/chain-${day}.txt`.split('/').map(encodeURIComponent).join('/')}`)
 				const hd = (await ocs(A, 'GET', '/invoices/chain/head')).data
-				check('chain-<day>.txt lies in Buchhaltung/<year>/Kette with the head', dv.status === 200 && dv.text.includes('team: Planungsbüro') && dv.text.includes(`head hash: ${hd?.hash}`) && dv.text.includes(`head seq: ${hd?.seq}`), [dv.status, dv.text.slice(0, 200)])
+				check('chain-<day>.txt lies in Buchhaltung/<year>/Kette with the head', dv.status === 200 && dv.text.includes(`team: ${TEAM.name}`) && dv.text.includes(`head hash: ${hd?.hash}`) && dv.text.includes(`head seq: ${hd?.seq}`), [dv.status, dv.text.slice(0, 200)])
 				const expiry = runJob('IssueExpiry')
 				check('the IssueExpiry job runs (replaces DocumentRetry, 0.32.0)', expiry)
 			}
@@ -242,9 +243,9 @@ export async function dokumente() {
 				await ocs(A, 'DELETE', `${path(k)}?version=${cur.data.version}`)
 			}
 		}
-		const mark = await ocs(A, 'GET', `/records/billing/${billingKey('pbuser1', EV1)}`)
+		const mark = await ocs(A, 'GET', `/records/billing/${billingKey('zbuser1', EV1)}`)
 		if (mark.status === 200) {
-			await ocs(A, 'DELETE', `/records/billing/${billingKey('pbuser1', EV1)}?version=${mark.data.version}`)
+			await ocs(A, 'DELETE', `/records/billing/${billingKey('zbuser1', EV1)}?version=${mark.data.version}`)
 		}
 		await deleteEvent(U1, EV1)
 		for (const r of ((await ocs(U1, 'GET', '/records?since=0')).data?.records || []).filter((x) => x.kind === 'booking-report' && x.key.includes(`+${PF}+`))) {
@@ -266,6 +267,6 @@ export async function dokumente() {
 		if (owner) {
 			await dav({ user: owner, pass: `Test-2026-${owner}!` }, 'DELETE', `files/${encodeURIComponent(owner)}/${FOLDER.split('/').map(encodeURIComponent).join('/')}`)
 		}
-		check('pb left as found', isObj(await me(A)))
+		check('zb left as found', isObj(await me(A)))
 	}
 }

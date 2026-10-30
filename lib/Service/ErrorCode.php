@@ -84,6 +84,14 @@ final class ErrorCode {
 	public const QUOTE_NUMBER_TAKEN = 'quote_number_taken';
 	public const QUOTE_DOCUMENTS_MAX = 'quote_documents_max';
 	public const QUOTE_NAME_REQUIRED = 'quote_name_required';
+	// ---- fee models (0.33.0)
+	public const FEE_MODEL_LOCKED = 'fee_model_locked';
+	public const FEE_MODEL_INVALID = 'fee_model_invalid';
+	public const LEVEL_RATE_MISSING = 'level_rate_missing';
+	public const NO_LEVELS = 'no_levels';
+	public const AMOUNT_WITHOUT_RATE = 'amount_without_rate';
+	public const CAP_MODE_INVALID = 'cap_mode_invalid';
+	public const CORRECTION_LEAD_ONLY = 'correction_lead_only';
 	// ---- records and routes
 	public const EXCHANGE_RATE_SERVER_ONLY = 'exchange_rate_server_only';
 	public const VERSION_CONFLICT = 'version_conflict';

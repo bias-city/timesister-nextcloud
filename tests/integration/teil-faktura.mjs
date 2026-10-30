@@ -9,11 +9,12 @@
 // team setting `invoicing` switches it off.
 // Needs the booking in the book (listener on CalDAV PUT or the job through
 // TS_OCC); without it the issuing checks are skipped.
-// Leaves pb as it found it: the settings record back, project, customer,
+// Leaves zb as it found it: the settings record back, project, customer,
 // events and marks removed; the frozen rows only with TS_SQL (the ledger
 // itself is append-only and stays).
 import { ensureTimeCalendar, deleteEvent, ocs, putEvent, runJob, sql } from './lib.mjs'
-import { A, L, RUN, U1, check, expect, festschreiben, head, isObj, me, sha256, stornieren } from './harness.mjs'
+import { RUN, check, expect, festschreiben, head, isObj, me, sha256, stornieren } from './harness.mjs'
+import { A, L, U1 } from './konten.mjs'
 
 const path = (key) => `/records/invoice/${encodeURIComponent(key)}`
 const ipath = (key) => `/invoices/${encodeURIComponent(key)}`
@@ -55,21 +56,21 @@ export async function faktura() {
 	const Y = 3000 + (parseInt(RUN.slice(-4), 36) % 5000) + 7
 	const ISSUED_ON = `${Y}-03-15`
 	const NUMBER = new RegExp(`^RF-${RUN}-\\d{4}$`)
-	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'pb'")
+	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'zb'")
 	const settings = await ocs(A, 'GET', '/records/setting/settings')
 	const base = settings.status === 200 ? settings.data.data : {}
 	let settingsVersion = settings.status === 200 ? settings.data.version : 0
 	const draft = (more = {}) => ({
 		schema: 1, project: PF, budget: 'b1', from: '2026-10-01', to: '2026-10-31', status: 'draft', number: null,
-		bookings: [{ person: 'pbuser1', uid: EV1, start: '2026-10-12T08:00:00', hours: 1, rate: 150, code: CODE }],
+		bookings: [{ person: 'zbuser1', uid: EV1, start: '2026-10-12T08:00:00', hours: 1, rate: 150, code: CODE }],
 		positions: [
-			{ kind: 'hours', text: 'Site visit', person: 'pbuser1', work_package: 0, hours: 1, rate: 150, amount: 150 },
+			{ kind: 'hours', text: 'Site visit', person: 'zbuser1', work_package: 0, hours: 1, rate: 150, amount: 150 },
 			{ kind: 'flat', text: 'Travel', amount: 100 },
 			{ kind: 'discount', text: 'Goodwill', amount: -50 },
 			{ kind: 'text', text: 'Thank you', amount: 0 },
 		],
 		greeting: 'Dear team', body: 'Payable within 30 days.', footer: 'Muster · Basel', vat: 8.1, contact: 'c1',
-		note: null, created_by: 'pbadmin', created_on: '2026-10-15', issued_on: null, paid_on: null, ...more,
+		note: null, created_by: 'zbadmin', created_on: '2026-10-15', issued_on: null, paid_on: null, ...more,
 	})
 	try {
 		head('Invoicing: setup')
@@ -83,9 +84,9 @@ export async function faktura() {
 			expect('Team Admin sets pattern and issuer', s, 200)
 			settingsVersion = s.data?.version ?? settingsVersion
 			expect('customer', await ocs(A, 'PUT', `/records/customer/${CF}`, { version: 0, data: { schema: 1, id: CF, name: `Kunde ${RUN}`, street: 'Platz 1', postcode: '4001', city: 'Basel', country: 'CH', vat_id: 'CHE-999', note: 'secret', contacts: [{ id: 'c1', name: 'Lea Kontakt' }] } }), 200)
-			expect('project with budget b1 in CHF, led by pblead', await ocs(A, 'PUT', `/records/project/${PF}`, { version: 0, data: { schema: 1, id: PF, name: `Faktura ${RUN}`, codes: [CODE], status: 'active', leads: ['pblead'], customer: CF, budgets: [{ id: 'b1', name: 'Budget', currency: 'CHF' }] } }), 200)
-			check('pbuser1’s time calendar exists and is named', (await ensureTimeCalendar(U1)) && (await ocs(U1, 'PUT', '/me/time-calendar', { calendar_url: 'zeit-pbuser1' })).status === 200)
-			check('pbuser1 books an hour on the project', (await putEvent(U1, EV1, ['DTSTART:20261012T080000Z', 'DTEND:20261012T090000Z', `SUMMARY:Site visit #${CODE}`])) === 201)
+			expect('project with budget b1 in CHF, led by zblead', await ocs(A, 'PUT', `/records/project/${PF}`, { version: 0, data: { schema: 1, id: PF, name: `Faktura ${RUN}`, codes: [CODE], status: 'active', leads: ['zblead'], customer: CF, budgets: [{ id: 'b1', name: 'Budget', currency: 'CHF' }] } }), 200)
+			check('zbuser1’s time calendar exists and is named', (await ensureTimeCalendar(U1)) && (await ocs(U1, 'PUT', '/me/time-calendar', { calendar_url: 'zeit-zbuser1' })).status === 200)
+			check('zbuser1 books an hour on the project', (await putEvent(U1, EV1, ['DTSTART:20261012T080000Z', 'DTEND:20261012T090000Z', `SUMMARY:Site visit #${CODE}`])) === 201)
 			await sleep(500)
 			if (!(await book(A)).some((e) => e.event_uid === EV1)) {
 				runJob('EntryReader')
@@ -137,9 +138,9 @@ export async function faktura() {
 			check('issue: seq, prev_hash, hash (from the close), document with the PDF’s sha256', Number.isInteger(seq) && typeof i?.prev_hash === 'string' && HEX64.test(hash ?? '') && i?.document?.kind === 'pdf' && i?.document?.sha256 === sha256(r.pdf), i)
 			const data = r.record?.data
 			check('record: hours 1, amount = total 216.2 (0.21.0), due_on, ledger_seq, hash, vat, documents[pdf]', data?.hours === 1 && data?.amount === 216.2 && data?.due_on === i?.due_on && data?.ledger_seq === seq && data?.hash === hash && data?.vat === 8.1 && data?.issued_on === ISSUED_ON && data?.documents?.[0]?.kind === 'pdf', data)
-			const mark = await ocs(A, 'GET', `/records/billing/${billingKey('pbuser1', EV1)}`)
+			const mark = await ocs(A, 'GET', `/records/billing/${billingKey('zbuser1', EV1)}`)
 			expect('the billing mark exists', mark, 200)
-			check('… document = number, source timesister, by pbadmin, billed_on = issued_on', mark.data?.data?.document === number && mark.data?.data?.source === 'timesister' && mark.data?.data?.by === 'pbadmin' && mark.data?.data?.billed_on === ISSUED_ON, mark.data?.data)
+			check('… document = number, source timesister, by zbadmin, billed_on = issued_on', mark.data?.data?.document === number && mark.data?.data?.source === 'timesister' && mark.data?.data?.by === 'zbadmin' && mark.data?.data?.billed_on === ISSUED_ON, mark.data?.data)
 			const again = await ocs(A, 'POST', `${ipath(K1)}/issue`, {})
 			expect('issuing it again', again, 409, 'issued')
 		}
@@ -152,14 +153,14 @@ export async function faktura() {
 			check('fixed: number, status, sums, currency, vat', x?.number === number && x?.status === 'issued' && x?.net === 200 && x?.vat_amount === 16.2 && x?.gross === 216.2 && x?.currency === 'CHF' && x?.vat === 8.1, x)
 			check('fixed: issuer and customer frozen, contact resolved, note left out', x?.issuer?.name === 'Muster sàrl' && x?.customer?.name === `Kunde ${RUN}` && x?.customer?.vat_id === 'CHE-999' && x?.customer?.contact?.name === 'Lea Kontakt' && x?.customer?.note === undefined, x?.customer)
 			check('fixed: positions as sent, hours with amount = hours × rate and code', x?.positions?.length === 4 && x?.positions?.[2]?.amount === -50 && x?.hours?.length === 1 && x?.hours?.[0]?.amount === 150 && x?.hours?.[0]?.code === CODE && x?.hours?.[0]?.start === '2026-10-12T08:00:00', [x?.positions, x?.hours])
-			check('fixed: texts, chain, period, issued_by', x?.greeting === 'Dear team' && x?.footer === 'Muster · Basel' && x?.chain?.seq === seq && x?.chain?.hash === hash && x?.period?.from === '2026-10-01' && x?.issued_by === 'pbadmin' && x?.reverses === null && x?.reversed_by === null, x)
+			check('fixed: texts, chain, period, issued_by', x?.greeting === 'Dear team' && x?.footer === 'Muster · Basel' && x?.chain?.seq === seq && x?.chain?.hash === hash && x?.period?.from === '2026-10-01' && x?.issued_by === 'zbadmin' && x?.reverses === null && x?.reversed_by === null, x)
 			expect('Lead of the project reads fixed', await ocs(L, 'GET', `${ipath(K1)}/fixed`), 200)
 			expect('Member reads fixed', await ocs(U1, 'GET', `${ipath(K1)}/fixed`), 403, 'forbidden')
 			expect('Lead reads the ledger', await ocs(L, 'GET', '/invoices/ledger'), 403, 'forbidden')
 			const lg = await ocs(A, 'GET', `/invoices/ledger?since=${seq - 1}&limit=10`)
 			expect('Team Admin reads the ledger from the issue on', lg, 200)
 			const e = lg.data?.entries?.[0]
-			check('entry: seq, at, actor, action issued, number, hashes', e?.seq === seq && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(e?.at ?? '') && e?.actor === 'pbadmin' && e?.action === 'issued' && e?.number === number && e?.hash === hash && HEX64.test(e?.payload_hash ?? ''), e)
+			check('entry: seq, at, actor, action issued, number, hashes', e?.seq === seq && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(e?.at ?? '') && e?.actor === 'zbadmin' && e?.action === 'issued' && e?.number === number && e?.hash === hash && HEX64.test(e?.payload_hash ?? ''), e)
 			check('entry: payload is the canonical JSON and hashes to payload_hash', typeof e?.payload === 'string' && sha256(e.payload) === e?.payload_hash && e.payload.startsWith('{"body":"Payable within 30 days.","budget":"b1"'), e?.payload?.slice(0, 120))
 			check('entry: the payload carries the document { kind pdf, name, size, sha256 } (0.32.0)', (() => { try { const d = JSON.parse(e?.payload ?? '{}').document; return d?.kind === 'pdf' && /\.pdf$/.test(d?.name ?? '') && HEX64.test(d?.sha256 ?? '') && Number.isInteger(d?.size) } catch { return false } })(), e?.payload?.slice(-200))
 			check('entry: the client recomputes the hash', e !== undefined && entryHash(e) === e.hash)
@@ -195,7 +196,7 @@ export async function faktura() {
 			const p = await ocs(A, 'POST', `${ipath(K1)}/paid`, { paid_on: `${Y}-04-01`, note: 'bank' })
 			expect('Team Admin marks it paid', p, 200)
 			check('… record paid with the day, ledger entry', p.data?.data?.status === 'paid' && p.data?.data?.paid_on === `${Y}-04-01` && p.data?.ledger?.seq > seq && HEX64.test(p.data?.ledger?.hash ?? ''), p.data)
-			check('… fixed shows paid_on and paid_by', (await ocs(A, 'GET', `${ipath(K1)}/fixed`)).data?.paid_by === 'pbadmin')
+			check('… fixed shows paid_on and paid_by', (await ocs(A, 'GET', `${ipath(K1)}/fixed`)).data?.paid_by === 'zbadmin')
 			expect('paid again', await ocs(A, 'POST', `${ipath(K1)}/paid`, { paid_on: `${Y}-04-02` }), 422, 'invalid')
 			const u = await ocs(A, 'POST', `${ipath(K1)}/unpaid`, {})
 			expect('… unpaid again', u, 200)
@@ -225,7 +226,7 @@ export async function faktura() {
 			check('the issue block of the reversal: net -200, gross -216.2, hash from the close', r.issue?.net === -200 && r.issue?.gross === -216.2 && HEX64.test(r.issue?.hash ?? ''), r.issue)
 			const o = r.original
 			check('the original after the close: cancelled, reversed_by, one version on', o?.key === K1 && o?.data?.status === 'cancelled' && o?.data?.reversed_by === rev && o?.version === before?.version + 1, o)
-			expect('the billing mark is gone', await ocs(A, 'GET', `/records/billing/${billingKey('pbuser1', EV1)}`), 404)
+			expect('the billing mark is gone', await ocs(A, 'GET', `/records/billing/${billingKey('zbuser1', EV1)}`), 404)
 			const f = await ocs(A, 'GET', `${ipath(K1)}/fixed`)
 			check('fixed of the original: cancelled, reversed_by, positions kept', f.data?.status === 'cancelled' && f.data?.reversed_by === rev && f.data?.positions?.length === 4 && f.data?.hours?.length === 1, f.data)
 			const g = await ocs(A, 'GET', `${ipath(rev)}/fixed`)
@@ -237,7 +238,8 @@ export async function faktura() {
 			check('… the reversal entry at the reserved seq with the document’s sha256', seqNoDoc[0]?.seq === r.issue?.seq && JSON.parse(seqNoDoc[0]?.payload ?? '{}')?.document?.sha256 === sha256(r.pdf), seqNoDoc[0])
 			expect('reversing it again', await ocs(A, 'POST', `${ipath(K1)}/reverse`, { kind: 'reversal' }), 422, 'invalid')
 			expect('crediting a cancelled one', await ocs(A, 'POST', `${ipath(K1)}/reverse`, { kind: 'credit' }), 422, 'invalid')
-			const rr = await stornieren(A, rev, { kind: 'reversal' })
+			// In the original's year: the pattern has no {year}, and a fresh team's counter of another year starts at 1 again.
+			const rr = await stornieren(A, rev, { kind: 'reversal', issued_on: ISSUED_ON })
 			expect('reversing the reversal', rr.reserve, 200)
 			expect('… closed', rr.close, 200)
 			if (rr.key) {
@@ -253,9 +255,9 @@ export async function faktura() {
 			expect('the second draft with the same booking is issued now', r.reserve, 200)
 			expect('… and closed', r.close, 200)
 			check('… due in 10 days', r.issue?.due_on === `${Y}-03-25`, r.issue)
-			expect('the billing mark is back', await ocs(A, 'GET', `/records/billing/${billingKey('pbuser1', EV1)}`), 200)
+			expect('the billing mark is back', await ocs(A, 'GET', `/records/billing/${billingKey('zbuser1', EV1)}`), 200)
 			expect('positions of a credit note checked', await ocs(A, 'POST', `${ipath(K2)}/reverse`, { kind: 'credit', positions: [{ kind: 'flat', text: 'Credit' }] }), 422, 'invalid')
-			const c = await stornieren(A, K2, { kind: 'credit', reason: 'Goodwill', positions: [{ kind: 'flat', text: 'Credit', amount: -30 }] })
+			const c = await stornieren(A, K2, { kind: 'credit', reason: 'Goodwill', issued_on: ISSUED_ON, positions: [{ kind: 'flat', text: 'Credit', amount: -30 }] })
 			expect('Team Admin credits', c.reserve, 200)
 			expect('… closed', c.close, 200)
 			const ck = c.key
@@ -263,8 +265,8 @@ export async function faktura() {
 				made.push(ck)
 			}
 			check('the credit note: credits the original, the given positions, net -30', c.record?.data?.credits === K2 && c.record?.data?.reverses === undefined && c.issue?.net === -30 && c.record?.data?.positions?.length === 1, c.record?.data)
-			check('the original stays issued, with its mark', c.original?.data?.status === 'issued' && (await ocs(A, 'GET', `/records/billing/${billingKey('pbuser1', EV1)}`)).status === 200, c.original)
-			const c2 = await stornieren(A, K2, { kind: 'credit' })
+			check('the original stays issued, with its mark', c.original?.data?.status === 'issued' && (await ocs(A, 'GET', `/records/billing/${billingKey('zbuser1', EV1)}`)).status === 200, c.original)
+			const c2 = await stornieren(A, K2, { kind: 'credit', issued_on: ISSUED_ON })
 			expect('a second credit note', c2.reserve, 200)
 			expect('… closed', c2.close, 200)
 			if (c2.key) {
@@ -331,12 +333,12 @@ export async function faktura() {
 				await ocs(A, 'DELETE', `${path(k)}?version=${cur.data.version}`)
 			}
 		}
-		const mark = await ocs(A, 'GET', `/records/billing/${billingKey('pbuser1', EV1)}`)
+		const mark = await ocs(A, 'GET', `/records/billing/${billingKey('zbuser1', EV1)}`)
 		if (mark.status === 200) {
-			await ocs(A, 'DELETE', `/records/billing/${billingKey('pbuser1', EV1)}?version=${mark.data.version}`)
+			await ocs(A, 'DELETE', `/records/billing/${billingKey('zbuser1', EV1)}?version=${mark.data.version}`)
 		}
 		await deleteEvent(U1, EV1)
-		// A running client of pbuser1 may have reported the booking on the project; only they delete that.
+		// A running client of zbuser1 may have reported the booking on the project; only they delete that.
 		for (const r of ((await ocs(U1, 'GET', '/records?since=0')).data?.records || []).filter((x) => x.kind === 'booking-report' && x.key.includes(`+${PF}+`))) {
 			await ocs(U1, 'DELETE', `/records/booking-report/${encodeURIComponent(r.key)}?version=${r.version}`)
 		}
@@ -352,6 +354,6 @@ export async function faktura() {
 		} else if (cur.status === 200) {
 			await ocs(A, 'DELETE', `/records/setting/settings?version=${cur.data.version}`)
 		}
-		check('pb left as found', isObj(await me(A)))
+		check('zb left as found', isObj(await me(A)))
 	}
 }

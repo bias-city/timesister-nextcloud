@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { ADMIN, as, ocs, sql } from './lib.mjs'
-import { A, AA, AL, AU, C, L, NOAH, P, R, RUN, U1, U2, V, ISO, b64, check, expect, head, isObj, keysOf, me, sha256, ensure } from './harness.mjs'
+import { C, NOAH, P, R, RUN, ISO, b64, check, expect, head, isObj, keysOf, me, sha256, ensure } from './harness.mjs'
+import { A, AA, AL, AU, L, U1, U2, V } from './konten.mjs'
 
 export async function datensaetze() {
-	// A project led by pblead and its customer (0.14.0); deleted at the end.
+	// A project led by zblead and its customer (0.14.0); deleted at the end.
 	const PL = `PK-${RUN}`
 	const CL = `KL-${RUN}`
 	let rev0 = 0
@@ -12,13 +13,13 @@ export async function datensaetze() {
 	head('Write, validate, conflict')
 	{
 		rev0 = (await me(A)).revision
-		const data = { id: P, name: 'Planungsbüro/Ä', codes: [P], mapping: {}, subprojects: [], budgets: [{ from: '2026-01-01', hours: 33.6 }], nested: { empty: {} } }
+		const data = { id: P, name: 'Probebüro/Ä', codes: [P], mapping: {}, subprojects: [], budgets: [{ from: '2026-01-01', hours: 33.6 }], nested: { empty: {} } }
 		const r = await ocs(A, 'PUT', `/records/project/${P}`, { version: 0, data })
 		expect('new project with version 0', r, 200)
 		check('response is the record (version 1, revision > old)', r.data?.version === 1 && r.data?.revision > rev0 && r.data?.deleted === false
-			&& r.data?.modified_by === 'pbadmin' && ISO.test(r.data?.modified_at), r.text)
+			&& r.data?.modified_by === 'zbadmin' && ISO.test(r.data?.modified_at), r.text)
 		check('empty objects stay objects, numbers and umlauts stay', isObj(r.data?.data?.mapping) && isObj(r.data?.data?.nested?.empty)
-			&& Array.isArray(r.data?.data?.subprojects) && r.data?.data?.budgets?.[0]?.hours === 33.6 && r.data?.data?.name === 'Planungsbüro/Ä', r.text)
+			&& Array.isArray(r.data?.data?.subprojects) && r.data?.data?.budgets?.[0]?.hours === 33.6 && r.data?.data?.name === 'Probebüro/Ä', r.text)
 		const again = await ocs(A, 'PUT', `/records/project/${P}`, { version: 0, data })
 		expect('version 0 on an existing record', again, 409, 'conflict')
 		check('conflict returns current', again.data?.current?.version === 1 && again.data?.current?.key === P, again.text)
@@ -26,7 +27,7 @@ export async function datensaetze() {
 		const stale = await ocs(A, 'PUT', `/records/project/${P}`, { version: 1, data: { ...data, name: 'stale' } })
 		expect('stale version', stale, 409, 'conflict')
 		check('current shows the new version and who wrote it', stale.data?.current?.version === 2 && stale.data?.current?.data?.name === 'v2'
-			&& stale.data?.current?.modified_by === 'pbadmin', stale.text)
+			&& stale.data?.current?.modified_by === 'zbadmin', stale.text)
 		expect('version from the future', await ocs(A, 'PUT', `/records/project/${P}`, { version: 9, data }), 409, 'conflict')
 
 		expect('project: id ≠ key', await ocs(A, 'PUT', `/records/project/${P}`, { version: 2, data: { id: 'anders' } }), 422, 'invalid')
@@ -35,7 +36,7 @@ export async function datensaetze() {
 		expect('setting with an unknown key', await ocs(A, 'PUT', '/records/setting/fremd', { version: 0, data: {} }), 422, 'invalid')
 		expect('data is a list', await ocs(A, 'PUT', `/records/project/${P}`, { version: 2, data: [] }), 422, 'invalid')
 		expect('data is missing', await ocs(A, 'PUT', `/records/project/${P}`, { version: 2 }), 422, 'invalid')
-		expect('accounts is not a list of uids', await ocs(A, 'PUT', `/records/person/x-${RUN}`, { version: 0, data: { login: `x-${RUN}`, accounts: 'pbuser1' } }), 422, 'invalid')
+		expect('accounts is not a list of uids', await ocs(A, 'PUT', `/records/person/x-${RUN}`, { version: 0, data: { login: `x-${RUN}`, accounts: 'zbuser1' } }), 422, 'invalid')
 		expect('version is missing', await ocs(A, 'PUT', `/records/project/${P}`, { data }), 400, 'invalid')
 		expect('version is negative', await ocs(A, 'PUT', `/records/project/${P}`, { version: -1, data }), 400, 'invalid')
 		expect('key with a space', await ocs(A, 'PUT', '/records/project/a%20b', { version: 0, data: { id: 'a b' } }), 400, 'invalid')
@@ -55,76 +56,77 @@ export async function datensaetze() {
 		expect('region as second Team Admin', await ocs(V, 'PUT', `/records/region/${R}`, { version: 0, data: { id: R, holidays: [] } }), 200)
 		expect('target hours', await ensure(V, 'setting', 'targethours', { entries: [{ from: '2026-01-01', weekly_hours: 42 }] }), 200)
 		expect('settings', await ensure(V, 'setting', 'settings', { vacation_code: 'F' }), 200)
-		expect('person pbuser1 (key = uid)', await ensure(A, 'person', 'pbuser1', { login: 'pbuser1', first_name: 'Mia' }), 200)
-		expect('person pblead', await ensure(A, 'person', 'pblead', { login: 'pblead' }), 200)
-		expect('person via accounts (pbuser2)', await ocs(A, 'PUT', `/records/person/${encodeURIComponent(NOAH)}`, { version: 0, data: { login: NOAH, accounts: ['pbuser2'] } }), 200)
+		// With their account in `accounts`, as the Mac app writes them: a person without one leads nothing.
+		expect('person zbuser1 (key = uid)', await ensure(A, 'person', 'zbuser1', { login: 'zbuser1', first_name: 'Mila', accounts: ['zbuser1'] }), 200)
+		expect('person zblead', await ensure(A, 'person', 'zblead', { login: 'zblead', accounts: ['zblead'] }), 200)
+		expect('person via accounts (zbuser2)', await ocs(A, 'PUT', `/records/person/${encodeURIComponent(NOAH)}`, { version: 0, data: { login: NOAH, accounts: ['zbuser2'] } }), 200)
 	}
 
 	// ---------------------------------------------------------------------------
-	head('Permissions: user (pbuser1)')
+	head('Permissions: user (zbuser1)')
 	{
 		const list = await ocs(U1, 'GET', '/records')
 		const k = keysOf(list)
 		check('reads setting, region, project', k.has(`project/${P}`) && k.has(`region/${R}`) && k.has('setting/targethours') && k.has('setting/settings'), [...k].slice(0, 20))
-		check('reads their own person', k.has('person/pbuser1'))
-		check('no other person, no customers in the list', !k.has('person/pblead') && !k.has(`person/${NOAH}`) && ![...k].some((x) => x.startsWith('customer/')), [...k])
-		expect('own person directly', await ocs(U1, 'GET', '/records/person/pbuser1'), 200)
-		expect('another person directly', await ocs(U1, 'GET', '/records/person/pblead'), 403, 'forbidden')
+		check('reads their own person', k.has('person/zbuser1'))
+		check('no other person, no customers in the list', !k.has('person/zblead') && !k.has(`person/${NOAH}`) && ![...k].some((x) => x.startsWith('customer/')), [...k])
+		expect('own person directly', await ocs(U1, 'GET', '/records/person/zbuser1'), 200)
+		expect('another person directly', await ocs(U1, 'GET', '/records/person/zblead'), 403, 'forbidden')
 		expect('another person that does not exist', await ocs(U1, 'GET', `/records/person/nie-${RUN}`), 403, 'forbidden')
 		expect('customer directly', await ocs(U1, 'GET', `/records/customer/${C}`), 403, 'forbidden')
 		expect('project directly', await ocs(U1, 'GET', `/records/project/${P}`), 200)
 		expect('project that does not exist', await ocs(U1, 'GET', `/records/project/nie-${RUN}`), 404, 'not_found')
-		expect('PUT', await ocs(U1, 'PUT', '/records/person/pbuser1', { version: 1, data: { login: 'pbuser1' } }), 403, 'forbidden')
+		expect('PUT', await ocs(U1, 'PUT', '/records/person/zbuser1', { version: 1, data: { login: 'zbuser1' } }), 403, 'forbidden')
 		expect('DELETE', await ocs(U1, 'DELETE', `/records/project/${P}?version=2`), 403, 'forbidden')
 		expect('Batch', await ocs(U1, 'POST', '/records/batch', { writes: [] }), 403, 'forbidden')
 		expect('Restore', await ocs(U1, 'POST', `/records/project/${P}/restore`, { version: 1, current: 2 }), 403, 'forbidden')
-		expect('history own person', await ocs(U1, 'GET', '/records/person/pbuser1/history'), 200)
-		expect('history another person', await ocs(U1, 'GET', '/records/person/pblead/history'), 403, 'forbidden')
+		expect('history own person', await ocs(U1, 'GET', '/records/person/zbuser1/history'), 200)
+		expect('history another person', await ocs(U1, 'GET', '/records/person/zblead/history'), 403, 'forbidden')
 		expect('history project', await ocs(U1, 'GET', `/records/project/${P}/history`), 403, 'forbidden')
 		expect('GET /status', await ocs(U1, 'GET', '/status'), 403, 'forbidden')
 		expect('GET /team', await ocs(U1, 'GET', '/team'), 403, 'forbidden')
-		check('/me: person_key = pbuser1', (await me(U1)).person_key === 'pbuser1')
+		check('/me: person_key = zbuser1', (await me(U1)).person_key === 'zbuser1')
 	}
-	head('Permissions: user via data.accounts (pbuser2)')
+	head('Permissions: user via data.accounts (zbuser2)')
 	{
-		// Earlier runs may have left other persons with accounts: [pbuser2].
+		// Earlier runs may have left other persons with accounts: [zbuser2].
 		const pk = (await me(U2)).person_key
 		const own = pk ? await ocs(U2, 'GET', `/records/person/${encodeURIComponent(pk)}`) : null
-		// A person keyed exactly "pbuser2" wins over accounts (the Mac app's test setup creates one).
-		const exact = (await ocs(U2, 'GET', '/records/person/pbuser2')).status === 200
-		if (exact) check('/me: person_key is the exact person pbuser2', pk === 'pbuser2', pk)
-		else check('/me: person_key from accounts', own?.status === 200 && own.data?.data?.accounts?.includes('pbuser2') && pk !== 'pbuser2', pk)
+		// A person keyed exactly "zbuser2" wins over accounts (the Mac app's test setup creates one).
+		const exact = (await ocs(U2, 'GET', '/records/person/zbuser2')).status === 200
+		if (exact) check('/me: person_key is the exact person zbuser2', pk === 'zbuser2', pk)
+		else check('/me: person_key from accounts', own?.status === 200 && own.data?.data?.accounts?.includes('zbuser2') && pk !== 'zbuser2', pk)
 		const k = keysOf(await ocs(U2, 'GET', '/records'))
-		check('reads their own person (accounts), not pbuser1', k.has(`person/${NOAH}`) && !k.has('person/pbuser1'))
+		check('reads their own person (accounts), not zbuser1', k.has(`person/${NOAH}`) && !k.has('person/zbuser1'))
 		expect('own person directly', await ocs(U2, 'GET', `/records/person/${encodeURIComponent(NOAH)}`), 200)
 		expect('history own person', await ocs(U2, 'GET', `/records/person/${encodeURIComponent(NOAH)}/history`), 200)
-		expect('another person (pbuser1)', await ocs(U2, 'GET', '/records/person/pbuser1'), 403, 'forbidden')
+		expect('another person (zbuser1)', await ocs(U2, 'GET', '/records/person/zbuser1'), 403, 'forbidden')
 	}
-	head('Permissions: lead (pblead)')
+	head('Permissions: lead (zblead)')
 	{
 		// 0.14.0: others as a name card, customers only of the Lead's projects.
 		expect('customer of a project the Lead leads', await ocs(A, 'PUT', `/records/customer/${CL}`, { version: 0, data: { id: CL, name: 'Lead customer', contacts: [] } }), 200)
-		expect('… and the project, led by pblead', await ocs(A, 'PUT', `/records/project/${PL}`, { version: 0, data: { id: PL, name: 'Led', codes: [PL], subprojects: [], leads: ['pblead'], customer: CL, status: 'active' } }), 200)
+		expect('… and the project, led by zblead', await ocs(A, 'PUT', `/records/project/${PL}`, { version: 0, data: { id: PL, name: 'Led', codes: [PL], subprojects: [], leads: ['zblead'], customer: CL, status: 'active' } }), 200)
 		const k = keysOf(await ocs(L, 'GET', '/records'))
-		check('reads the persons and only the customer of their project', k.has('person/pbuser1') && k.has(`person/${NOAH}`) && k.has(`customer/${CL}`)
+		check('reads the persons and only the customer of their project', k.has('person/zbuser1') && k.has(`person/${NOAH}`) && k.has(`customer/${CL}`)
 			&& !k.has(`customer/${C}`) && k.has(`project/${P}`), [...k].filter((x) => x.startsWith('customer/')))
 		expect('customer of their project directly', await ocs(L, 'GET', `/records/customer/${CL}`), 200)
 		expect('another customer directly', await ocs(L, 'GET', `/records/customer/${C}`), 403, 'forbidden')
 		expect('a customer that does not exist', await ocs(L, 'GET', `/records/customer/nie-${RUN}`), 403, 'forbidden')
-		const card = await ocs(L, 'GET', '/records/person/pbuser1')
+		const card = await ocs(L, 'GET', '/records/person/zbuser1')
 		const fields = ['accounts', 'first_name', 'initials', 'last_name', 'login', 'schema']
-		check('another person directly: only the name card', card.status === 200 && card.data?.data?.login === 'pbuser1'
+		check('another person directly: only the name card', card.status === 200 && card.data?.data?.login === 'zbuser1'
 			&& Object.keys(card.data?.data || {}).every((f) => fields.includes(f)), card.data?.data)
 		const inList = ((await ocs(L, 'GET', '/records')).data?.records || []).find((x) => x.kind === 'person' && x.key === NOAH)
 		check('… also in the list', !!inList && Object.keys(inList.data || {}).every((f) => fields.includes(f)), inList?.data)
-		const ownP = await ocs(L, 'GET', '/records/person/pblead')
-		check('own person: in full', ownP.status === 200 && ownP.data?.data?.login === 'pblead', ownP.data)
+		const ownP = await ocs(L, 'GET', '/records/person/zblead')
+		check('own person: in full', ownP.status === 200 && ownP.data?.data?.login === 'zblead', ownP.data)
 		expect('PUT', await ocs(L, 'PUT', `/records/customer/${C}`, { version: 1, data: { id: C } }), 403, 'forbidden')
 		expect('DELETE', await ocs(L, 'DELETE', `/records/customer/${C}?version=1`), 403, 'forbidden')
 		expect('Batch', await ocs(L, 'POST', '/records/batch', { writes: [{ kind: 'project', key: `L-${RUN}`, version: 0, data: { id: `L-${RUN}` } }] }), 403, 'forbidden')
 		expect('Restore', await ocs(L, 'POST', `/records/project/${P}/restore`, { version: 1, current: 2 }), 403, 'forbidden')
-		expect('history own person', await ocs(L, 'GET', '/records/person/pblead/history'), 200)
-		expect('history another person', await ocs(L, 'GET', '/records/person/pbuser1/history'), 403, 'forbidden')
+		expect('history own person', await ocs(L, 'GET', '/records/person/zblead/history'), 200)
+		expect('history another person', await ocs(L, 'GET', '/records/person/zbuser1/history'), 403, 'forbidden')
 		expect('history customer', await ocs(L, 'GET', `/records/customer/${C}/history`), 403, 'forbidden')
 		expect('GET /status', await ocs(L, 'GET', '/status'), 403, 'forbidden')
 		expect('GET /team', await ocs(L, 'GET', '/team'), 403, 'forbidden')
@@ -135,23 +137,23 @@ export async function datensaetze() {
 	{
 		const caps = await ocs(U1, 'GET', '/ocs/v1.php/cloud/capabilities?format=json')
 		check('capability cost_rates: 1', caps.data?.capabilities?.timesister?.cost_rates === 1, caps.data?.capabilities?.timesister)
-		const cur = (await ocs(A, 'GET', '/records/person/pbuser1')).data
+		const cur = (await ocs(A, 'GET', '/records/person/zbuser1')).data
 		const rates = [{ from: '2026-01-01', rate: 95 }, { from: '2026-07-01', rate: 110.5 }]
 		const rev = (await me(A)).revision
-		const w = await ocs(A, 'PUT', '/records/person/pbuser1', { version: cur.version, data: { ...cur.data, cost_rates: rates } })
+		const w = await ocs(A, 'PUT', '/records/person/zbuser1', { version: cur.version, data: { ...cur.data, cost_rates: rates } })
 		check('admin writes cost_rates and reads them back', w.status === 200 && JSON.stringify(w.data?.data?.cost_rates) === JSON.stringify(rates), w.text.slice(0, 300))
-		const again = await ocs(V, 'GET', '/records/person/pbuser1')
+		const again = await ocs(V, 'GET', '/records/person/zbuser1')
 		check('second Team Admin reads them', JSON.stringify(again.data?.data?.cost_rates) === JSON.stringify(rates), again.data?.data)
 		const hasRates = (d) => Object.prototype.hasOwnProperty.call(d || {}, 'cost_rates')
-		const own = await ocs(U1, 'GET', '/records/person/pbuser1')
-		check('pbuser1: own person without cost_rates, the rest there', own.status === 200 && own.data?.data?.first_name === 'Mia' && !hasRates(own.data?.data), own.data?.data)
-		check('… not in the list', !hasRates(((await ocs(U1, 'GET', '/records')).data?.records || []).find((x) => x.kind === 'person' && x.key === 'pbuser1')?.data))
-		const delta = ((await ocs(U1, 'GET', `/records?since=${rev}`)).data?.records || []).find((x) => x.kind === 'person' && x.key === 'pbuser1')
+		const own = await ocs(U1, 'GET', '/records/person/zbuser1')
+		check('zbuser1: own person without cost_rates, the rest there', own.status === 200 && own.data?.data?.first_name === 'Mila' && !hasRates(own.data?.data), own.data?.data)
+		check('… not in the list', !hasRates(((await ocs(U1, 'GET', '/records')).data?.records || []).find((x) => x.kind === 'person' && x.key === 'zbuser1')?.data))
+		const delta = ((await ocs(U1, 'GET', `/records?since=${rev}`)).data?.records || []).find((x) => x.kind === 'person' && x.key === 'zbuser1')
 		check('… not in the delta', !!delta && !hasRates(delta.data), delta)
-		check('… not in the history', ((await ocs(U1, 'GET', '/records/person/pbuser1/history')).data || []).every((h) => !hasRates(h.data)))
-		check('pblead: not on the name card', !hasRates((await ocs(L, 'GET', '/records/person/pbuser1')).data?.data))
+		check('… not in the history', ((await ocs(U1, 'GET', '/records/person/zbuser1/history')).data || []).every((h) => !hasRates(h.data)))
+		check('zblead: not on the name card', !hasRates((await ocs(L, 'GET', '/records/person/zbuser1')).data?.data))
 		const bad = async (name, cost_rates, text) => {
-			const r = await ocs(A, 'PUT', '/records/person/pbuser1', { version: cur.version + 1, data: { ...cur.data, cost_rates } })
+			const r = await ocs(A, 'PUT', '/records/person/zbuser1', { version: cur.version + 1, data: { ...cur.data, cost_rates } })
 			check(`422 ${name}`, r.status === 422 && r.data?.message?.includes(text), `${r.status} ${r.data?.message}`)
 		}
 		await bad('not a list', { '2026-01-01': 95 }, '“cost_rates” must be a list')
@@ -159,53 +161,53 @@ export async function datensaetze() {
 		await bad('no such day', [{ from: '2026-02-30', rate: 95 }], 'needs a day “from”')
 		await bad('negative', [{ from: '2026-01-01', rate: -1 }], 'needs a day “from”')
 		await bad('a day twice', [{ from: '2026-01-01', rate: 95 }, { from: '2026-01-01', rate: 99 }], 'names the day 2026-01-01 twice')
-		expect('null clears them', await ocs(A, 'PUT', '/records/person/pbuser1', { version: cur.version + 1, data: { ...cur.data, cost_rates: null } }), 200)
+		expect('null clears them', await ocs(A, 'PUT', '/records/person/zbuser1', { version: cur.version + 1, data: { ...cur.data, cost_rates: null } }), 200)
 		// Back to the record as it was before this part.
-		expect('pbuser1 restored', await ocs(A, 'PUT', '/records/person/pbuser1', { version: cur.version + 2, data: cur.data }), 200)
+		expect('zbuser1 restored', await ocs(A, 'PUT', '/records/person/zbuser1', { version: cur.version + 2, data: cur.data }), 200)
 	}
 
-	head('Permissions: both Team Admins (pbverw, pbadmin)')
+	head('Permissions: both Team Admins (zbverw, zbadmin)')
 	{
-		for (const [who, name] of [[V, 'pbverw'], [A, 'pbadmin']]) {
+		for (const [who, name] of [[V, 'zbverw'], [A, 'zbadmin']]) {
 			const k = keysOf(await ocs(who, 'GET', '/records'))
-			check(`${name}: reads everything`, k.has('person/pbuser1') && k.has(`customer/${C}`) && k.has(`region/${R}`))
-			expect(`${name}: history another person`, await ocs(who, 'GET', '/records/person/pbuser1/history'), 200)
+			check(`${name}: reads everything`, k.has('person/zbuser1') && k.has(`customer/${C}`) && k.has(`region/${R}`))
+			expect(`${name}: history another person`, await ocs(who, 'GET', '/records/person/zbuser1/history'), 200)
 			expect(`${name}: history customer`, await ocs(who, 'GET', `/records/customer/${C}/history`), 200)
 			expect(`${name}: GET /status`, await ocs(who, 'GET', '/status'), 200)
 			const t = await ocs(who, 'GET', '/team')
 			const roles = Object.fromEntries((t.data?.members || []).map((x) => [x.uid, x.role]))
-			check(`${name}: GET /team with members and role`, t.status === 200 && t.data?.slug === 'pb'
-				&& JSON.stringify(roles) === JSON.stringify({ pbadmin: 'admin', pblead: 'lead', pbuser1: 'user', pbuser2: 'user', pbverw: 'admin' }), t.text)
+			check(`${name}: GET /team with members and role`, t.status === 200 && t.data?.slug === 'zb'
+				&& JSON.stringify(roles) === JSON.stringify({ zbadmin: 'admin', zblead: 'lead', zbuser1: 'user', zbuser2: 'user', zbverw: 'admin' }), t.text)
 		}
 	}
 
 	// ---------------------------------------------------------------------------
-	head('Team boundary: Atelier sees nothing from Planungsbüro')
+	head('Team boundary: Probeatelier sees nothing from Probebüro')
 	{
 		const k = keysOf(await ocs(AA, 'GET', '/records'))
-		check('list contains no record from pb', ![`project/${P}`, `customer/${C}`, `region/${R}`, 'person/pbuser1', 'person/pblead', `person/${NOAH}`].some((x) => k.has(x)), [...k])
+		check('list contains no record from zb', ![`project/${P}`, `customer/${C}`, `region/${R}`, 'person/zbuser1', 'person/zblead', `person/${NOAH}`].some((x) => k.has(x)), [...k])
 		const kd = keysOf(await ocs(AA, 'GET', `/records?since=${Math.max(0, rev0 - 1)}`))
-		check('not in the delta either', !kd.has(`project/${P}`) && !kd.has('person/pbuser1'))
-		expect('pb project directly', await ocs(AA, 'GET', `/records/project/${P}`), 404, 'not_found')
+		check('not in the delta either', !kd.has(`project/${P}`) && !kd.has('person/zbuser1'))
+		expect('zb project directly', await ocs(AA, 'GET', `/records/project/${P}`), 404, 'not_found')
 		// 0.14.0: a Lead reads no customer outside their projects – 403, existence not revealed.
-		expect('pb customer directly (lead at)', await ocs(AL, 'GET', `/records/customer/${C}`), 403, 'forbidden')
-		expect('pb person directly', await ocs(AA, 'GET', '/records/person/pbuser1'), 404, 'not_found')
-		expect('history of a pb record', await ocs(AA, 'GET', `/records/project/${P}/history`), 404, 'not_found')
-		expect('restore of a pb record', await ocs(AA, 'POST', `/records/project/${P}/restore`, { version: 1, current: 2 }), 404, 'not_found')
-		expect('DELETE of a pb record', await ocs(AA, 'DELETE', `/records/project/${P}?version=2`), 404, 'not_found')
-		const pbRev = (await me(A)).revision
-		const atRev = (await me(AA)).revision
-		const own = await ocs(AA, 'PUT', `/records/project/${P}`, { version: 0, data: { id: P, status: DRAFT, name: 'Atelier' } })
-		check('the same key in at is its own record (version 1)', own.status === 200 && own.data?.version === 1, own.text)
-		check("writing in at only bumps at's revision", own.data?.revision === atRev + 1 && (await me(A)).revision === pbRev, { pbRev, atRev, got: own.data?.revision })
-		const pbP = await ocs(A, 'GET', `/records/project/${P}`)
-		check('pb record unchanged', pbP.data?.version === 2 && pbP.data?.data?.name === 'v2', pbP.text)
+		expect('zb customer directly (lead za)', await ocs(AL, 'GET', `/records/customer/${C}`), 403, 'forbidden')
+		expect('zb person directly', await ocs(AA, 'GET', '/records/person/zbuser1'), 404, 'not_found')
+		expect('history of a zb record', await ocs(AA, 'GET', `/records/project/${P}/history`), 404, 'not_found')
+		expect('restore of a zb record', await ocs(AA, 'POST', `/records/project/${P}/restore`, { version: 1, current: 2 }), 404, 'not_found')
+		expect('DELETE of a zb record', await ocs(AA, 'DELETE', `/records/project/${P}?version=2`), 404, 'not_found')
+		const zbRev = (await me(A)).revision
+		const zaRev = (await me(AA)).revision
+		const own = await ocs(AA, 'PUT', `/records/project/${P}`, { version: 0, data: { id: P, status: DRAFT, name: 'Probeatelier' } })
+		check('the same key in za is its own record (version 1)', own.status === 200 && own.data?.version === 1, own.text)
+		check("writing in za only bumps za's revision", own.data?.revision === zaRev + 1 && (await me(A)).revision === zbRev, { zbRev, zaRev, got: own.data?.revision })
+		const zbP = await ocs(A, 'GET', `/records/project/${P}`)
+		check('zb record unchanged', zbP.data?.version === 2 && zbP.data?.data?.name === 'v2', zbP.text)
 		const st = await ocs(AA, 'GET', '/status')
 		const uids = (st.data || []).map((x) => x.uid).sort()
-		check('GET /status: only members of at', JSON.stringify(uids) === JSON.stringify(['atadmin', 'atlead', 'atuser1']), uids)
+		check('GET /status: only members of za', JSON.stringify(uids) === JSON.stringify(['zaadmin', 'zalead', 'zauser1']), uids)
 		const t = await ocs(AA, 'GET', '/team')
-		check('GET /team: at, no pb accounts', t.data?.slug === 'at' && !JSON.stringify(t.data?.members).includes('pb'), t.text)
-		expect('at user reads no pb customer', await ocs(AU, 'GET', `/records/customer/${C}`), 403, 'forbidden')
+		check('GET /team: za, no zb accounts', t.data?.slug === 'za' && !JSON.stringify(t.data?.members).includes('zb'), t.text)
+		expect('za user reads no zb customer', await ocs(AU, 'GET', `/records/customer/${C}`), 403, 'forbidden')
 	}
 
 	// ---------------------------------------------------------------------------
@@ -213,24 +215,24 @@ export async function datensaetze() {
 	{
 		const id = `b1-${RUN}@example.test`
 		const booking = { id, date: '2026-10-07', start: '08:15', end: '10:00', minutes: 105, code: PL, title: 'Site visit', notes: 'First line\nSecond line', billable: true, billed: false }
-		const report = (project, month, bookings = [booking]) => ({ schema: 1, person: 'pbuser1', project, month, at: '2026-10-07T12:00:00Z', bookings })
-		const rk = `pbuser1+${PL}+2026-10`
-		const rp = `pbuser1+${P}+2026-10`
-		const mk = `pbuser1+${PL}+${sha256(id).slice(0, 32)}`
-		const mark = (project) => ({ schema: 1, person: 'pbuser1', project, uid: id, billable: false })
+		const report = (project, month, bookings = [booking]) => ({ schema: 1, person: 'zbuser1', project, month, at: '2026-10-07T12:00:00Z', bookings })
+		const rk = `zbuser1+${PL}+2026-10`
+		const rp = `zbuser1+${P}+2026-10`
+		const mk = `zbuser1+${PL}+${sha256(id).slice(0, 32)}`
+		const mark = (project) => ({ schema: 1, person: 'zbuser1', project, uid: id, billable: false })
 		try {
 			const cat = await ocs(U1, 'GET', `/records/project/${PL}`)
 			check('catalog: led true for a project with a Lead, no leads', cat.data?.data?.led === true && !('leads' in (cat.data?.data || {})), cat.data?.data)
 			check('… no led without a Lead', !('led' in ((await ocs(U1, 'GET', `/records/project/${P}`)).data?.data || {})))
-			check('/me.lead_of of pblead names the project', ((await me(L)).lead_of || []).some((x) => x.key === PL))
+			check('/me.lead_of of zblead names the project', ((await me(L)).lead_of || []).some((x) => x.key === PL))
 			expect('the person reports their bookings', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(rk)}`, { version: 0, data: report(PL, '2026-10') }), 200)
 			expect('… on a project without Lead too', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(rp)}`, { version: 0, data: report(P, '2026-10', []) }), 200)
-			expect('unknown field', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(`pbuser1+${PL}+2026-11`)}`, { version: 0, data: { ...report(PL, '2026-11', []), x: 1 } }), 422, 'invalid')
-			expect('a day outside the month', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(`pbuser1+${PL}+2026-11`)}`, { version: 0, data: report(PL, '2026-11') }), 422, 'invalid')
-			expect('month ≠ key', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(`pbuser1+${PL}+2026-11`)}`, { version: 0, data: report(PL, '2026-10') }), 422, 'invalid')
-			expect('another User writes it', await ocs(U2, 'PUT', `/records/booking-report/${encodeURIComponent(`pbuser1+${PL}+2026-09`)}`, { version: 0, data: report(PL, '2026-09', []) }), 403, 'forbidden')
-			expect('a Team Admin writes it', await ocs(A, 'PUT', `/records/booking-report/${encodeURIComponent(`pbuser1+${PL}+2026-09`)}`, { version: 0, data: report(PL, '2026-09', []) }), 403, 'forbidden')
-			expect('the Lead writes it', await ocs(L, 'PUT', `/records/booking-report/${encodeURIComponent(`pbuser1+${PL}+2026-09`)}`, { version: 0, data: report(PL, '2026-09', []) }), 403, 'forbidden')
+			expect('unknown field', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(`zbuser1+${PL}+2026-11`)}`, { version: 0, data: { ...report(PL, '2026-11', []), x: 1 } }), 422, 'invalid')
+			expect('a day outside the month', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(`zbuser1+${PL}+2026-11`)}`, { version: 0, data: report(PL, '2026-11') }), 422, 'invalid')
+			expect('month ≠ key', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(`zbuser1+${PL}+2026-11`)}`, { version: 0, data: report(PL, '2026-10') }), 422, 'invalid')
+			expect('another User writes it', await ocs(U2, 'PUT', `/records/booking-report/${encodeURIComponent(`zbuser1+${PL}+2026-09`)}`, { version: 0, data: report(PL, '2026-09', []) }), 403, 'forbidden')
+			expect('a Team Admin writes it', await ocs(A, 'PUT', `/records/booking-report/${encodeURIComponent(`zbuser1+${PL}+2026-09`)}`, { version: 0, data: report(PL, '2026-09', []) }), 403, 'forbidden')
+			expect('the Lead writes it', await ocs(L, 'PUT', `/records/booking-report/${encodeURIComponent(`zbuser1+${PL}+2026-09`)}`, { version: 0, data: report(PL, '2026-09', []) }), 403, 'forbidden')
 			const lr = await ocs(L, 'GET', `/records/booking-report/${encodeURIComponent(rk)}`)
 			check('the project\'s Lead reads it, with title and notes', lr.status === 200 && lr.data?.data?.bookings?.[0]?.notes === 'First line\nSecond line', lr.text.slice(0, 300))
 			expect('… but not the report on a project they do not lead', await ocs(L, 'GET', `/records/booking-report/${encodeURIComponent(rp)}`), 403, 'forbidden')
@@ -241,8 +243,8 @@ export async function datensaetze() {
 			check('… nor in the list', !keysOf(await ocs(U2, 'GET', '/records')).has(`booking-report/${rk}`))
 
 			expect('billable: the Lead marks a booking', await ocs(L, 'PUT', `/records/billable/${encodeURIComponent(mk)}`, { version: 0, data: mark(PL) }), 200)
-			expect('… hash ≠ uid', await ocs(L, 'PUT', `/records/billable/${encodeURIComponent(`pbuser1+${PL}+${'0'.repeat(32)}`)}`, { version: 0, data: mark(PL) }), 422, 'invalid')
-			expect('… not on a project they do not lead', await ocs(L, 'PUT', `/records/billable/${encodeURIComponent(`pbuser1+${P}+${sha256(id).slice(0, 32)}`)}`, { version: 0, data: mark(P) }), 403, 'forbidden')
+			expect('… hash ≠ uid', await ocs(L, 'PUT', `/records/billable/${encodeURIComponent(`zbuser1+${PL}+${'0'.repeat(32)}`)}`, { version: 0, data: mark(PL) }), 422, 'invalid')
+			expect('… not on a project they do not lead', await ocs(L, 'PUT', `/records/billable/${encodeURIComponent(`zbuser1+${P}+${sha256(id).slice(0, 32)}`)}`, { version: 0, data: mark(P) }), 403, 'forbidden')
 			expect('the person reads the mark', await ocs(U1, 'GET', `/records/billable/${encodeURIComponent(mk)}`), 200)
 			expect('… but does not write it', await ocs(U1, 'PUT', `/records/billable/${encodeURIComponent(mk)}`, { version: 1, data: { ...mark(PL), billable: true } }), 403, 'forbidden')
 			expect('another User does not read it', await ocs(U2, 'GET', `/records/billable/${encodeURIComponent(mk)}`), 403, 'forbidden')
@@ -288,7 +290,7 @@ export async function datensaetze() {
 
 		// Tombstone of a person via accounts
 		const NOAH2 = `noah2.${RUN}@example.test`
-		await ocs(A, 'PUT', `/records/person/${encodeURIComponent(NOAH2)}`, { version: 0, data: { login: NOAH2, accounts: ['pbuser2'] } })
+		await ocs(A, 'PUT', `/records/person/${encodeURIComponent(NOAH2)}`, { version: 0, data: { login: NOAH2, accounts: ['zbuser2'] } })
 		const b2 = (await me(U2)).revision
 		await ocs(A, 'DELETE', `/records/person/${encodeURIComponent(NOAH2)}?version=1`)
 		const d2 = await ocs(U2, 'GET', `/records?since=${b2}`)
@@ -304,15 +306,15 @@ export async function datensaetze() {
 		const versions = (h.data || []).map((x) => x.version)
 		check('history newest first, every version', JSON.stringify(versions) === JSON.stringify([4, 3, 2, 1]), versions)
 		check('version 3 is the tombstone', h.data?.[1]?.deleted === true && h.data?.[1]?.data === null)
-		check('version 1 with content, who and when', h.data?.[3]?.data?.name === 'Planungsbüro/Ä' && h.data?.[3]?.modified_by === 'pbadmin' && ISO.test(h.data?.[3]?.modified_at))
+		check('version 1 with content, who and when', h.data?.[3]?.data?.name === 'Probebüro/Ä' && h.data?.[3]?.modified_by === 'zbadmin' && ISO.test(h.data?.[3]?.modified_at))
 		const rs = await ocs(V, 'POST', `/records/project/${P}/restore`, { version: 1, current: 4 })
 		expect('restore version 1', rs, 200)
-		check('… as new version 5 with the old content', rs.data?.version === 5 && rs.data?.data?.name === 'Planungsbüro/Ä' && rs.data?.modified_by === 'pbverw', rs.text)
+		check('… as new version 5 with the old content', rs.data?.version === 5 && rs.data?.data?.name === 'Probebüro/Ä' && rs.data?.modified_by === 'zbverw', rs.text)
 		expect('restore with a stale current', await ocs(V, 'POST', `/records/project/${P}/restore`, { version: 2, current: 4 }), 409, 'conflict')
 		expect('restore of a tombstone', await ocs(V, 'POST', `/records/project/${P}/restore`, { version: 3, current: 5 }), 422, 'invalid')
 		expect('restore of an unknown version', await ocs(V, 'POST', `/records/project/${P}/restore`, { version: 99, current: 5 }), 404, 'not_found')
 		expect('history of an unknown record', await ocs(A, 'GET', `/records/project/nie-${RUN}/history`), 404, 'not_found')
-		const many = await ocs(A, 'GET', '/records/person/pbuser1/history')
+		const many = await ocs(A, 'GET', '/records/person/zbuser1/history')
 		check('history at most 100', Array.isArray(many.data) && many.data.length <= 100)
 	}
 

@@ -7,10 +7,11 @@
 // the person record is deleted. Only ZZ data; everything is cleaned up.
 import { inflateRawSync } from 'node:zlib'
 import { ADMIN, API, NC, ocs, seedProjectOf } from './lib.mjs'
-import { A, L, RUN, U1, check, expect, head, sha256 } from './harness.mjs'
+import { RUN, check, expect, head, sha256 } from './harness.mjs'
+import { A, L, U1 } from './konten.mjs'
 
 const EXT = 'ext-zzliste'
-const CODE = seedProjectOf('pb').toUpperCase()
+const CODE = seedProjectOf('zb').toUpperCase()
 const uidOf = (name) => `zzl-${RUN}-${name}@example.test`
 const billingKey = (person, uid) => `${person}+${sha256(uid).slice(0, 32)}`
 
@@ -87,7 +88,7 @@ export async function listen() {
 		const made = await createPerson()
 		expect('Team Admin creates the external person', made, 200)
 		personVersion = made.data?.version ?? 0
-		expect('a member is no external person', await ocs(A, 'POST', '/entries/list', { uid: 'pbuser1', put: [object(e1, '20261005', 'x')] }), 422, 'invalid')
+		expect('a member is no external person', await ocs(A, 'POST', '/entries/list', { uid: 'zbuser1', put: [object(e1, '20261005', 'x')] }), 422, 'invalid')
 		expect('a Lead may not send lists', await ocs(L, 'POST', '/entries/list', { uid: EXT, put: [object(e1, '20261005', 'x')] }), 403, 'forbidden')
 		const two = object(e1, '20261005', 'a').replace('END:VCALENDAR', `BEGIN:VEVENT\r\nUID:${e2}\r\nDTSTAMP:20261001T080000Z\r\nDTSTART:20261006T080000Z\r\nDTEND:20261006T090000Z\r\nSUMMARY:b\r\nEND:VEVENT\r\nEND:VCALENDAR`)
 		expect('an object with two UIDs is refused', await ocs(A, 'POST', '/entries/list', { uid: EXT, put: [two] }), 422, 'invalid')
@@ -136,8 +137,8 @@ export async function listen() {
 		expect('the mark is taken back', await ocs(A, 'DELETE', `/records/billing/${bk}?version=${billed.data?.version ?? 1}`), 200)
 
 		head('Lists of hours: the team ZIP')
-		const team = (await ocs(ADMIN, 'GET', '/admin/teams')).data?.find((t) => t.slug === 'pb')
-		check('the team pb is known', Number.isInteger(team?.id), team)
+		const team = (await ocs(ADMIN, 'GET', '/admin/teams')).data?.find((t) => t.slug === 'zb')
+		check('the team zb is known', Number.isInteger(team?.id), team)
 		if (Number.isInteger(team?.id)) {
 			const res = await fetch(`${NC}${API}/admin/teams/${team.id}/export`, { headers: { 'OCS-APIRequest': 'true', Authorization: 'Basic ' + Buffer.from(`${ADMIN.user}:${ADMIN.pass}`).toString('base64') } })
 			const zip = unzip(Buffer.from(await res.arrayBuffer()))

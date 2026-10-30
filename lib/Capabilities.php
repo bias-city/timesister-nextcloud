@@ -106,6 +106,14 @@ use OCP\Capabilities\ICapability;
  * since 0.32.0: `POST /quotes/{key}/documents?kind=sent|signed`, `GET
  * /quotes/{key}/documents`, `documents[]` on the record. `invoice_layout: 2`
  * since 0.32.0: six appendices, every table from the client.
+ * `fee_models: 1` since 0.33.0: work packages led by `amount`, the fee
+ * model per budget (`fee_model`, `mean_rate`, `cap_mode`, `tolerance`
+ * checked, the lock), a package's `level`, `settings.fee_model`, the
+ * person's `level` on their own bookings in the category model,
+ * `booking_levels` in the catalog, addenda in money, `level` and
+ * `level_name` on `hours` lines, `bookings[].level`, the appendix
+ * `by_level` and the issue checks of quotes and invoices (`no_levels`,
+ * `level_rate_missing`, `amount_without_rate`).
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -113,7 +121,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, quote_documents: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int}} */
+	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, quote_documents: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int, fee_models: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -151,6 +159,7 @@ final class Capabilities implements ICapability {
 				'entry_lists' => 1,
 				'customer_types' => 1,
 				'expense_table' => 2,
+				'fee_models' => 1,
 			],
 		];
 	}

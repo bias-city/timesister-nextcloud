@@ -10,7 +10,9 @@ namespace OCA\TimeSister\Service;
  * The layout of an invoice document (0.26.0), pure: the positions flat or
  * grouped by the level of their work packages (`path` of each hours
  * position), and appended tables. Since 0.32.0 (`invoice_layout: 2`) six
- * appendices – `levels`, `tags`, `budget`, `aps`, `companies`, `rates` –
+ * appendices – `levels`, `tags`, `budget`, `aps`, `companies`, `rates` –,
+ * since 0.33.0 also `by_level` (hours and amount per level of the team's
+ * list, beside `levels`, the table per level of the package tree) –
  * and every table comes from the client: the server checks the form only
  * (lists of at most 500 objects, strings of at most 500 characters, finite
  * numbers), freezes the layout with the invoice and renders nothing.
@@ -18,9 +20,9 @@ namespace OCA\TimeSister\Service;
 final class InvoiceLayout {
 	public const FIELD = 'layout';
 	public const GROUPINGS = ['flat', 'level'];
-	public const APPENDIX = ['levels', 'tags', 'budget', 'aps', 'companies', 'rates'];
+	public const APPENDIX = ['levels', 'tags', 'budget', 'aps', 'companies', 'rates', 'by_level'];
 	/** The tables the client sends as lists of objects (the budget is one object). */
-	public const TABLES = ['tags', 'aps', 'companies', 'rates'];
+	public const TABLES = ['tags', 'aps', 'companies', 'rates', 'by_level'];
 	public const ROWS_MAX = 500;
 	public const PATH_MAX = 10;
 	public const TEXT_MAX = 500;

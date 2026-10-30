@@ -10,11 +10,12 @@
 // queue after an issue and the status endpoint. What the server's XML and
 // PDF used to be checked for (ZUGFeRD, KoSIT, tax categories) is the Mac
 // app's now (core/src/rechnung/erechnung_xml.rs). Positions only, no
-// bookings: no calendar needed. Leaves pb as it found it (settings record,
+// bookings: no calendar needed. Leaves zb as it found it (settings record,
 // team settings, project, customers); the frozen rows only with TS_SQL,
 // the ledger stays.
 import { ocs, runJob, sql } from './lib.mjs'
-import { A, L, RUN, U1, check, expect, festschreiben, head, isObj, me, raw, sha256, stornieren } from './harness.mjs'
+import { RUN, check, expect, festschreiben, head, isObj, me, raw, sha256, stornieren } from './harness.mjs'
+import { A, L, U1 } from './konten.mjs'
 
 const path = (key) => `/records/invoice/${encodeURIComponent(key)}`
 const ipath = (key) => `/invoices/${encodeURIComponent(key)}`
@@ -49,7 +50,7 @@ export async function erechnung() {
 	const made = Object.values(keys)
 	const Y = 3000 + (parseInt(RUN.slice(-4), 36) % 5000) + 9
 	const ISSUED_ON = `${Y}-03-10`
-	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'pb'")
+	const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'zb'")
 	const settings = await ocs(A, 'GET', '/records/setting/settings')
 	const base = settings.status === 200 ? settings.data.data : {}
 	let settingsVersion = settings.status === 200 ? settings.data.version : 0
@@ -66,7 +67,7 @@ export async function erechnung() {
 	const draft = (customerKey, currency, more = {}) => ({
 		schema: 1, project: PF, budget: currency === 'EUR' ? 'b2' : 'b1', from: '2026-10-01', to: '2026-10-31', status: 'draft', number: null, bookings: [],
 		positions: [{ kind: 'hours', text: 'Planung', hours: 10, rate: 150, amount: 1500 }, { kind: 'flat', text: 'Spesen', amount: 100 }, { kind: 'discount', text: 'Rabatt', amount: -100 }],
-		greeting: 'Guten Tag', body: 'Zahlbar innert 30 Tagen.', footer: 'Muster · Basel', note: null, created_by: 'pbadmin', created_on: '2026-10-15', issued_on: null, paid_on: null, ...more,
+		greeting: 'Guten Tag', body: 'Zahlbar innert 30 Tagen.', footer: 'Muster · Basel', note: null, created_by: 'zbadmin', created_on: '2026-10-15', issued_on: null, paid_on: null, ...more,
 	})
 	try {
 		head('E-invoices: setup')
@@ -83,7 +84,7 @@ export async function erechnung() {
 			expect('customer with e_invoice as text', await ocs(A, 'PUT', `/records/customer/${customers.pub}`, { version: 1, data: { schema: 1, id: customers.pub, name: 'x', e_invoice: 'yes' } }), 422, 'invalid')
 			expect('customer with a Leitweg-ID of 47 characters', await ocs(A, 'PUT', `/records/customer/${customers.pub}`, { version: 1, data: { schema: 1, id: customers.pub, name: 'x', leitweg_id: '1'.repeat(47) } }), 422, 'invalid')
 			expect('customer with datev_account as number', await ocs(A, 'PUT', `/records/customer/${customers.pub}`, { version: 1, data: { schema: 1, id: customers.pub, name: 'x', datev_account: 10001 } }), 422, 'invalid')
-			expect('project with budgets in CHF and EUR, customer CH', await ocs(A, 'PUT', `/records/project/${PF}`, { version: 0, data: { schema: 1, id: PF, name: `E-Rechnung ${RUN}`, codes: [CODE], status: 'active', leads: ['pblead'], customer: customers.ch, budgets: [{ id: 'b1', name: 'CHF', currency: 'CHF' }, { id: 'b2', name: 'EUR', currency: 'EUR' }] } }), 200)
+			expect('project with budgets in CHF and EUR, customer CH', await ocs(A, 'PUT', `/records/project/${PF}`, { version: 0, data: { schema: 1, id: PF, name: `E-Rechnung ${RUN}`, codes: [CODE], status: 'active', leads: ['zblead'], customer: customers.ch, budgets: [{ id: 'b1', name: 'CHF', currency: 'CHF' }, { id: 'b2', name: 'EUR', currency: 'EUR' }] } }), 200)
 			expect('a draft with a bad tax_case', await ocs(A, 'PUT', path(keys.over), { version: 0, data: draft(customers.ch, 'CHF', { tax_case: 'abroad' }) }), 422, 'invalid')
 		}
 		const pointProjectTo = async (customerKey) => {
@@ -215,7 +216,7 @@ export async function erechnung() {
 			expect('external by a Lead', await ocs(L, 'POST', `${ipath(keys.chch)}/external`, { system: 'bexio', id: '1' }), 403, 'forbidden')
 			const r = await ocs(A, 'POST', `${ipath(keys.chch)}/external`, { system: 'bexio', id: 4711, url: 'https://office.bexio.com/kb_invoice/show/4711' })
 			expect('Team Admin records the hand-over', r, 200)
-			check('… fixed.external {system, id, url, at, by} and a ledger block', r.data?.external?.system === 'bexio' && r.data?.external?.id === '4711' && r.data?.external?.by === 'pbadmin' && typeof r.data?.ledger?.seq === 'number', r.data?.external)
+			check('… fixed.external {system, id, url, at, by} and a ledger block', r.data?.external?.system === 'bexio' && r.data?.external?.id === '4711' && r.data?.external?.by === 'zbadmin' && typeof r.data?.ledger?.seq === 'number', r.data?.external)
 			const lg = await ocs(A, 'GET', `/invoices/ledger?since=${r.data?.ledger?.seq - 1}&limit=2`)
 			const e = (lg.data?.entries || []).find((x) => x.seq === r.data?.ledger?.seq)
 			check('ledger: exported with payload {key, number, system, id, url}', e?.action === 'exported' && JSON.parse(e.payload).system === 'bexio' && JSON.parse(e.payload).id === '4711', e)
@@ -226,12 +227,13 @@ export async function erechnung() {
 			const s = await ocs(A, 'POST', `${ipath(keys.chch)}/external`, { system: 'sevdesk', id: 'SD-17', url: 'https://my.sevdesk.de/fi/detail/type/RE/id/17' })
 			expect('Team Admin records a hand-over to sevdesk', s, 200)
 			const ext = s.data?.record?.data?.external
-			check('… the answer carries the written record with external {system, id, url, at, by}', s.data?.external?.system === 'sevdesk' && ext?.system === 'sevdesk' && ext?.id === 'SD-17' && ext?.url === 'https://my.sevdesk.de/fi/detail/type/RE/id/17' && ext?.by === 'pbadmin' && ext?.at === s.data?.external?.at && s.data?.record?.version === before?.version + 1, s.data?.record)
+			check('… the answer carries the written record with external {system, id, url, at, by}', s.data?.external?.system === 'sevdesk' && ext?.system === 'sevdesk' && ext?.id === 'SD-17' && ext?.url === 'https://my.sevdesk.de/fi/detail/type/RE/id/17' && ext?.by === 'zbadmin' && ext?.at === s.data?.external?.at && s.data?.record?.version === before?.version + 1, s.data?.record)
 			const rec = (await ocs(A, 'GET', path(keys.chch))).data
 			check('the invoice record carries external, the rest unchanged', rec?.data?.external?.system === 'sevdesk' && rec?.data?.external?.id === 'SD-17' && rec?.data?.status === before?.data?.status && rec?.data?.number === before?.data?.number, rec?.data?.external)
 			expect('a client still may not write the issued invoice (external included)', await ocs(A, 'PUT', path(keys.chch), { version: rec?.version, data: { ...rec?.data, external: { system: 'datev', id: '1' } } }), 409, 'issued')
 			// 0.24.0: a credit note is a document of its own – it does not inherit the original's hand-over.
-			const cr = await stornieren(A, keys.chch, { kind: 'credit', reason: 'Copy check' })
+			// In the original's year: the pattern has no {year}, and a fresh team's counter of another year starts at 1 again.
+			const cr = await stornieren(A, keys.chch, { kind: 'credit', reason: 'Copy check', issued_on: ISSUED_ON })
 			expect('a credit note of the handed-over invoice', cr.reserve, 200)
 			expect('… closed with its PDF', cr.close, 200)
 			if (cr.key) {
@@ -268,7 +270,7 @@ export async function erechnung() {
 				const n = sql(`SELECT COUNT(*) FROM oc_ts_inv_webhook_queue WHERE tenant_id = ${tenant} AND url = 'https://hooks.invalid/ts-${RUN}' AND delivered_at IS NULL`)
 				check('the queue holds the two rows (TS_SQL)', n === '2', n)
 				const body = sql(`SELECT body FROM oc_ts_inv_webhook_queue WHERE tenant_id = ${tenant} AND url = 'https://hooks.invalid/ts-${RUN}' AND event = 'issued'`)
-				check('… body {team, event, at, invoice {key, number, status, gross, currency}, ledger {seq, hash}}', (() => { try { const b = JSON.parse(body); return b.team === 'pb' && b.event === 'issued' && b.invoice.key === K8 && b.invoice.number === r.fixed?.number && b.invoice.gross === 1621.5 && b.invoice.currency === 'CHF' && typeof b.ledger.seq === 'number' && /^[0-9a-f]{64}$/.test(b.ledger.hash) } catch { return false } })(), body)
+				check('… body {team, event, at, invoice {key, number, status, gross, currency}, ledger {seq, hash}}', (() => { try { const b = JSON.parse(body); return b.team === 'zb' && b.event === 'issued' && b.invoice.key === K8 && b.invoice.number === r.fixed?.number && b.invoice.gross === 1621.5 && b.invoice.currency === 'CHF' && typeof b.ledger.seq === 'number' && /^[0-9a-f]{64}$/.test(b.ledger.hash) } catch { return false } })(), body)
 			}
 			if (!process.env.TS_OCC) {
 				console.log('    info  TS_OCC not set – the delivery job is skipped')
@@ -306,6 +308,6 @@ export async function erechnung() {
 		} else if (cur.status === 200) {
 			await ocs(A, 'DELETE', `/records/setting/settings?version=${cur.data.version}`)
 		}
-		check('pb left as found', isObj(await me(A)))
+		check('zb left as found', isObj(await me(A)))
 	}
 }

@@ -116,7 +116,7 @@ class LedgerRulesTest extends TestCase {
 	public function testHoursAndChecks(): void {
 		$b = static fn (array $over = []): \stdClass => (object)array_merge(['person' => 'alice', 'uid' => 'u1', 'start' => '2026-09-02T08:00:00'], $over);
 		$h = IssueRules::hoursOf([$b(['hours' => 2.5, 'rate' => 150, 'code' => 'D196.4']), $b(['uid' => 'u2'])]);
-		$this->assertSame(['uid' => 'alice', 'event_uid' => 'u1', 'start' => '2026-09-02T08:00:00', 'hours' => 2.5, 'rate' => 150.0, 'amount' => 375.0, 'code' => 'D196.4'], $h[0]);
+		$this->assertSame(['uid' => 'alice', 'event_uid' => 'u1', 'start' => '2026-09-02T08:00:00', 'hours' => 2.5, 'rate' => 150.0, 'amount' => 375.0, 'code' => 'D196.4', 'level' => null], $h[0]);
 		$this->assertSame([0.0, 0.0, 0.0, null], [$h[1]['hours'], $h[1]['rate'], $h[1]['amount'], $h[1]['code']], 'missing hours and rate count 0');
 		$this->assertSame(2.5, IssueRules::totalHours($h));
 

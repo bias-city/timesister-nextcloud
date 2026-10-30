@@ -17,13 +17,16 @@ use OCP\IDBConnection;
  * @template-extends QBMapper<Entry>
  */
 final class EntryMapper extends QBMapper {
+	/** The columns of {@see Entry} without `ics`; named, since the unused `category` of 0.33.0's drafts stays in the table. */
+	private const COLUMNS = ['id', 'tenant_id', 'uid', 'source', 'event_uid', 'object_uri', 'etag', 'summary', 'codes', 'first_start', 'last_end', 'level', 'cancelled', 'kept', 'deleted', 'revision', 'modified_at'];
+
 	public function __construct(IDBConnection $db) {
 		parent::__construct($db, 'ts_entries', Entry::class);
 	}
 
 	public function findOne(int $tenantId, string $uid, string $source, string $eventUid): ?Entry {
 		$qb = $this->db->getQueryBuilder();
-		$qb->select('*')->from($this->getTableName())
+		$qb->select(...self::COLUMNS)->addSelect('ics')->from($this->getTableName())
 			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
 			->andWhere($qb->expr()->eq('uid', $qb->createNamedParameter($uid)))
 			->andWhere($qb->expr()->eq('source', $qb->createNamedParameter($source)))
@@ -42,7 +45,7 @@ final class EntryMapper extends QBMapper {
 	 */
 	public function findByEvent(int $tenantId, string $uid, string $eventUid): ?Entry {
 		$qb = $this->db->getQueryBuilder();
-		$qb->select('id', 'tenant_id', 'uid', 'source', 'event_uid', 'object_uri', 'etag', 'summary', 'codes', 'first_start', 'last_end', 'level', 'cancelled', 'kept', 'deleted', 'revision', 'modified_at')
+		$qb->select(...self::COLUMNS)
 			->from($this->getTableName())
 			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
 			->andWhere($qb->expr()->eq('uid', $qb->createNamedParameter($uid)))
@@ -65,7 +68,7 @@ final class EntryMapper extends QBMapper {
 	 */
 	public function bySource(int $tenantId, string $uid, string $source, bool $all = false): array {
 		$qb = $this->db->getQueryBuilder();
-		$qb->select('id', 'tenant_id', 'uid', 'source', 'event_uid', 'object_uri', 'etag', 'summary', 'codes', 'first_start', 'last_end', 'level', 'cancelled', 'kept', 'deleted', 'revision', 'modified_at')
+		$qb->select(...self::COLUMNS)
 			->from($this->getTableName())
 			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
 			->andWhere($qb->expr()->eq('uid', $qb->createNamedParameter($uid)))
@@ -91,7 +94,7 @@ final class EntryMapper extends QBMapper {
 	 */
 	public function findChanged(int $tenantId, int $since, int $limit): array {
 		$qb = $this->db->getQueryBuilder();
-		$qb->select('id', 'tenant_id', 'uid', 'source', 'event_uid', 'object_uri', 'etag', 'summary', 'codes', 'first_start', 'last_end', 'level', 'cancelled', 'kept', 'deleted', 'revision', 'modified_at')
+		$qb->select(...self::COLUMNS)
 			->from($this->getTableName())
 			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
 			->andWhere($qb->expr()->gt('revision', $qb->createNamedParameter($since, IQueryBuilder::PARAM_INT)));

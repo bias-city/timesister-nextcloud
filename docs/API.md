@@ -26,7 +26,7 @@ deviates from it changes this file first. Plan and rationale: `PLAN-NC-APP.md`.
   to the place that resolves it.
 - Times as ISO 8601 in UTC (`2026-09-26T08:15:00Z`), days as `YYYY-MM-DD`.
 
-## Error codes (0.31.0, extended 0.32.0)
+## Error codes (0.31.0, extended 0.32.0 and 0.33.0)
 
 `data = { "error", "message", "code"?, "field"?, … }`. `error` stays the
 coarse class (`no_team`, `ambiguous_team`, `forbidden`, `not_found`,
@@ -110,6 +110,13 @@ as *retired*. Message wording may change at any time.
 | `quote_number_taken` | 409 conflict | since 0.32.0: the next quote number is taken; check the quote number pattern (`quote_number`) |
 | `quote_documents_max` | 409 conflict | since 0.32.0: a quote holds at most 10 documents |
 | `quote_name_required` | 422 invalid | since 0.32.0: only a `draft` may be unnamed; `POST /quotes/{key}/issue` and every other status need `name` (`field: name`) |
+| `fee_model_locked` | 409 conflict | since 0.33.0: a budget's `fee_model` does not change once a booking of that budget is billed by an invoice that is `issuing`, `issued`, `paid` or handed over (`field: fee_model`, with `budget` and `invoice`, the number); reverse those invoices first |
+| `fee_model_invalid` | 422 invalid | since 0.33.0: `fee_model` is none of `category`, `mean_rate`, `role` (a budget's or the team setting, `field: fee_model`), or `mean_rate` is set while the budget's model is not `mean_rate` (`field: mean_rate`) |
+| `level_rate_missing` | 422 invalid | since 0.33.0: a level has no rate in the currency on the day – neither in the project's `level_rates` (the project's currency) nor in the level's `rates` of `settings.levels` (the team's currency) (`field: level`, with `level`, the id); raised when issuing an invoice with `hours` lines that name a level and a quote in the category model |
+| `no_levels` | 422 invalid | since 0.33.0: the team has no levels, and a budget in the model `role` or `category` needs at least one (`field: levels`, with `budget`, the id); raised when issuing an invoice that bills hours of such a budget and a quote with such a budget |
+| `amount_without_rate` | 422 invalid | since 0.33.0: an amount needs its rate – an `hours` position with a `level` and without `rate` (`field: rate`); when issuing a quote, a work package with an amount but no rate in its model: no `mean_rate` (`field: mean_rate`) or no `level` in the category model (`field: level`) |
+| `cap_mode_invalid` | 422 invalid | since 0.33.0: `cap_mode` is none of `cap`, `flat` (`field: cap_mode`), or is set while `cap` is null (`field: cap`) |
+| `correction_lead_only` | 403 forbidden | since 0.33.0: title, code and billable of a booking, its level outside a budget in the model `category`, and anything of someone else's booking, are corrected by Team Admins and the booking's Leads; a person corrects only the `level` of their own bookings that fall into a budget in the model `category` (`field` names the first other field) |
 
 The server app adds codes release by release; every new `ApiException`
 for a rule gets one (a unit test holds the services of receipts, expenses,
@@ -4959,7 +4966,9 @@ the rates away from members; the clients compute.
 
 - `null` or a list of at most 50 levels. `id`: 1–40 lower-case letters,
   digits or dashes, unique in the list and stable (persons and projects
-  refer to it); `name`: 1–60 characters; `rates`: missing, `null` or a
+  refer to it); `name`: 1–60 characters; `description` (0.33.0): missing,
+  `null` or one line of at most 300 characters – what the level stands for,
+  e.g. from a rate template; `rates`: missing, `null` or a
   series like `cost_rates` (`from` a day, each day once, `rate` ≥ 0). A raise
   is a new entry – the past keeps its rate. `422` naming the fault otherwise.
 - **Members read the list without `rates`** (`id` and `name` stay); Team
@@ -6053,3 +6062,486 @@ mismatch search), `QuoteRules` (`texts`, `attachments`, the frozen
 (reserve, close, cancel, expiry; `LedgerAppender::appendReserved`),
 `DocumentService` (filing, serving, `verify?files`), `QuoteIssueService`,
 `QuoteDocumentService` (three kinds), the job `IssueExpiry`.
+
+## Fee models, 0.33.0 (2026-10-29) – money leads, the fee model per budget, one list of levels (`fee_models: 1`)
+
+PLAN-HONORAR §2–§4 and §9 (decisions E1–E7 of 2026-10-29, E8 – the fee
+calculator from construction costs – in the backlog; one list of levels,
+decided 2026-10-29 evening). **Money leads:** a work package stores its
+**amount** per milestone; its hours are derived (amount / the package's
+rate). The rate depends on the **fee model of the budget**: `category` (by
+the kind of work – the package presets a level, the person may change it
+on their booking; the SIA/KBOB categories A–G are levels), `mean_rate`
+(one rate for the budget) or `role` (the person's level, the model of
+0.27.0). A cost cap or a flat fee combines with each. **One list:** levels
+and categories are the same thing – the team's `levels` (0.27.0) with
+their rates and the project's `level_rates` serve every model; there is
+no second list and no default list on the server. Additive records and
+fields, no new endpoint, no new record kind; `api: 2` stays. The server
+checks the form, keeps the rates away from members, locks the model once
+bookings of the budget are billed, lets the person set the level of their
+own bookings in the category model and checks completeness when a quote
+or an invoice is issued – it computes nothing: amounts, hours, rates of
+bookings, sums and distributions are the clients'. Migration: `level` in
+`ts_inv_hours` (nothing dropped). 0.33.0 was not published with the
+earlier drafts of this section (a list of categories beside the levels);
+there is no transition from them (I below).
+
+### A. Work packages: the amount leads
+
+Fields of `budgets[].work_packages[]` (a project's budgets and a quote's,
+both through `ProjectRules::checkBudget`):
+
+| Field | Rule |
+|---|---|
+| `amount` | **new.** `null` or a list of at most 200 numbers ≥ 0, finite, at most two decimals: the amount per milestone in the currency of the project (the budget's `currency`), in the order of `milestones` and of `hours`. The server does not compare the lengths. A package that is the `parent` of another has no amount of its own – all entries zero or none: `422` “A work package with packages below has no amount of its own – move it to a package below.” (as for `hours` since 0.26.3). Otherwise `422 invalid` (`field: amount`). |
+| `hours` | unchanged checks. **Derived** when `amount` is a list: hours = amount / the package's **planning rate** (below), written by the client beside `amount` – unrounded – so readers that do not know `amount` keep a plan. The server stores what comes and never derives one from the other. |
+| `rate` | unchanged checks (`null` or ≥ 0; since 0.26.3 the default for the packages below). Meaning now: **planning only** – when set it is the package's planning rate (below), over the model's; it never values a booking (E3). |
+| `level` | **new.** `null` or the id of a level (`settings.levels[].id`: 1–40 lower-case letters, digits or dashes): the kind of work the package plans – the preset level of its bookings in the model `category`. On a `parent` it is the preset of the packages below without their own (as `rate`). Not checked against the team's list – an unknown id has no rate and the clients say so (`level_rate_missing`). Stored in every model, so switching the model back keeps it. Otherwise `422 invalid` (`field: level`). |
+
+**Reading rule (the transition):** a package whose `amount` is missing or
+`null` is read as before – `hours` lead, and the clients value them as
+hours × planning rate. A package with `amount` (a list, also of zeros) is led by
+the amount; its `hours` are only the derived figure. Packages of both kinds
+may stand in one budget. A parent shows the sum of the packages below, in
+money and in hours, as before.
+
+**The planning rate of a package** (clients, informative; it translates
+the plan, never a booking): the package's own `rate` (or its parent's) when
+set, else by model – `category`: the rate of the package's `level` (its
+own or the nearest above; C below); `mean_rate`: the budget's `mean_rate`;
+`role`: the clients' planning default (the default rate of the level most
+frequent in the project). A package with an amount and no planning rate
+has no hour figure, only money; the clients show it greyed with the
+reason, and the issue of a quote checks it (H below).
+
+### B. Budgets: the fee model, the cap and the flat fee
+
+| Field | Rule |
+|---|---|
+| `fee_model` | **new.** `null`, missing, `"category"`, `"mean_rate"` or `"role"`; `null` and missing read as `"role"` (every budget before 0.33.0, E6). Otherwise `422 fee_model_invalid` (`field: fee_model`). One model per budget; a quote asks once and writes it to each of its budgets, the server does not require them to agree. Changing it: see «The lock» below. |
+| `mean_rate` | **new.** `null` or a number ≥ 0 in the budget's currency – the one rate of the model `mean_rate` (KBOB names 176.– as its example). Set (not `null`) while `fee_model` is anything else: `422 fee_model_invalid` (`field: mean_rate`); negative or not a number: `422 invalid` (`field: mean_rate`). May be `null` in the model `mean_rate` while drafting; issuing a quote needs it (H). |
+| `cap` | unchanged: `null` or a number ≥ 0 in the budget's currency (`422` ““cap” must be null or a number ≥ 0.”). Meaning now: the budget's volume in money. `null`: the volume is Σ `amount` of its packages (for hours-led packages Σ hours × planning rate), billed by effort without a ceiling. Set: a ceiling (`cap_mode: cap`) or a price (`cap_mode: flat`). A cap that differs from Σ `amount` is distributed by the client over the packages in proportion to their amounts (E4), so the packages' hours become the hour caps; the server does not compare `cap` with the sum. |
+| `cap_mode` | **new.** `null`, missing, `"cap"` or `"flat"`. `cap`: billed by effort, at most `cap` (*Kostendach*, «nach Aufwand bis höchstens»); `flat`: `cap` is the price (*Pauschale*), the packages are its basis in the document; null or missing with a `cap` reads as `cap` (the meaning before 0.33.0). Anything else: `422 cap_mode_invalid` (`field: cap_mode`); set while `cap` is `null`: `422 cap_mode_invalid` (`field: cap`). |
+| `tolerance` | written by the Mac app before (unchecked), **now checked:** `null` or a number from 0 to 100 – the band around the plan in percent of the volume in money (missing: the client's default, 15). Otherwise `422 invalid` (`field: tolerance`). |
+
+`billing_plan` (0.25.1) is unchanged: `share` is the percentage of the
+budget's volume in money (`cap` when set – the price of a flat fee –, else
+Σ `amount`), `amount` stays in the budget's currency. Cost positions
+(`costs[]`, 0.21.0) and their `forecast` are unchanged; they were money
+already. A budget of `kind: aufwand` (the silent «by effort» budget of the
+Mac app) has no amounts; its `fee_model` still decides the rate of its
+bookings.
+
+```json
+{ "id": "b-n410-1", "name": "Vorprojekt", "currency": "CHF", "start": "2027-01-01", "end": "2027-12-31",
+  "fee_model": "category", "mean_rate": null, "cap": 30000, "cap_mode": "cap", "tolerance": 10,
+  "milestones": [ { "no": "M1", "title": "Vorprojekt", "date": "2027-03-31" },
+                  { "no": "M2", "title": "Bauprojekt", "date": "2027-09-30" } ],
+  "work_packages": [
+    { "no": "3", "name": "Projektierung" },
+    { "no": "31", "parent": "3", "name": "Vorprojekt", "codes": ["N410.31"], "level": "b",
+      "amount": [12000, 3000], "hours": [60.91370558375635, 15.228426395939087] },
+    { "no": "32", "parent": "3", "name": "Bauprojekt", "codes": ["N410.32"], "level": "d",
+      "amount": [0, 15000], "hours": [0, 104.16666666666667] } ] }
+```
+
+#### The lock (`fee_model_locked`)
+
+`fee_model` changes as long as no booking of the budget is billed. On every
+write of a **project** record – single `PUT`, batch, restore of a version –
+the server compares each incoming budget with the stored one of the same
+`id` (`null` and missing count as `role`). When the model differs and an
+invoice of this project and budget (`ts_inv_invoices.budget`) whose status
+is `issuing`, `issued`, `paid` or handed over bills at least one booking
+(a row in `ts_inv_hours`; a handed-over invoice has none – there its
+record's `bookings[]` count), the write is refused:
+`409 fee_model_locked` with `field: fee_model`, `budget` (the id) and
+`invoice` (the number of one such invoice, for a handed-over one the
+accounting system's); in a batch as every rule error
+of a write. Drafts, reversed (`cancelled`) invoices, credit notes and
+advance invoices bill no booking and do not lock; reversing the invoices
+frees the model again. `mean_rate`, `cap`, the amounts, the packages'
+`level` and the rates stay writable – issued invoices are frozen, a change
+counts for what is not billed yet. A new budget, a removed budget and a
+quote's budgets (no invoice names them) are never locked.
+
+### C. One list: the levels
+
+The team setting `levels` (0.27.0, record `setting/settings`) is **the one
+list of both models**: a level of a person (model `role`) and a kind of
+work (model `category`) are entries of the same form. The list does not
+tell them apart; a team may hold both kinds.
+
+```json
+{ "fee_model": "category",
+  "levels": [
+    { "id": "b", "name": "Kategorie B", "rates": [{ "from": "2025-01-01", "rate": 197 }] },
+    { "id": "d", "name": "Kategorie D", "rates": [{ "from": "2025-01-01", "rate": 144 }] },
+    { "id": "lead", "name": "Projektleitung", "rates": [{ "from": "2026-01-01", "rate": 180 }, { "from": "2027-01-01", "rate": 190 }] } ] }
+```
+
+- **Form and rights as 0.27.0, unchanged:** `null` or at most 50 levels
+  `{ id, name, rates }`, `id` stable and unique, `rates` a series of
+  `{ from, rate }` (a raise is a new entry – the past keeps its rate).
+  Written by Team Admins with the record, like every setting. **Members
+  read the list without `rates`** – `id` and `name` stay, so they can
+  choose a level on their bookings –; Team Admins and Leads read it whole.
+- **Rates count in the team's currency** (`settings.currency`, else CHF).
+  A level may have no rate yet (`rates` missing, `null` or `[]`): a level
+  without a rate.
+- **No default list.** The server never writes the list and knows no rate
+  template. The clients create the levels – by hand or from a **rate
+  template** (PLAN-HONORAR §9: the Mac app ships «KBOB 2025 (Schweiz,
+  CHF)» with A–G; applying one adds its entries to the list, their rates
+  only when the template's currency is the team's) – and keep the ids
+  stable: persons, projects, packages, bookings and invoices refer to them.
+- **At least one level** once a budget computes by `role` or `category`.
+  The clients hold the rule (the models greyed with the reason and the way
+  to the setting); the server checks it only when an invoice or a quote is
+  issued (`422 no_levels`, G and H) – never when the setting, a person or a
+  budget is written, so `levels: []` and a budget in the model `role`
+  stay writable.
+- **The rate of a level** on a day in a currency (the clients; the server
+  when issuing): the project's `level_rates` of that id, when the currency
+  is the project's (its `currency`, else the team's); else the entry of the
+  level's `rates` with the latest `from` on or before the day, when the
+  currency is the team's. Otherwise there is none – the clients raise
+  `level_rate_missing` with the way to the setting or the project. There
+  is no exchange rate: a project in another currency than the team's needs
+  its own `level_rates`.
+
+#### Team setting `fee_model`
+
+`null` or one of `category`, `mean_rate`, `role` – the team's default for
+new budgets and quotes (the app's team rule «Fee by …»); otherwise
+`422 fee_model_invalid` (`field: fee_model`). `null` or missing: the
+client's default by country (Switzerland `category`, else `role`). Changing
+it never changes an existing budget. Same record, same rights.
+
+#### Project: `level_rates`
+
+`level_rates` (0.27.0) is the project's override in **every** model – the
+project's own rate per level in its currency; what is missing takes the
+team's rate (in the team's currency only, above). Unchanged in form and
+rights: only in the full project record (Team Admins and the project's
+Leads), never in the booking catalog; no `from` (a project's rate holds
+for its term). There is no second field per model.
+
+### D. The rate of a booking (clients, informative)
+
+What a booking is valued at – consumption, rest and invoice –, per model of
+the budget its code belongs to (E below):
+
+| Model | Rate of a booking |
+|---|---|
+| `category` | the rate (C) of the booking's level – its own (`X-TIMESISTER-LEVEL`, E), else the package's `level` (own or above) – on the booking's day. No rate: the booking has no value yet and the client raises `level_rate_missing` with the way to the setting |
+| `mean_rate` | the budget's `mean_rate` |
+| `role` | the rate (C) of the booking's level – its own (E), else the person's level of that day (`person.levels`) – on the booking's day; **no fallback to the package's `rate` any more** (E3) |
+
+Rest in money = the package's amount − Σ hours × the booking's rate; rest
+in hours = rest in money / planning rate, an estimate and shown as one. Hours
+stay the lead where they are working time (target time, workload, Jobs,
+timeline, remaining effort in `progress_log`).
+
+### E. The level of a booking
+
+- **In the event:** `X-TIMESISTER-LEVEL:<id>` (0.27.0) – the one property
+  of every model, an id, never a rate. A correction sets and removes it
+  (below), also on a booking just created; the app writes no level into a
+  new event by itself. Without it a booking takes its preset: the
+  package's `level` in the model `category` (`booking_levels` below for
+  members), the person's level of the day in the model `role`.
+- **`GET /entries`:** `level` as since 0.27.0 – the `X-TIMESISTER-LEVEL`
+  of the master component, `null` without (`ts_entries.level`); a
+  per-occurrence level is read from the object's exception by the clients.
+  The level a booking counts with (its own, else the preset) is the
+  clients'. No other field is added.
+- **Correction** (record `correction` and `POST /entries/correct`, 0.27.0):
+  the fields stay `title`, `code`, `billable` and `level`, at least one of
+  them; `level` the id of a level or `null` (the property goes). Written
+  into the event, per occurrence with `recurrence`, the protocol and the
+  reapplying exactly as 0.27.0. New is who writes `level`:
+
+```json
+{ "kind": "correction", "key": "pbuser1+3f9c1a2b7d4e…", "data": {
+  "person": "pbuser1", "event_uid": "…", "level": "d" } }
+```
+
+- **Rights.** Team Admins correct every booking; a Lead the bookings whose
+  codes all belong to projects they lead (0.27.0; otherwise `status:
+  forbidden` in the record or the result). Beyond that **the person sets
+  `level` on their own booking**, in any role, **when the booking falls
+  into a budget in the model `category`** (below): `person` resolves to
+  the caller's account (for `POST /entries/correct`: every
+  `entries[].uid` is the caller), and the write changes nothing but
+  `level` – `title`, `code` and `billable` are missing or equal to the
+  stored, applied record's (they stay the Lead's). Otherwise a member's
+  write is refused with `403 correction_lead_only`, `field` naming the
+  first field that is not theirs: `title`, `code`, `billable`, `level`
+  (the booking falls into no budget of the model `category`), or `person`
+  / `uid` (someone else's booking). For `POST /entries/correct` the server
+  checks every listed booking before it writes any; a booking not in the
+  book answers `not_found` in its result and does not block. A Lead's own
+  booking beyond their projects counts as the person's (this rule), else
+  `status: forbidden` as before. A batch of the person's own corrections is
+  a per-record batch, as a Lead's. A billed booking answers
+  `status: locked` for everyone.
+- **The budget of a booking** (for this right; the rule by which the
+  clients assign bookings): the project is the one the booking's code
+  belongs to (as for a Lead's right – `n410.31.2` belongs to `N410`).
+  Among the packages of the project's budgets that carry the code – equal,
+  or a prefix followed by `.`, case aside – the most precise code wins
+  (`N410.31.2` before `N410.31` before `N410`); of equal ones the budget
+  whose `start`–`end` holds the booking's day (open ends count), else the
+  one that began last before the day, else the earliest; when no package
+  carries the code, the project's budget of `kind: aufwand`, if any. The
+  booking's day is the occurrence's with `recurrence`, else the day of the
+  entry's first start. A booking with several codes: each of them. The
+  server reads the codes and the day from the book and the budgets from
+  the stored project.
+- **The person's fields and the Lead's.** On a booking in the model
+  `category` the level is not the Lead's alone: the clients do not lock
+  `level` against the person there; a Lead's and the person's writes are
+  equal, the last one stands, the record's `by` and the protocol show who.
+  In the other models `level` stays the Lead's (0.27.0, «A corrected field
+  is the lead's»). The person's write of a correction record keeps the
+  Lead's fields of the stored, applied record that it leaves out – `title`,
+  `code`, `billable` – (a refused change of a Lead never passes on); a
+  member deletes a correction record only when it holds none of them, and
+  no `level` on a booking outside the model `category`. The reapplying
+  against changes in other calendar apps holds for `level` in every model.
+- **Booking catalog: `booking_levels`.** Members read a project as the
+  booking catalog, without budgets. To preset the level, the catalog
+  (also for Leads of other projects) adds the server-derived
+  `booking_levels`: for each budget with `fee_model: category`, for each
+  package that has no packages below and has `codes`, one entry per code
+  `{ "code", "level", "start", "end" }` – `level` the package's own, else
+  the nearest package above with one, else `null` (the app then asks);
+  `start` and `end` the budget's (or `null`). No amount, no rate, no name
+  (members have the names from `settings.levels`). Missing when no budget
+  has the category model. The client picks the entry whose period holds
+  the booking's day; the most precise code wins. An entry tells a member's
+  client that the person may set the level; the server decides by the
+  budget of the booking (above, with all budgets of the project). Like
+  `led`, it is derived on reading; a client's write of the field is
+  dropped.
+
+```json
+"booking_levels": [ { "code": "N410.31", "level": "b", "start": "2027-01-01", "end": "2027-12-31" },
+                    { "code": "N410.32", "level": "d", "start": "2027-01-01", "end": "2027-12-31" } ]
+```
+
+### F. Addenda on a work package
+
+`budgets[].addenda[]` with `package` (0.27.0) takes **`amount` ≥ 0 or
+`hours` ≥ 0, exactly one** (before: `hours` only): ordered in money or in
+working time. Both or neither: `422` “Addendum {n}: a work package addendum
+needs either “hours” ≥ 0 or “amount” ≥ 0.” The client values an hours
+addendum with the package's planning rate when it sums money, and derives the
+hours of an amount addendum with it; the server stores what comes. An
+addendum with `cost` is unchanged (`amount`, no `hours`).
+
+### G. Invoices: hours per level, bookings, appendix
+
+- **`hours` positions take `level` and `level_name`** (there is no
+  position kind of its own): `level` `null` or the id of a level (form as
+  a package's `level`, not checked against the list), `level_name` `null`
+  or text of 1–60 characters without control characters – the level's
+  name as the document shows it, frozen with the positions. Only on
+  `hours` positions, and `level_name` only beside a `level`; otherwise
+  `422 invalid` (`field: level` or `level_name`). A line with a `level` is
+  the hours of one level at one rate and needs its `rate`: without it
+  `422 amount_without_rate` (`field: rate`). `amount` is the client's
+  hours × rate, rounded to cents; the server does not recompute it (as for
+  every `hours` line). `VatLines`, the ledger payload, `fixed`, the
+  exports and the webhooks treat it as every `hours` line.
+- **Which lines, per model** (the client's; the server does not judge):
+  `category` and `role` alike – hours per level × rate, one `hours` line
+  per package (`work_package`, `path` as 0.26.0), level and rate (a raise
+  within the period gives two); `mean_rate` – one `hours` line per package
+  at `mean_rate`, without `level`. A `flat` budget bills its price by
+  `billing_plan` or `flat` lines.
+- **On issue** (`POST /invoices/{key}/issue`, step 1):
+  - when the invoice bills hours (an `hours` position or a booking) and its
+    budget's model is `role` or `category` (the budget named by `budget` in
+    the stored project; missing reads as `role`), the team has at least one
+    level – otherwise `422 no_levels` (`field: levels`, `budget` the id);
+  - every `hours` position with a `level` needs a rate of that level in the
+    invoice's currency (C) on `to`, the last day of the period (else on
+    `issued_on`) – otherwise `422 level_rate_missing` (`field: level`,
+    `level` the id; the message names the position). The rate on the line
+    may differ (the client's choice); the check keeps a level out of the
+    document that the team cannot value.
+- **`bookings[].level`:** optional, `null` or the id of a level – the level
+  the booking was billed in (its own, else the preset); stored with the
+  invoice's hours at the reservation (`ts_inv_hours.level`), as `rate` and
+  `code`. It enters the ledger payload only when set, so the payload of an
+  invoice without levels is that of 0.32.0.
+- **`bookings[].rate_own`:** optional boolean, written by the Mac app. `true`
+  marks a rate set by hand in this draft; it stays when the draft is
+  rebuilt. Without it (or `false`) the client re-rates the booking by the
+  budget's fee model on every change of the draft. The server keeps the
+  field in the record unchecked and does not freeze it.
+- **`layout.appendix`** also takes **`by_level`** – hours and amount per
+  level of the team's list – (each at most once, now at most seven).
+  `levels` (0.26.0) stays what it was, the table per level of the package
+  tree; the two are different tables. The client sends the table
+  `layout.by_level`, a list of at most 500 objects, form only, as the
+  tables of 0.32.0; one row per level and rate, in the models `role` and
+  `category`:
+
+```json
+"by_level": [ { "level": "b", "name": "Kategorie B", "rate": 197, "hours": 62.5, "amount": 12312.5 } ]
+```
+
+### H. Quotes and templates
+
+- A quote's budgets carry everything of A and B (`ProjectRules::checkBudget`);
+  the lock does not apply. The frozen `issued` copy (0.32.0) keeps them as
+  sent. `POST /quotes/{key}/issue` `amount` is the client's sum in money
+  (per budget `cap` when set, else Σ `amount`) – the document's total.
+- **On issue** a quote is complete in money, for each budget:
+  - model `role` or `category` and the team has no level:
+    `422 no_levels` (`field: levels`, `budget` the id);
+  - for each package without packages below that has an amount above 0:
+    - model `mean_rate` and `mean_rate` `null`: `422 amount_without_rate`
+      (`field: mean_rate`, `budget`);
+    - model `category` and no `level` (own or above): `422
+      amount_without_rate` (`field: level`, `budget`, `package` the `no`);
+    - model `category` and the level has no rate (C) in the quote's
+      `currency` on the quote's `date` – the project's `level_rates`
+      count when the quote names a `project`: `422 level_rate_missing`
+      (`field: level`, `level`, `budget`, `package`);
+    - model `role`: nothing more (the rate comes from the people who book;
+      the package's `rate` only plans).
+  Packages without `amount` (hours-led) and drafts are not checked.
+- Templates (`template`, 0.25.0) carry a model too (`fee_model`, items with
+  `amount`, `share_pct`, `level`) and may name a rate template; the server
+  checks only their format and person fields, as before. Rate templates
+  themselves are the clients' (C).
+
+### I. The transition
+
+#### A server ≤ 0.32.0 (no `fee_models`)
+
+As read from 0.32.0 (`RecordValidator`, `ProjectRules`, `CorrectionRules`,
+`InvoiceRules`, `InvoiceLayout`, `RecordRights`):
+
+| What the client sends | 0.32.0 does |
+|---|---|
+| budget `fee_model`, `mean_rate`, `cap_mode`, package `amount`, `level` (project and quote) | **stored as sent, unchecked** – `checkBudget` knows them not and refuses no unknown field; no lock, no parent rule for `amount`, nothing on quote issue |
+| `tolerance` | stored unchecked, as before |
+| addendum on a package with `amount` | **refused:** `422` “Addendum {n}: a work package addendum needs “hours” ≥ 0 and no “amount”.” (no code) |
+| `settings.levels`, project `level_rates` | as 0.27.0 – the one list works the same; no `no_levels` and no `level_rate_missing` on issue |
+| `setting/settings` `fee_model` | stored unchecked (it holds no rate) |
+| a member's correction of `level` on their own booking | **refused:** `403 forbidden` (members correct nothing, no code); the `level` corrections of Team Admins and Leads work as 0.27.0 |
+| the booking catalog | no `booking_levels` |
+| `hours` position with `level`, `level_name` | stored as sent, unchecked – no `rate` required, no check on issue; frozen with the positions |
+| `layout.appendix` with `by_level` | **refused:** `422` (`layout.appendix`); a `layout.by_level` table alone is dropped by the normalisation |
+| `bookings[].level` on an invoice draft | kept in the record, unchecked, not in `ts_inv_hours` |
+| the capability | no `fee_models` |
+
+**What follows for the client:** without `fee_models >= 1` it writes
+**none of the fields of this section** – packages with `hours` (derived from
+its amounts, with `rate` as before) and no `amount`, no package `level`, no
+`fee_model`, `mean_rate` or `cap_mode`, no `fee_model` in the settings, no
+`level` correction by the person, no `level` on positions or bookings, no
+appendix `by_level`, addenda on packages in `hours` only. Unknown fields
+would be stored but none of the rules would hold (no lock, no issue
+checks), and some writes are refused outright. The Mac app shows the fee
+models greyed with the reason «needs TimeSister on Nextcloud 0.33.0»; the
+budget works as the model `role`, money typed in the matrix becomes hours
+through the planning rate, and a package without a rate takes no money
+(`amount_without_rate`, raised by the app). A team without a server
+(local) has the models in full.
+
+#### A client without `fee_models` against 0.33.0
+
+**Not additive for writers of budgets**, as 0.32.0 was for issuing
+(development without transition): a client that does not know `amount`
+must not write budgets to a 0.33.0 server. If it does, it drops what it
+does not know – the packages fall back to `hours` (the reading rule), the
+budget to `role`; on a billed budget the write is refused with
+`fee_model_locked`. Reading stays safe: such a client sees `hours` (derived)
+and `rate` and plans as before. The Mac app and the server app are updated
+together.
+
+#### Records written before 0.33.0
+
+No server migration of records (the server computes nothing). A budget
+without `fee_model` is `role`, a package without `amount` is hours-led, a
+`cap` that differs from the sum is distributed by the reading client (E4,
+E6) – the same figures as before. A 0.33.0 client writes `fee_model`,
+`amount` and the derived `hours` on its next write of the budget, or for all
+budgets at once (a batch per project); the record's history keeps the
+earlier version. Frozen quotes (`issued`) and invoices stay as they are.
+
+#### The drafts of 0.33.0 (never published)
+
+The earlier drafts of this section had a list of categories beside the
+levels: team and project `category_rates`, a package's `category`,
+`X-TIMESISTER-CATEGORY` with `category` in `GET /entries` and on
+corrections, `booking_categories`, the position kind `category`,
+`bookings[].category`, the appendix `categories` and the code
+`category_rate_missing`. None of it is part of 0.33.0 and there is no
+transition (PLAN-HONORAR §9). Leftovers in test installs are treated as
+anything unknown: `category_rates` and a package's `category` are stored
+as sent and never checked or read (members would read leftover team rates
+– write the setting once without them); a correction with `category`:
+`422` ““category” is not a field of a correction.”; `X-TIMESISTER-CATEGORY`
+stays in the event as received and is read by nobody; the kind `category`
+and the appendix `categories`: `422` as any unknown kind or appendix;
+`bookings[].category` passes as any unknown booking field and does not
+reach `ts_inv_hours`.
+
+### J. Error codes
+
+New in the table «Error codes» at the top: `fee_model_locked` (409),
+`fee_model_invalid`, `level_rate_missing`, `no_levels`,
+`amount_without_rate`, `cap_mode_invalid` (422) and `correction_lead_only`
+(403). Form errors of the new fields (`amount`, a package's, position's or
+booking's `level`, `level_name`, `tolerance`, `mean_rate` not a number)
+carry `field` only. The Mac app raises `level_rate_missing`,
+`amount_without_rate` and `no_levels` locally as well – a booking without
+a rate, a package with money and no rate, a budget by role or category in
+a team without levels – with the way to the field (as `no_currency`). No
+new routes, so no new rate limits.
+
+### Capability
+
+```json
+"timesister": { …, "fee_models": 1 }
+```
+
+`fee_models: 1`: the fields and checks of A and B (`amount`, a package's
+`level`, `fee_model`, `mean_rate`, `cap_mode`, `tolerance` checked, the
+lock), `settings.fee_model`, the person's `level` on their own bookings in
+the category model (E), `booking_levels` in the catalog, addenda with
+`amount`, `level` and `level_name` on `hours` lines, `bookings[].level`
+and the appendix `by_level`, the issue checks of quotes and invoices
+(`no_levels`, `level_rate_missing`, `amount_without_rate`). The other flags
+are unchanged (`invoice_layout` stays 2, `corrections` 2).
+
+### Classes (planned)
+
+Pure: `FeeModelRules` (budget fields, `cap_mode`, the model comparison of
+the lock, the budget of a booking for the person's right); `LevelRules`
+also takes the level of packages, positions and bookings (the id form),
+the level of a package (own or above), the rate of a level on a day in a
+currency and the catalog's `booking_levels`; `ProjectRules` (amount,
+`level`, addenda), `CorrectionRules` (`level` as the person's field in the
+category model; no `category`), `InvoiceRules` (`level` and `level_name`
+on `hours` lines, `bookings[].level`; no kind `category`), `InvoiceLayout`
+(`by_level`, no `categories`), `IssueRules` and `QuoteRules` (the issue
+checks); `ErrorCode` (`level_rate_missing`, `no_levels`; no
+`category_rate_missing`). `CategoryRules` goes – its package helpers move
+to `LevelRules`. Services: `RecordService` (the lock under the team lock;
+the person's correction right with the booking from the book and the
+stored project), `CorrectionService`, `IssueService` (`no_levels`,
+`level_rate_missing`, `ts_inv_hours.level`), `QuoteIssueService`;
+`EntryService` reads no category any more. `InvHour::present()` adds
+`level` only when set. Migration: a new step `Version1025…` adds
+`ts_inv_hours.level` (string of 40, nullable). `Version1024Date20261029180000`
+stays as it is – Nextcloud has run it in test installs –; its `category`
+columns in `ts_entries` and `ts_inv_hours` stay unused (nothing dropped).

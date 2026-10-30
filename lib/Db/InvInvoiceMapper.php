@@ -95,6 +95,30 @@ final class InvInvoiceMapper extends QBMapper {
 		return $this->findEntities($qb);
 	}
 
+	/**
+	 * The number of an invoice of this project and budget that bills
+	 * bookings – `issuing`, `issued` or `paid` with rows in `ts_inv_hours` –,
+	 * or null (0.33.0, the lock of the fee model).
+	 */
+	public function billingBudget(int $tenantId, string $project, string $budget): ?string {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('i.number')
+			->from($this->getTableName(), 'i')
+			->innerJoin('i', 'ts_inv_hours', 'h', $qb->expr()->andX(
+				$qb->expr()->eq('h.invoice_id', 'i.id'),
+				$qb->expr()->eq('h.tenant_id', 'i.tenant_id'),
+			))
+			->where($qb->expr()->eq('i.tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('i.project', $qb->createNamedParameter($project)))
+			->andWhere($qb->expr()->eq('i.budget', $qb->createNamedParameter($budget)))
+			->andWhere($qb->expr()->in('i.status', $qb->createNamedParameter([InvInvoice::ISSUING, InvInvoice::ISSUED, InvInvoice::PAID], IQueryBuilder::PARAM_STR_ARRAY)))
+			->orderBy('i.id', 'ASC')->setMaxResults(1);
+		$res = $qb->executeQuery();
+		$n = $res->fetchOne();
+		$res->closeCursor();
+		return $n === false || $n === null ? null : (string)$n;
+	}
+
 	/** The team's open reservation (0.32.0): at most one invoice is `issuing` per team. */
 	public function findIssuing(int $tenantId): ?InvInvoice {
 		$qb = $this->db->getQueryBuilder();

@@ -24,7 +24,8 @@ final class InvHourMapper extends QBMapper {
 	/** @return list<InvHour> in the order they were written */
 	public function findByInvoice(int $tenantId, int $invoiceId): array {
 		$qb = $this->db->getQueryBuilder();
-		$qb->select('*')->from($this->getTableName())
+		// Named: the unused `category` of 0.33.0's drafts stays in the table.
+		$qb->select('id', 'tenant_id', 'invoice_id', 'uid', 'event_uid', 'start', 'hours', 'rate', 'amount', 'code', 'level')->from($this->getTableName())
 			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)))
 			->andWhere($qb->expr()->eq('invoice_id', $qb->createNamedParameter($invoiceId, IQueryBuilder::PARAM_INT)))
 			->orderBy('id');

@@ -68,7 +68,13 @@ final class QuoteIssueService {
 			if (!is_string($name) || trim($name) === '') {
 				throw QuoteRules::nameRequired();
 			}
-			$number = is_string($d->number ?? null) && $d->number !== '' ? $d->number : $this->takeNumber($tid, $d, $v['date'], $now);
+			// 0.33.0: complete in money – every amount has its rate in the budget's model.
+			$settings = InvoiceRules::decode($this->records->findOne($tid, 'setting', 'settings')?->getData());
+			$projectKey = Fields::str($d, 'project');
+			$p = $projectKey === null ? null : $this->records->findOne($tid, 'project', $projectKey);
+			QuoteRules::requireComplete($d, $settings, $p === null || $p->isTombstone() ? null : InvoiceRules::decode($p->getData()), $v['date']);
+			$given = $d->number ?? null;
+			$number = is_string($given) && $given !== '' ? $given : $this->takeNumber($tid, $d, $v['date'], $now);
 			$customerKey = is_string($d->customer ?? null) ? $d->customer : null;
 			$c = $customerKey === null ? null : $this->records->findOne($tid, 'customer', $customerKey);
 			$customerName = Fields::str($c === null || $c->isTombstone() ? null : InvoiceRules::decode($c->getData()), 'name');

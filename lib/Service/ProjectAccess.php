@@ -55,6 +55,11 @@ final class ProjectAccess {
 		if (is_array($leads) && $leads !== []) {
 			$out->led = true;
 		}
+		// 0.33.0: the level per code of the budgets in the category model, to preset a booking's.
+		$levels = LevelRules::bookingLevels($data);
+		if ($levels !== null) {
+			$out->{LevelRules::CATALOG_FIELD} = $levels;
+		}
 		return $out;
 	}
 

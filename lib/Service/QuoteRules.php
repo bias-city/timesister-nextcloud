@@ -80,6 +80,71 @@ final class QuoteRules {
 			->code(ErrorCode::QUOTE_NAME_REQUIRED)->field('name');
 	}
 
+	/**
+	 * 0.33.0: on issue a quote is complete in money, per budget: by role or
+	 * by category the team has a level (`no_levels`); every package without
+	 * packages below that has an amount above 0 has its rate in the budget's
+	 * model – a `mean_rate` in the mean-rate model; a level (own or above)
+	 * with a rate in the currency on `$day` in the category model. The role
+	 * model needs nothing more; hours-led packages are not checked.
+	 *
+	 * @throws ApiException 422 `no_levels`, `amount_without_rate`, `level_rate_missing`
+	 */
+	public static function requireComplete(\stdClass $d, ?\stdClass $settings, ?\stdClass $project, string $day): void {
+		$list = $d->budgets ?? null;
+		$budgets = is_array($list) ? array_values($list) : [];
+		$one = $d->budget ?? null;
+		if ($one instanceof \stdClass) {
+			$budgets[] = $one;
+		}
+		$team = ReceiptBooking::teamCurrency($settings);
+		foreach ($budgets as $b) {
+			if (!($b instanceof \stdClass)) {
+				continue;
+			}
+			$model = FeeModelRules::modelOf($b);
+			$id = (string)($b->id ?? '');
+			if ($model !== FeeModelRules::MEAN_RATE && !LevelRules::hasLevels($settings)) {
+				throw IssueRules::noLevels($id);
+			}
+			if ($model === FeeModelRules::ROLE) {
+				continue;
+			}
+			$currency = strtoupper(Fields::str($d, 'currency') ?? Fields::str($b, 'currency') ?? Fields::str($project, 'currency') ?? $team);
+			$wps = $b->work_packages ?? null;
+			$byNo = LevelRules::packagesByNo($wps);
+			$parents = LevelRules::parents($wps);
+			foreach (is_array($wps) ? $wps : [] as $wp) {
+				if (!($wp instanceof \stdClass) || isset($parents[LevelRules::noOf($wp)]) || !self::hasAmount($wp)) {
+					continue;
+				}
+				$no = (string)(is_string($wp->no ?? null) || is_int($wp->no ?? null) ? $wp->no : '');
+				if ($model === FeeModelRules::MEAN_RATE) {
+					if (($b->mean_rate ?? null) === null) {
+						throw (new ApiException(422, ApiException::INVALID, Message::of('Budget {budget}: the model “mean_rate” needs its rate before the quote is issued.', ['budget' => $id]), ['budget' => $id]))
+							->code(ErrorCode::AMOUNT_WITHOUT_RATE)->field('mean_rate');
+					}
+					continue;
+				}
+				$level = LevelRules::levelOf($wp, $byNo);
+				if ($level === null) {
+					throw (new ApiException(422, ApiException::INVALID, Message::of('Budget {budget}, work package {package}: an amount needs a level in the category model.', ['budget' => $id, 'package' => $no]), ['budget' => $id, 'package' => $no]))
+						->code(ErrorCode::AMOUNT_WITHOUT_RATE)->field('level');
+				}
+				if (LevelRules::rateOf($settings, $project, $level, $currency, $day) === null) {
+					throw (new ApiException(422, ApiException::INVALID, Message::of('Budget {budget}, work package {package}: the level {level} has no rate in {currency} on {day}.', ['budget' => $id, 'package' => $no, 'level' => $level, 'currency' => $currency, 'day' => $day]),
+						['level' => $level, 'budget' => $id, 'package' => $no]))->code(ErrorCode::LEVEL_RATE_MISSING)->field('level');
+				}
+			}
+		}
+	}
+
+	/** A package led by money with an amount above 0. */
+	private static function hasAmount(\stdClass $wp): bool {
+		$a = $wp->amount ?? null;
+		return is_array($a) && array_filter($a, static fn ($v) => (is_int($v) || is_float($v)) && $v > 0) !== [];
+	}
+
 	/** Key and content; other fields pass and are stored as sent, as for invoices. */
 	public static function validate(string $key, \stdClass $d): void {
 		if (preg_match(self::KEY_PATTERN, $key) !== 1) {

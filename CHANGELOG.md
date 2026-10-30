@@ -1,5 +1,98 @@
 # Changes
 
+## 0.33.0 – 2026-10-30
+
+`api: 2` unchanged; capability `fee_models: 1`; migration adds `level`
+to `ts_inv_hours` (nothing dropped). Contract first (API.md «Fee models,
+0.33.0»; PLAN-HONORAR, decisions E1–E7 of 2026-10-29, E8 in the backlog,
+§9 one list of levels). Not additive for writers of budgets: a client
+without `fee_models` must not write budgets to this server, and a client
+must not send the new fields to a server without it (only `hours`).
+
+- **Money leads** (2026-10-29). A work package stores `amount` per
+  milestone (≥ 0, two decimals, the project's currency); `hours` stay as
+  the derived figure the client writes beside it, the server derives
+  nothing. A package without `amount` is read as before (hours lead). A
+  parent package has no amount of its own, as for hours. The package's
+  `rate` plans only and never values a booking.
+- **The fee model per budget** (2026-10-29). `fee_model` `category`,
+  `mean_rate` or `role` (missing reads as `role`), `mean_rate` only in its
+  model (`fee_model_invalid`), `cap` unchanged with the new `cap_mode`
+  `cap` (ceiling, by effort) or `flat` (the price; `cap_mode_invalid`),
+  `tolerance` now checked (0–100). Once a booking of the budget is billed
+  by an issued, paid or handed-over invoice, `fee_model` does not change
+  (`409 fee_model_locked`). Team setting `fee_model` is the default for new
+  budgets and quotes.
+- **One list: the levels** (2026-10-29). Levels and categories are the
+  same: the team's `levels` (0.27.0, `{ id, name, rates }`, rates in the
+  team's currency, read by members without rates) and the project's
+  `level_rates` serve the models `role` and `category`. There is no list
+  of categories and no default list on the server; the client creates
+  levels by hand or from a rate template (the Mac app ships KBOB 2025 A–G
+  in CHF). Each level may carry a `description` (one line, at most 300
+  characters, e.g. from the template). A package carries `level`, the preset of its bookings in the
+  category model; the booking catalog lists `booking_levels` per code for
+  budgets in the category model, without money.
+- **The level of a booking** (2026-10-29). `X-TIMESISTER-LEVEL` and
+  `level` in `GET /entries` as since 0.27.0. The person sets the `level`
+  of their own bookings when the booking falls into a budget in the
+  category model (by its code and day); title, code, billable, the level
+  elsewhere and everything of someone else's booking stay with Team Admins
+  and Leads (`403 correction_lead_only`).
+- **Addenda in money** (2026-10-29). An addendum on a work package takes
+  `amount` or `hours`, exactly one.
+- **Invoices and quotes** (2026-10-29). `hours` lines take `level` and
+  `level_name` – in the models `role` and `category` hours per level ×
+  rate under the work package; a line with a `level` needs its `rate`
+  (`amount_without_rate`). `bookings[].level` (stored in `ts_inv_hours`),
+  appendix `by_level` (beside `levels`, the table per level of the package
+  tree). Issuing an invoice that bills hours, or a quote, of a budget in
+  `role` or `category` needs a level in the team (`no_levels`); issuing an
+  invoice checks that every level of its lines has a rate in its currency,
+  issuing a quote that every package with money has its rate in its model
+  (`level_rate_missing`, `amount_without_rate`).
+- **Error codes** (2026-10-29). New: `fee_model_locked`,
+  `fee_model_invalid`, `level_rate_missing`, `no_levels`,
+  `amount_without_rate`, `cap_mode_invalid`, `correction_lead_only`.
+- **As built** (2026-10-29). New pure class `FeeModelRules` (budget
+  fields, `cap_mode`, the model comparison of the lock, the budget of a
+  booking); `LevelRules` also checks the `level` of packages, positions and
+  bookings, finds the level of a package (own or above) and the rate of a
+  level on a day in a currency, and derives `booking_levels`;
+  `ProjectRules` checks `amount` and `level` of the packages and addenda
+  in money, `CorrectionRules` the person's own `level` in the category
+  model, `InvoiceRules` `level` and `level_name` of `hours` lines and
+  `bookings[].level`, `InvoiceLayout` the appendix `by_level`,
+  `IssueRules` and `QuoteRules` the issue checks (`no_levels`,
+  `level_rate_missing`, `amount_without_rate`). `RecordService` holds the
+  lock under the team lock (issuing, issued or paid invoices of the budget
+  with rows in `ts_inv_hours`, handed-over ones with `bookings[]`); a batch
+  error now carries the rule's extra fields (`budget`, `invoice`) beside
+  `index`, and `Position {n}:` and `Booking {n}:` errors carry the code and
+  field of the line's error. The person's right on a correction reads the
+  booking's codes and day from the book and the budgets from the stored
+  projects (`CorrectionService::requireLevelRight()`); a booking with
+  several codes needs each of them in a budget by category; every
+  correction of a request – `POST /entries/correct` and a batch of records
+  – is checked before any is written into an event. The person's write of
+  a correction record keeps the Lead's fields (`title`, `code`,
+  `billable`) of the applied record it leaves out (a refused change of a
+  Lead never passes on); a member deletes only a correction record that
+  holds none of them and no `level` outside the category model. A
+  quote's currency falls back to the budget's, the project's, then the
+  team's. `InvHour::present()` adds `level` only when set, so the ledger
+  payload of an invoice without levels is that of 0.32.0. Migration
+  `Version1025Date20261029210000` (`level` in `ts_inv_hours`);
+  `Version1024Date20261029180000` stays, its `category` columns in
+  `ts_entries` and `ts_inv_hours` unused (nothing dropped) – `EntryMapper`
+  and `InvHourMapper` name their columns instead of `*`. The categories
+  of the drafts (`category_rates`, a package's and a booking's `category`,
+  `X-TIMESISTER-CATEGORY`, `booking_categories`, the position kind and the
+  appendix `categories`, `category_rate_missing`, `CategoryRules`) are
+  gone without a transition. Tests: `FeeModelRulesTest`, `LevelBookingTest`
+  (replaces `CategoryBookingTest`), `InvoiceLayoutTest`, integration
+  `teil-honorar`.
+
 ## 0.32.0 – 2026-10-29
 
 `api: 2` unchanged; capabilities `invoice_documents: 2`, `quotes: 4`,

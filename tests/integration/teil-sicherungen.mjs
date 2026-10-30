@@ -4,7 +4,8 @@
 // copy at the backup account and in the person's own folder, permissions,
 // weekly job and thinning (both with TS_OCC), backup account per team.
 import { ADMIN, NC, dav, occ, ocs, sql } from './lib.mjs'
-import { A, AA, L, RUN, U1, U2, V, ISO, check, expect, head, isObj, sha256 } from './harness.mjs'
+import { RUN, ISO, check, expect, head, isObj, sha256 } from './harness.mjs'
+import { A, AA, L, TEAM, U1, U2, V, nameOf } from './konten.mjs'
 
 const REFUSED = 'The person has not agreed to backups with the Team Admin.'
 const REFUSED_DE = 'Die Person hat die Sicherung beim Team Admin nicht freigegeben.'
@@ -62,8 +63,8 @@ export async function sicherungen() {
 	const prior2 = (await ocs(U2, 'GET', '/backups/consent')).data
 	const own1 = (await ocs(U1, 'GET', '/backups/own-copy')).data
 	const ownPath = `TimeSister Backups/${today()}.ics`
-	const ownBefore = (await dav(U1, 'GET', davPath('pbuser1', ownPath))).status
-	const ownDirBefore = (await dav(U1, 'PROPFIND', davPath('pbuser1', 'TimeSister Backups'), undefined, { Depth: '0' })).status
+	const ownBefore = (await dav(U1, 'GET', davPath('zbuser1', ownPath))).status
+	const ownDirBefore = (await dav(U1, 'PROPFIND', davPath('zbuser1', 'TimeSister Backups'), undefined, { Depth: '0' })).status
 	try {
 		check('GET /backups/consent: consent, since, revoked_at, notice', typeof prior1?.consent === 'boolean'
 			&& ['since', 'revoked_at', 'notice'].every((k) => k in (prior1 || {})), prior1)
@@ -90,27 +91,27 @@ export async function sicherungen() {
 		expect('consent without notice', await ocs(U1, 'PUT', '/backups/consent', { consent: true }), 422, 'invalid')
 		expect('notice too long', await ocs(U1, 'PUT', '/backups/consent', { consent: true, notice: 'x'.repeat(33) }), 422, 'invalid')
 		expect('consent is not a boolean', await ocs(U1, 'PUT', '/backups/consent', { consent: 'ja', notice: NOTICE }), 400, 'invalid')
-		expect('PUT with uid (another account)', await ocs(U1, 'PUT', '/backups/consent', { consent: true, notice: NOTICE, uid: 'pbuser2' }), 400, 'invalid')
-		expect('own copy: PUT with uid', await ocs(U1, 'PUT', '/backups/own-copy', { enabled: true, uid: 'pbuser2' }), 400, 'invalid')
+		expect('PUT with uid (another account)', await ocs(U1, 'PUT', '/backups/consent', { consent: true, notice: NOTICE, uid: 'zbuser2' }), 400, 'invalid')
+		expect('own copy: PUT with uid', await ocs(U1, 'PUT', '/backups/own-copy', { enabled: true, uid: 'zbuser2' }), 400, 'invalid')
 		const u2after = (await ocs(U2, 'GET', '/backups/consent')).data
-		check('… pbuser2 unchanged', JSON.stringify(u2after) === JSON.stringify(prior2), { prior2, u2after })
+		check('… zbuser2 unchanged', JSON.stringify(u2after) === JSON.stringify(prior2), { prior2, u2after })
 		const on = await ocs(U1, 'PUT', '/backups/consent', { consent: true, notice: NOTICE })
 		check('consent with notice → 200, version returned', on.status === 200 && on.data?.consent === true && on.data?.notice === NOTICE
 			&& ISO.test(on.data?.since) && on.data?.revoked_at === null, on.text)
-		const st = ((await ocs(V, 'GET', '/status')).data || []).find((x) => x.uid === 'pbuser1')
+		const st = ((await ocs(V, 'GET', '/status')).data || []).find((x) => x.uid === 'zbuser1')
 		check('GET /status: backup_consent, _since, _notice, without own_copy', st?.backup_consent === true && st?.backup_consent_since === on.data?.since
 			&& st?.backup_consent_notice === NOTICE && !('own_copy' in st), st)
 
 		head('Server backup and copy at the backup account')
 		const team = await ocs(A, 'GET', '/team')
-		check('GET /team names backup_owner (pbadmin)', team.data?.backup_owner === 'pbadmin', team.data?.backup_owner)
-		const adm = (await ocs(ADMIN, 'GET', '/admin/teams')).data?.find?.((t) => t.slug === 'pb')
-		check('GET /admin/teams names backup_owner', adm?.backup_owner === 'pbadmin', adm)
+		check('GET /team names backup_owner (zbadmin)', team.data?.backup_owner === 'zbadmin', team.data?.backup_owner)
+		const adm = (await ocs(ADMIN, 'GET', '/admin/teams')).data?.find?.((t) => t.slug === 'zb')
+		check('GET /admin/teams names backup_owner', adm?.backup_owner === 'zbadmin', adm)
 
 		const now = await ocs(U1, 'POST', '/backups/now')
-		const path = `TimeSister Backups/Mia Muster (pbuser1)/${now.data?.taken_on}.ics`
+		const path = `TimeSister Backups/${nameOf('zbuser1')} (zbuser1)/${now.data?.taken_on}.ics`
 		check('POST /backups/now → source server, file_path at the backup account', now.status === 200 && now.data?.source === 'server'
-			&& now.data?.uid === 'pbuser1' && now.data?.file_path === path && !('own_copy' in now.data), now.text)
+			&& now.data?.uid === 'zbuser1' && now.data?.file_path === path && !('own_copy' in now.data), now.text)
 		const one = await ocs(U1, 'GET', `/backups/${now.data?.id}`)
 		const ics = icsOf(one)
 		check('GET /backups/{id}: full calendar, hash matches', one.status === 200 && ics.startsWith('BEGIN:VCALENDAR')
@@ -121,40 +122,40 @@ export async function sicherungen() {
 		const listB = (await ocs(U1, 'GET', '/backups')).data || []
 		check('calendar unchanged: no second backup', again.data?.id === now.data?.id && again.data?.sha256 === now.data?.sha256
 			&& JSON.stringify(listA) === JSON.stringify(listB), again.text)
-		const file = await dav(A, 'GET', davPath('pbadmin', path))
-		check('file via WebDAV in pbadmin\'s folder, same content', file.status === 200 && sha256(file.text) === now.data?.sha256, `HTTP ${file.status}`)
-		check('pbuser1 does not see pbadmin\'s folder', (await dav(U1, 'GET', davPath('pbadmin', path))).status !== 200)
+		const file = await dav(A, 'GET', davPath('zbadmin', path))
+		check('file via WebDAV in zbadmin\'s folder, same content', file.status === 200 && sha256(file.text) === now.data?.sha256, `HTTP ${file.status}`)
+		check('zbuser1 does not see zbadmin\'s folder', (await dav(U1, 'GET', davPath('zbadmin', path))).status !== 200)
 
-		expect('user backs up another account', await ocs(U2, 'POST', '/backups/now', { uid: 'pbuser1' }), 403, 'forbidden')
-		expect('lead backs up another account', await ocs(L, 'POST', '/backups/now', { uid: 'pbuser1' }), 403, 'forbidden')
-		expect('at admin backs up a pb account', await ocs(AA, 'POST', '/backups/now', { uid: 'pbuser1' }), 404, 'not_found')
-		const byV = await ocs(V, 'POST', '/backups/now', { uid: 'pbuser1' })
-		check('second Team Admin backs up pbuser1 (unchanged: the same)', byV.status === 200 && byV.data?.id === now.data?.id && byV.data?.source === 'server', byV.text)
+		expect('user backs up another account', await ocs(U2, 'POST', '/backups/now', { uid: 'zbuser1' }), 403, 'forbidden')
+		expect('lead backs up another account', await ocs(L, 'POST', '/backups/now', { uid: 'zbuser1' }), 403, 'forbidden')
+		expect('za admin backs up a zb account', await ocs(AA, 'POST', '/backups/now', { uid: 'zbuser1' }), 404, 'not_found')
+		const byV = await ocs(V, 'POST', '/backups/now', { uid: 'zbuser1' })
+		check('second Team Admin backs up zbuser1 (unchanged: the same)', byV.status === 200 && byV.data?.id === now.data?.id && byV.data?.source === 'server', byV.text)
 		expect('user gets another backup', await ocs(U2, 'GET', `/backups/${now.data?.id}`), 403, 'forbidden')
-		expect('at admin gets a pb backup', await ocs(AA, 'GET', `/backups/${now.data?.id}`), 404, 'not_found')
+		expect('za admin gets a zb backup', await ocs(AA, 'GET', `/backups/${now.data?.id}`), 404, 'not_found')
 
 		head('Copy in the person\'s own folder')
 		await ocs(U1, 'PUT', '/backups/consent', { consent: false })
 		const en = await ocs(U1, 'PUT', '/backups/own-copy', { enabled: true })
 		check('PUT /backups/own-copy → enabled true', en.status === 200 && en.data?.enabled === true, en.text)
 		expect('enabled is not a boolean', await ocs(U1, 'PUT', '/backups/own-copy', { enabled: 'ja' }), 400, 'invalid')
-		const adminBefore = await dav(A, 'GET', davPath('pbadmin', path))
+		const adminBefore = await dav(A, 'GET', davPath('zbadmin', path))
 		const onlyOwn = await ocs(U1, 'POST', '/backups/now')
 		check('own copy only: response { own_copy }', onlyOwn.status === 200 && onlyOwn.data?.own_copy === ownPath && !('id' in (onlyOwn.data || {})), onlyOwn.text)
-		const mine = await dav(U1, 'GET', davPath('pbuser1', ownPath))
-		check('… file via WebDAV at pbuser1, full calendar', mine.status === 200 && mine.text.startsWith('BEGIN:VCALENDAR')
+		const mine = await dav(U1, 'GET', davPath('zbuser1', ownPath))
+		check('… file via WebDAV at zbuser1, full calendar', mine.status === 200 && mine.text.startsWith('BEGIN:VCALENDAR')
 			&& mine.text.trimEnd().endsWith('END:VCALENDAR'), `HTTP ${mine.status}`)
 		const listC = (await ocs(U1, 'GET', '/backups')).data || []
-		const adminAfter = await dav(A, 'GET', davPath('pbadmin', path))
-		check('… no new entry in /backups, nothing new at pbadmin', JSON.stringify(listC) === JSON.stringify(listB)
+		const adminAfter = await dav(A, 'GET', davPath('zbadmin', path))
+		check('… no new entry in /backups, nothing new at zbadmin', JSON.stringify(listC) === JSON.stringify(listB)
 			&& adminAfter.status === adminBefore.status && adminAfter.text === adminBefore.text)
-		check('… pbadmin does not see the own copy', (await dav(A, 'GET', davPath('pbuser1', ownPath))).status !== 200)
+		check('… zbadmin does not see the own copy', (await dav(A, 'GET', davPath('zbuser1', ownPath))).status !== 200)
 
 		await ocs(U1, 'PUT', '/backups/consent', { consent: true, notice: NOTICE })
 		const both = await ocs(U1, 'POST', '/backups/now')
 		check('both on: entry with own_copy, both files present', both.status === 200 && Number.isInteger(both.data?.id) && both.data?.own_copy === ownPath
-			&& (await dav(A, 'GET', davPath('pbadmin', both.data?.file_path || 'x'))).status === 200
-			&& (await dav(U1, 'GET', davPath('pbuser1', ownPath))).status === 200, both.text)
+			&& (await dav(A, 'GET', davPath('zbadmin', both.data?.file_path || 'x'))).status === 200
+			&& (await dav(U1, 'GET', davPath('zbuser1', ownPath))).status === 200, both.text)
 
 		head('Withdrawing consent')
 		await ocs(U1, 'PUT', '/backups/own-copy', { enabled: false })
@@ -164,20 +165,20 @@ export async function sicherungen() {
 		const stopped = await ocs(U1, 'POST', '/backups/now')
 		check('no new backup afterwards (403)', stopped.status === 403 && stopped.data?.message === REFUSED, stopped.text)
 		expect('existing backup stays readable', await ocs(U1, 'GET', `/backups/${now.data?.id}`), 200)
-		check('the admin\'s copy stays', (await dav(A, 'GET', davPath('pbadmin', path))).status === 200)
+		check('the admin\'s copy stays', (await dav(A, 'GET', davPath('zbadmin', path))).status === 200)
 	} finally {
 		await restoreConsent(U1, prior1)
 		await restoreOwnCopy(U1, own1)
 		// Only delete test files in the own folder if they did not exist before.
 		if (ownBefore !== 200) {
-			await dav(U1, 'DELETE', davPath('pbuser1', ownPath))
+			await dav(U1, 'DELETE', davPath('zbuser1', ownPath))
 		}
 		if (ownDirBefore !== 207) {
-			await dav(U1, 'DELETE', davPath('pbuser1', 'TimeSister Backups'))
+			await dav(U1, 'DELETE', davPath('zbuser1', 'TimeSister Backups'))
 		}
 		const back = (await ocs(U1, 'GET', '/backups/consent')).data
 		const backOwn = (await ocs(U1, 'GET', '/backups/own-copy')).data
-		check('pbuser1: consent and own copy as before', back?.consent === prior1?.consent && backOwn?.enabled === own1?.enabled, { prior1, back, own1, backOwn })
+		check('zbuser1: consent and own copy as before', back?.consent === prior1?.consent && backOwn?.enabled === own1?.enabled, { prior1, back, own1, backOwn })
 	}
 
 	await testkonto()
@@ -192,14 +193,14 @@ async function testkonto() {
 	const cal = `zeit-${uid}`
 	const probe = `tsprobe-${RUN}`
 	const adminDir = `TimeSister Backups/${uid} (${uid})`
-	await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/users', { userid: uid, password: who.pass, groups: ['pb-team'] })
+	await ocs(ADMIN, 'POST', '/ocs/v2.php/cloud/users', { userid: uid, password: who.pass, groups: ['zb-team'] })
 	try {
 		const mk = await dav(who, 'MKCALENDAR', `calendars/${uid}/${cal}/`)
 		const ev = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//TimeSister//Probe//DE\r\nBEGIN:VEVENT\r\nUID:${probe}\r\nDTSTAMP:20260926T080000Z\r\nDTSTART:20260926T080000Z\r\nDTEND:20260926T090000Z\r\nSUMMARY:Probe\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`
 		const put = await dav(who, 'PUT', `calendars/${uid}/${cal}/${probe}.ics`, ev, { 'Content-Type': 'text/calendar; charset=utf-8' })
 		check('test account with a time calendar and an event', mk.status === 201 && put.status === 201, `${mk.status} ${put.status}`)
 		// calendar_url in a foreign home: the server still only takes its own calendar.
-		await ocs(who, 'POST', '/status', { calendar_url: 'http://localhost:8081/remote.php/dav/calendars/pbuser1/zeit-pbuser1/' })
+		await ocs(who, 'POST', '/status', { calendar_url: 'http://localhost:8081/remote.php/dav/calendars/zbuser1/zeit-zbuser1/' })
 
 		if (!runJob('WeeklyBackup')) {
 			console.log('    --  weekly job and thinning: not checked without TS_OCC')
@@ -213,8 +214,8 @@ async function testkonto() {
 		runJob('WeeklyBackup')
 		const own = await dav(who, 'GET', ownFile)
 		check('job with only an own copy: file in the own folder with the event', own.status === 200 && own.text.includes(`UID:${probe}`), `HTTP ${own.status}`)
-		check('… nothing in /backups, nothing at pbadmin', ((await ocs(who, 'GET', '/backups')).data || []).length === 0
-			&& (await dav(A, 'PROPFIND', davPath('pbadmin', adminDir), undefined, { Depth: '0' })).status === 404)
+		check('… nothing in /backups, nothing at zbadmin', ((await ocs(who, 'GET', '/backups')).data || []).length === 0
+			&& (await dav(A, 'PROPFIND', davPath('zbadmin', adminDir), undefined, { Depth: '0' })).status === 404)
 
 		await ocs(who, 'PUT', '/backups/consent', { consent: true, notice: NOTICE })
 		runJob('WeeklyBackup')
@@ -225,7 +226,7 @@ async function testkonto() {
 		check('only the own event, not the calendar from the foreign calendar_url', got.includes(`UID:${probe}`)
 			&& (got.match(/BEGIN:VEVENT/g) || []).length === 1, got.slice(0, 300))
 		check('both on: copy at the admin and in the own folder', b?.file_path === `${adminDir}/${today()}.ics`
-			&& (await dav(A, 'GET', davPath('pbadmin', b.file_path))).status === 200 && (await dav(who, 'GET', ownFile)).status === 200, b)
+			&& (await dav(A, 'GET', davPath('zbadmin', b.file_path))).status === 200 && (await dav(who, 'GET', ownFile)).status === 200, b)
 		runJob('WeeklyBackup')
 		check('second run in the same week: no further backup', ((await ocs(who, 'GET', '/backups')).data || []).length === 1)
 
@@ -235,28 +236,28 @@ async function testkonto() {
 			await ocs(who, 'POST', '/backups', { taken_on: d, ics_base64: b64(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//TimeSister//Old ${d}//DE\r\nEND:VCALENDAR\r\n`) })
 		}
 		const moved = `${adminDir}/moved-2026-03-10.ics`
-		const mv = await dav(A, 'MOVE', davPath('pbadmin', `${adminDir}/2026-03-10.ics`), undefined, { Destination: `${NC}/remote.php/dav/${davPath('pbadmin', moved)}` })
+		const mv = await dav(A, 'MOVE', davPath('zbadmin', `${adminDir}/2026-03-10.ics`), undefined, { Destination: `${NC}/remote.php/dav/${davPath('zbadmin', moved)}` })
 		check('the March 10 copy at the admin renamed', mv.status === 201, `HTTP ${mv.status}`)
 		runJob('Retention')
 		const left = ((await ocs(who, 'GET', '/backups')).data || []).map((x) => x.taken_on).sort()
 		check('thinning: only the newest in March, older than 10 years gone', JSON.stringify(left) === JSON.stringify(['2026-03-20', today()]), left)
-		const st = async (p) => (await dav(A, 'GET', davPath('pbadmin', p))).status
+		const st = async (p) => (await dav(A, 'GET', davPath('zbadmin', p))).status
 		check('deleted copies gone, kept ones present', await st(`${adminDir}/2026-03-02.ics`) === 404 && await st(`${adminDir}/2015-06-01.ics`) === 404
 			&& await st(`${adminDir}/2026-03-20.ics`) === 200)
 		check('the moved file is not deleted', await st(moved) === 200)
 		// Trash entries are named <name>.d<time>; only the ones from this run.
-		const trash = await dav(A, 'PROPFIND', 'trashbin/pbadmin/trash/', undefined, { Depth: '1' })
+		const trash = await dav(A, 'PROPFIND', 'trashbin/zbadmin/trash/', undefined, { Depth: '1' })
 		const items = [...trash.text.matchAll(/<d:href>([^<]+)<\/d:href>/g)].map((m) => m[1]).filter((h) => {
 			const m = decodeURIComponent(h).match(/\/(2026-03-02|2015-06-01)\.ics\.d(\d+)$/)
 			return m !== null && Number(m[2]) >= START
 		})
-		check('deleted via pbadmin\'s trash', items.length === 2, items)
+		check('deleted via zbadmin\'s trash', items.length === 2, items)
 		for (const h of items) {
 			await dav(A, 'DELETE', h.replace(/^.*?\/remote\.php\/dav\//, ''))
 		}
 	} finally {
 		await ocs(ADMIN, 'DELETE', `/ocs/v2.php/cloud/users/${uid}`)
-		await dav(A, 'DELETE', davPath('pbadmin', adminDir))
+		await dav(A, 'DELETE', davPath('zbadmin', adminDir))
 	}
 	const left = sql(`SELECT COUNT(*) FROM oc_ts_backup_consent WHERE uid = '${uid}';`)
 	if (left === null) {
@@ -268,7 +269,7 @@ async function testkonto() {
 
 /** Own test team: backup account (1.1) and team settings (1.2). */
 async function testteam() {
-	head('Team settings in /me (Planungsbüro, read only)')
+	head(`Team settings in /me (${TEAM.name}, read only)`)
 	{
 		const me = (await ocs(U1, 'GET', '/me')).data
 		// 0.17.0: `entries_since` (date or null) next to `backup_required`; `leads_see_calendars` is gone with the shares matrix. 0.18.0: `invoicing`. 0.19.0: `documents`. 0.20.0: `datev`, `webhooks`.
@@ -292,7 +293,7 @@ async function testteam() {
 		const made = await ocs(ADMIN, 'POST', '/admin/teams', base)
 		id = made.data?.id
 		check('without a choice: first admin by uid', made.status === 200 && made.data?.backup_owner === first, made.text)
-		expect('choosing an account without the admin role', await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, backup_owner: 'pbuser1' }), 422, 'invalid')
+		expect('choosing an account without the admin role', await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, backup_owner: 'zbuser1' }), 422, 'invalid')
 		const set = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, backup_owner: second })
 		check('choosing an admin', set.status === 200 && set.data?.backup_owner === second, set.text)
 		const keep = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, base)

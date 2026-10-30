@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { ADMIN, as, groupsOf, ocs, sql } from './lib.mjs'
-import { A, AA, AL, AU, C, L, NOAH, P, R, RUN, U1, U2, V, ISO, b64, check, expect, head, isObj, keysOf, me, sha256, ensure } from './harness.mjs'
+import { C, NOAH, P, R, RUN, ISO, b64, check, expect, head, isObj, keysOf, me, sha256, ensure } from './harness.mjs'
+import { A, AA, AL, AU, L, U1, U2, V } from './konten.mjs'
 
 export async function teams() {
 	head('Capability')
@@ -14,9 +15,9 @@ export async function teams() {
 	head('GET /me – team from the team group, role from group admin and project leads')
 	{
 		const expected = [
-			['pbadmin', 'pb', 'admin'], ['pbverw', 'pb', 'admin'], ['pblead', 'pb', 'lead'],
-			['pbuser1', 'pb', 'user'], ['pbuser2', 'pb', 'user'],
-			['atadmin', 'at', 'admin'], ['atlead', 'at', 'lead'], ['atuser1', 'at', 'user'],
+			['zbadmin', 'zb', 'admin'], ['zbverw', 'zb', 'admin'], ['zblead', 'zb', 'lead'],
+			['zbuser1', 'zb', 'user'], ['zbuser2', 'zb', 'user'],
+			['zaadmin', 'za', 'admin'], ['zalead', 'za', 'lead'], ['zauser1', 'za', 'user'],
 		]
 		for (const [uid, slug, role] of expected) {
 			const r = await ocs(as(uid), 'GET', '/me')
@@ -28,7 +29,7 @@ export async function teams() {
 		}
 		const lead = (await ocs(L, 'GET', '/me')).data
 		// 0.17.0: nothing of the shares matrix in /me any more.
-		check('pblead: no admins, leads, calendar_share, share_targets or may_override', ['admins', 'leads', 'calendar_share', 'share_targets', 'may_override'].every((k) => !(k in (lead || {}))), Object.keys(lead || {}))
+		check('zblead: no admins, leads, calendar_share, share_targets or may_override', ['admins', 'leads', 'calendar_share', 'share_targets', 'may_override'].every((k) => !(k in (lead || {}))), Object.keys(lead || {}))
 		expect('Nextcloud admin without a team group', await ocs(ADMIN, 'GET', '/me'), 403, 'no_team')
 		expect('Nextcloud admin without a team group reads no records', await ocs(ADMIN, 'GET', '/records'), 403, 'no_team')
 	}
@@ -37,18 +38,18 @@ export async function teams() {
 	head('Team administration (Nextcloud admins only)')
 	{
 		const r = await ocs(ADMIN, 'GET', '/admin/teams')
-		const pb = r.data?.find?.((t) => t.slug === 'pb')
-		const at = r.data?.find?.((t) => t.slug === 'at')
-		check('GET /admin/teams: two teams', r.status === 200 && pb && at, r.text)
+		const zb = r.data?.find?.((t) => t.slug === 'zb')
+		const za = r.data?.find?.((t) => t.slug === 'za')
+		check('GET /admin/teams: two teams', r.status === 200 && zb && za, r.text)
 		check('count per role, plus departed',
-			JSON.stringify(pb?.counts) === JSON.stringify({ user: 2, lead: 1, admin: 2, left: 0 })
-			&& JSON.stringify(at?.counts) === JSON.stringify({ user: 1, lead: 1, admin: 1, left: 0 }), { pb: pb?.counts, at: at?.counts })
-		check('groups only with team', JSON.stringify(pb?.groups) === '{"team":"pb-team"}' && JSON.stringify(at?.groups) === '{"team":"at-team"}', { pb: pb?.groups, at: at?.groups })
-		check('list without members', pb && !('members' in pb))
-		expect('GET /admin/teams as pbadmin', await ocs(A, 'GET', '/admin/teams'), 403)
-		expect('POST /admin/teams as pbadmin', await ocs(A, 'POST', '/admin/teams', { name: 'X', slug: 'xx', groups: groupsOf('pb') }), 403)
-		expect('GET /admin/teams as pbuser1', await ocs(U1, 'GET', '/admin/teams'), 403)
-		expect('DELETE /admin/teams as atadmin', await ocs(AA, 'DELETE', `/admin/teams/${pb?.id}`), 403)
+			JSON.stringify(zb?.counts) === JSON.stringify({ user: 2, lead: 1, admin: 2, left: 0 })
+			&& JSON.stringify(za?.counts) === JSON.stringify({ user: 1, lead: 1, admin: 1, left: 0 }), { zb: zb?.counts, za: za?.counts })
+		check('groups only with team', JSON.stringify(zb?.groups) === '{"team":"zb-team"}' && JSON.stringify(za?.groups) === '{"team":"za-team"}', { zb: zb?.groups, za: za?.groups })
+		check('list without members', zb && !('members' in zb))
+		expect('GET /admin/teams as zbadmin', await ocs(A, 'GET', '/admin/teams'), 403)
+		expect('POST /admin/teams as zbadmin', await ocs(A, 'POST', '/admin/teams', { name: 'X', slug: 'xx', groups: groupsOf('zb') }), 403)
+		expect('GET /admin/teams as zbuser1', await ocs(U1, 'GET', '/admin/teams'), 403)
+		expect('DELETE /admin/teams as zaadmin', await ocs(AA, 'DELETE', `/admin/teams/${zb?.id}`), 403)
 
 		const tmp = { team: `tmp-${RUN}-t` }
 		for (const gid of Object.values(tmp)) {
@@ -58,10 +59,10 @@ export async function teams() {
 		expect('unknown group', await ocs(ADMIN, 'POST', '/admin/teams', { name: 'T', slug: `t-${RUN}`, groups: { team: `missing-${RUN}` } }), 422, 'invalid')
 		expect('without a team group', await ocs(ADMIN, 'POST', '/admin/teams', { name: 'T', slug: `t-${RUN}`, groups: {} }), 422, 'invalid')
 		for (const alt of ['user', 'accounts', 'zeit']) {
-			expect(`old key groups.${alt}`, await ocs(ADMIN, 'POST', '/admin/teams', { name: 'T', slug: `t-${RUN}`, groups: { ...tmp, [alt]: 'pb-team' } }), 422, 'invalid')
+			expect(`old key groups.${alt}`, await ocs(ADMIN, 'POST', '/admin/teams', { name: 'T', slug: `t-${RUN}`, groups: { ...tmp, [alt]: 'zb-team' } }), 422, 'invalid')
 		}
-		expect('team group of another team', await ocs(ADMIN, 'POST', '/admin/teams', { name: 'T', slug: `t-${RUN}`, groups: { team: 'pb-team' } }), 409, 'conflict')
-		expect('short name already taken', await ocs(ADMIN, 'POST', '/admin/teams', { name: 'T', slug: 'pb', groups: tmp }), 409, 'conflict')
+		expect('team group of another team', await ocs(ADMIN, 'POST', '/admin/teams', { name: 'T', slug: `t-${RUN}`, groups: { team: 'zb-team' } }), 409, 'conflict')
+		expect('short name already taken', await ocs(ADMIN, 'POST', '/admin/teams', { name: 'T', slug: 'zb', groups: tmp }), 409, 'conflict')
 		const made = await ocs(ADMIN, 'POST', '/admin/teams', { name: 'Temporary', slug: `t-${RUN}`, groups: tmp })
 		expect('create team', made, 200)
 		check('created team as in GET /team, with counts', made.data?.slug === `t-${RUN}` && JSON.stringify(made.data?.groups) === JSON.stringify(tmp) && made.data?.counts?.user === 0, made.text)

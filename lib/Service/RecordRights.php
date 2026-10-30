@@ -179,11 +179,9 @@ final class RecordRights {
 		}
 		if ($kind === CorrectionRules::KIND) {
 			// 0.27.0: Team Admins and Leads; the project is checked as the record is applied (CorrectionService::prepare).
+			// 0.33.0: members too – the category of their own bookings, checked against the stored record (CorrectionRules::requirePersonal).
 			if (CorrectionRules::personOf($key) === null) {
 				throw ApiException::invalid('The key of a correction is the person’s key, “+” and 32 hex digits of the SHA-256 of the event UID (and recurrence).');
-			}
-			if (!$m->manages() && $m->role !== Role::LEAD) {
-				throw ApiException::forbidden('Only Team Admins and the project’s Leads correct bookings.');
 			}
 			return;
 		}

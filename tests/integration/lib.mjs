@@ -31,6 +31,10 @@ export const as = (uid) => ({ user: uid, pass: pw(uid) })
 export const TEAMS = [
 	{ name: 'Planungsbüro', slug: 'pb', prefix: 'pb' },
 	{ name: 'Atelier', slug: 'at', prefix: 'at' },
+	// The integration check's own teams (konten.mjs), built like pb and at but
+	// outside the test data set, so its writes never touch pb or at.
+	{ name: 'Probebüro', slug: 'zb', prefix: 'zb', check: true },
+	{ name: 'Probeatelier', slug: 'za', prefix: 'za', check: true },
 ]
 /**
  * Account, display name, team, role. All are in the team group; admin
@@ -53,7 +57,23 @@ export const ACCOUNTS = [
 	['atadmin', 'Anna Keller', 'at', 'admin'],
 	['atlead', 'Luca Leitner', 'at', 'lead'],
 	['atuser1', 'Tim Test', 'at', 'user'],
+	// Integration check only (konten.mjs); zbverw is zb's second Team Admin.
+	['zbadmin', 'Pia Bauer', 'zb', 'admin'],
+	['zbverw', 'Paul Probe', 'zb', 'admin'],
+	['zblead', 'Lina Lauf', 'zb', 'lead'],
+	['zbuser1', 'Mila Mock', 'zb', 'user'],
+	['zbuser2', 'Nico Bach', 'zb', 'user'],
+	['zaadmin', 'Alma Kunz', 'za', 'admin'],
+	['zalead', 'Leo Lang', 'za', 'lead'],
+	['zauser1', 'Tara Thal', 'za', 'user'],
 ]
+
+/**
+ * The levels seed.mjs gives the check's own teams (0.33.0: issuing hours of
+ * a budget by role or category needs at least one; pb and at get theirs from
+ * the test data set).
+ */
+export const CHECK_LEVELS = [{ id: 'staff', name: 'Staff', rates: [{ from: '2020-01-01', rate: 150 }] }]
 
 /** A team's team group. */
 export const teamGroupOf = (prefix) => `${prefix}-team`
