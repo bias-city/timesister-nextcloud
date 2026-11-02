@@ -314,6 +314,8 @@ export async function renderer() {
 		head('Renderer: expiry')
 		{
 			const tenant = sql("SELECT id FROM oc_ts_tenants WHERE slug = 'zb'")
+			// The reversal above took a number of its own, so the counter is read, not assumed.
+			const before = (await ocs(A, 'GET', `/invoices/next-number?year=${Y}`)).data?.number
 			const rv = await ocs(A, 'POST', `${ipath(K2)}/reverse`, { kind: 'credit', reason: 'Expiry test' })
 			expect('reserve a credit note', rv, 200)
 			const rk = rv.data?.record?.key
@@ -335,7 +337,7 @@ export async function renderer() {
 				console.log('    info  no TS_SQL – the expiry is not forced; the reservation is cancelled')
 				expect('cancel', await ocs(A, 'POST', `${ipath(rk)}/issue/cancel`, {}), 200)
 			}
-			check('the counter did not move (the credit note’s numbers were given back)', (await ocs(A, 'GET', `/invoices/next-number?year=${Y}`)).data?.number === 4)
+			check('the counter did not move (the credit note’s numbers were given back)', (await ocs(A, 'GET', `/invoices/next-number?year=${Y}`)).data?.number === before, { before, now: (await ocs(A, 'GET', `/invoices/next-number?year=${Y}`)).data?.number })
 		}
 
 		head('Renderer: quotes with texts, number and documents')

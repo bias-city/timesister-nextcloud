@@ -12,7 +12,7 @@
 import { exec } from 'node:child_process'
 import http from 'node:http'
 import { promisify } from 'node:util'
-import { dav, ocs, occ, sql, NC, API } from './lib.mjs'
+import { dav, ocs, occ, sql, NC, API, APP_VERSION } from './lib.mjs'
 import { RUN, check, expect, head, sha256 } from './harness.mjs'
 import { A, L, U1, U2 } from './konten.mjs'
 
@@ -203,7 +203,7 @@ export async function spesen() {
 		head('Expenses 0.30.0: setup')
 		{
 			const cap = (await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')).data?.capabilities?.timesister
-			check('capability expense_table: 2 (0.31.0), version 0.33.0', cap?.expense_table === 2 && cap?.version === '0.33.0', cap)
+			check(`capability expense_table: 2 (0.31.0), version ${APP_VERSION}`, cap?.expense_table === 2 && cap?.version === APP_VERSION, cap)
 			expect('documents.root for the test', await ocs(A, 'PUT', '/team/settings', { documents: { root: FOLDER } }), 200)
 			expect('settings: costs on, CHF, an own expense number', await ocs(A, 'PUT', '/records/setting/settings', { version: settings.status === 200 ? settings.data.version : 0, data: { ...base,
 				currency: 'CHF', modules: { ...(base.modules || {}), costs: true }, expense_number: { pattern: `SQ-${RUN}-{no:4}`, per_year: true, start: 1 } } }), 200)

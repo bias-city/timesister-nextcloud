@@ -10,8 +10,10 @@ use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\ITempManager;
 
 /**
- * The team's invoice template (0.16.0): one Word file per team, the
- * source for every Mac of the team. Team Admins only – reading, too.
+ * The team's Word templates: the invoice template (0.16.0) and the quote
+ * template (0.34.0), one file each per team, the source for every Mac of
+ * the team. Since 0.34.0 every member reads them (to fill documents);
+ * only Team Admins replace or remove them.
  */
 final class InvoiceTemplateService {
 	public function __construct(
@@ -22,15 +24,13 @@ final class InvoiceTemplateService {
 	}
 
 	/** @return array{name:string,size:int,sha256:string,modified_at:string,modified_by:string} */
-	public function info(Membership $m): array {
-		self::allowed($m);
-		return $this->store->info($m->tenantId) ?? throw self::none();
+	public function info(Membership $m, string $kind = InvoiceTemplateStore::INVOICE): array {
+		return $this->store->info($m->tenantId, $kind) ?? throw self::none($kind);
 	}
 
 	/** @return array{name:string,size:int,sha256:string,modified_at:string,modified_by:string,base64:string} */
-	public function get(Membership $m): array {
-		self::allowed($m);
-		$t = $this->store->get($m->tenantId) ?? throw self::none();
+	public function get(Membership $m, string $kind = InvoiceTemplateStore::INVOICE): array {
+		$t = $this->store->get($m->tenantId, $kind) ?? throw self::none($kind);
 		return $t['meta'] + ['base64' => base64_encode($t['content'])];
 	}
 
@@ -39,20 +39,20 @@ final class InvoiceTemplateService {
 	 *
 	 * @return array{name:string,size:int,sha256:string,modified_at:string,modified_by:string}
 	 */
-	public function put(Membership $m, \stdClass $body): array {
-		self::allowed($m);
+	public function put(Membership $m, \stdClass $body, string $kind = InvoiceTemplateStore::INVOICE): array {
+		self::allowed($m, $kind);
 		$name = InvoiceTemplateRules::checkName($body->name ?? null);
 		$bytes = InvoiceTemplateRules::decode($body->base64 ?? null);
 		$this->check($bytes);
 		$meta = InvoiceTemplateRules::meta($name, $bytes, $this->time->getTime(), $m->uid);
-		$this->store->put($m->tenantId, $meta, $bytes);
+		$this->store->put($m->tenantId, $meta, $bytes, $kind);
 		return $meta;
 	}
 
 	/** @return array{deleted:bool} false when none was stored */
-	public function delete(Membership $m): array {
-		self::allowed($m);
-		return ['deleted' => $this->store->delete($m->tenantId)];
+	public function delete(Membership $m, string $kind = InvoiceTemplateStore::INVOICE): array {
+		self::allowed($m, $kind);
+		return ['deleted' => $this->store->delete($m->tenantId, $kind)];
 	}
 
 	/** A Word document; ZipArchive needs the bytes as a file. */
@@ -71,14 +71,18 @@ final class InvoiceTemplateService {
 		}
 	}
 
-	/** Team Admins only; the controller asks before it reads a large body. */
-	public static function allowed(Membership $m): void {
+	/** Writing is for Team Admins only; the controller asks before it reads a large body. */
+	public static function allowed(Membership $m, string $kind = InvoiceTemplateStore::INVOICE): void {
 		if (!$m->manages()) {
-			throw ApiException::forbidden('Only Team Admins manage the invoice template.');
+			throw $kind === InvoiceTemplateStore::QUOTE
+				? ApiException::forbidden('Only Team Admins manage the quote template.')
+				: ApiException::forbidden('Only Team Admins manage the invoice template.');
 		}
 	}
 
-	private static function none(): ApiException {
-		return ApiException::notFound('The team has no invoice template.');
+	private static function none(string $kind): ApiException {
+		return $kind === InvoiceTemplateStore::QUOTE
+			? ApiException::notFound('The team has no quote template.')
+			: ApiException::notFound('The team has no invoice template.');
 	}
 }

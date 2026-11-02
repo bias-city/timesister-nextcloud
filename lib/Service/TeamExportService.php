@@ -94,10 +94,13 @@ final class TeamExportService {
 		// 0.18.0: the ledger and the frozen invoices, for reading; an import never recreates them.
 		$put(ZipRules::LEDGER, Json::encode(self::toObject(['entries' => array_map(static fn (InvLedger $e): array => $e->present(), $this->ledger->findAll($tid))])));
 		$put(ZipRules::INVOICES, Json::encode(self::toObject(['invoices' => array_map(fn (InvInvoice $i): array => $this->issues->fixedOf($i), $this->invoices->findAll($tid))])));
-		$template = $this->template($tid);
-		if ($template !== null) {
-			$put(ZipRules::TEMPLATE, $template['content']);
-			$put(ZipRules::TEMPLATE_META, Json::encode(self::toObject($template['meta'])));
+		foreach ([[InvoiceTemplateStore::INVOICE, ZipRules::TEMPLATE, ZipRules::TEMPLATE_META],
+			[InvoiceTemplateStore::QUOTE, ZipRules::QUOTE_TEMPLATE, ZipRules::QUOTE_TEMPLATE_META]] as [$kind, $file, $metaFile]) {
+			$template = $this->template($tid, $kind);
+			if ($template !== null) {
+				$put($file, $template['content']);
+				$put($metaFile, Json::encode(self::toObject($template['meta'])));
+			}
 		}
 		foreach (array_map('strval', array_keys($this->tenants->memberRoles($tid))) as $uid) {
 			$p = ZipRules::calendarPath($uid);
@@ -262,16 +265,16 @@ final class TeamExportService {
 	}
 
 	/**
-	 * The invoice template; a failure to read it leaves it out rather than
-	 * failing the backup.
+	 * A Word template (invoice or quote); a failure to read it leaves it out
+	 * rather than failing the backup.
 	 *
 	 * @return ?array{meta:array{name:string,size:int,sha256:string,modified_at:string,modified_by:string},content:string}
 	 */
-	private function template(int $tid): ?array {
+	private function template(int $tid, string $kind): ?array {
 		try {
-			return $this->templates->get($tid);
+			return $this->templates->get($tid, $kind);
 		} catch (\Throwable $e) {
-			$this->logger->warning('TimeSister: invoice template of team {team} not in the team backup', ['app' => 'timesister', 'team' => $tid, 'exception' => $e]);
+			$this->logger->warning('TimeSister: {kind} template of team {team} not in the team backup', ['app' => 'timesister', 'kind' => $kind, 'team' => $tid, 'exception' => $e]);
 			return null;
 		}
 	}

@@ -85,7 +85,7 @@ export async function projekte() {
 
 		head('Projects: quotes (0.16.0) – status, team, currency, work package rates')
 		const caps = await ocs(U1, 'GET', '/ocs/v1.php/cloud/capabilities?format=json')
-		check('capability quotes: 2 (the statuses since 1, the kind quote since 2)', caps.data?.capabilities?.timesister?.quotes === 2, caps.data?.capabilities?.timesister)
+		check('capability quotes: 4 (the statuses since 1, the kind quote since 2, issue since 4)', caps.data?.capabilities?.timesister?.quotes === 4, caps.data?.capabilities?.timesister)
 		const budget = (rate) => [{ id: 'b1', from: '2026-01-01', hours: 40, currency: 'chf', rates: {},
 			work_packages: [{ no: 1, name: 'Concept', hours: [40], rate }] }]
 		const quote = (extra) => ({ ...full(PQ, ['zblead']), status: 'draft', team: ['zbuser1', 'zbuser2', 'zbuser1'], budgets: budget(180), ...extra })
@@ -133,13 +133,17 @@ export async function projekte() {
 		await bad('progress above 100', { budgets: [{ id: 'b1', progress: 101 }] }, '“progress” must be null or a whole number from 0 to 100.')
 		await bad('progress with decimals', { budgets: [{ id: 'b1', progress: 12.5 }] }, '“progress” must be null or a whole number from 0 to 100.')
 		await bad('addendum as text', { budgets: [{ id: 'b1', work_packages: [{ no: 1, addendum: 'yes' }] }] }, '“addendum” must be true, false or null.')
-		// 0.25.1: a work package's group and role, the structured invoice plan.
-		const groupMsg = '“group” must be null or text of 1 to 200 characters without control characters.'
-		await bad('group blank', { budgets: [{ id: 'b1', work_packages: [{ no: 1, group: '   ' }] }] }, groupMsg)
-		await bad('group 201 characters', { budgets: [{ id: 'b1', work_packages: [{ no: 1, group: 'g'.repeat(201) }] }] }, groupMsg)
-		await bad('group with a control character', { budgets: [{ id: 'b1', work_packages: [{ no: 1, group: 'a\u0007b' }] }] }, groupMsg)
-		await bad('group a number', { budgets: [{ id: 'b1', work_packages: [{ no: 1, group: 7 }] }] }, groupMsg)
-		await bad('role unknown', { budgets: [{ id: 'b1', work_packages: [{ no: 1, role: 'Bauleitung' }] }] }, '“role” must be null, “gesamtleitung”, “fachplanung” or “bauleitung”.')
+		// 0.26.0: a work package's level (parent) and tags instead of group and role; 0.25.1: the structured invoice plan.
+		const parentMsg = '“parent” must be null or the “no” of another work package of the budget.'
+		const tagsMsg = '“tags” must be null or a list of at most 20 texts of 1 to 60 characters.'
+		const wps = (...list) => ({ budgets: [{ id: 'b1', work_packages: list }] })
+		await bad('parent blank', wps({ no: 1 }, { no: 2, parent: '   ' }), parentMsg)
+		await bad('parent itself', wps({ no: 1, parent: '1' }), parentMsg)
+		await bad('parent unknown', wps({ no: 1 }, { no: 2, parent: '9' }), parentMsg)
+		await bad('tags with a blank entry', wps({ no: 1, tags: ['a', '  '] }), tagsMsg)
+		await bad('tags 21 entries', wps({ no: 1, tags: Array.from({ length: 21 }, (_, i) => `t${i}`) }), tagsMsg)
+		await bad('tag 61 characters', wps({ no: 1, tags: ['t'.repeat(61)] }), tagsMsg)
+		await bad('tags not a list', wps({ no: 1, tags: 'a' }), tagsMsg)
 		const plan = (billing_plan) => ({ budgets: [{ id: 'b1', invoice_dates: ['2026-12-31'], billing_plan }] })
 		await bad('billing_plan an object', plan({ date: '2026-12-31' }), '“billing_plan” must be null or a list of at most 200 entries.')
 		await bad('billing_plan 201 entries', plan(Array.from({ length: 201 }, (_, i) => ({ date: new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10) }))), '“billing_plan” must be null or a list of at most 200 entries.')
@@ -159,10 +163,10 @@ export async function projekte() {
 		check('zblead stores progress 45 and an addendum (0.24.1)', pa.status === 200 && pa.data?.data?.budgets?.[0]?.progress === 45 && pa.data?.data?.budgets?.[0]?.work_packages?.[1]?.addendum === true, [pa.status, pa.text.slice(0, 300)])
 		const billing = [{ date: '2026-06-30', share: 30, title: 'Vorprojekt' }, { date: '2026-12-31', amount: 12000.5 }, { date: '2027-03-31', share: null, amount: null, title: null }]
 		const gr = await ocs(L, 'PUT', path(PQ), { version: 5, data: quote({ status: 'active', budgets: [{ id: 'b1', hours: 40, invoice_dates: ['2026-12-31'], billing_plan: billing,
-			work_packages: [{ no: 1, group: '  Vorprojekt  ', role: 'gesamtleitung' }, { no: 2, group: null, role: 'bauleitung' }, { no: 3, role: null }] }] }) })
+			work_packages: [{ no: 1, tags: [' Vorprojekt ', 'SIA'] }, { no: 2, parent: ' 1 ', tags: null }, { no: 3, parent: null }] }] }) })
 		const gb = gr.data?.data?.budgets?.[0]
-		check('zblead stores billing_plan, group (trimmed) and role (0.25.1)', gr.status === 200 && JSON.stringify(gb?.billing_plan) === JSON.stringify(billing)
-			&& gb?.work_packages?.[0]?.group === 'Vorprojekt' && gb?.work_packages?.[0]?.role === 'gesamtleitung' && gb?.work_packages?.[1]?.role === 'bauleitung'
+		check('zblead stores billing_plan, parent and tags (trimmed) (0.26.0)', gr.status === 200 && JSON.stringify(gb?.billing_plan) === JSON.stringify(billing)
+			&& JSON.stringify(gb?.work_packages?.[0]?.tags) === '["Vorprojekt","SIA"]' && gb?.work_packages?.[1]?.parent === '1' && gb?.work_packages?.[2]?.parent === null
 			&& JSON.stringify(gb?.invoice_dates) === '["2026-12-31"]', [gr.status, gr.text.slice(0, 400)])
 
 		head('Projects: quotes – no code while a quote, from_quote stays')

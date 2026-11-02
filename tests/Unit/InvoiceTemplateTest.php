@@ -23,9 +23,9 @@ use OCP\ITempManager;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The team's invoice template (0.16.0): name, Base64, size and Word check,
- * Team Admins only, the store in the app data and the template in the
- * team ZIP.
+ * The team's Word templates – invoice (0.16.0) and quote (0.34.0): name,
+ * Base64, size and Word check, every member reads and Team Admins write,
+ * the store in the app data and the templates in the team ZIP.
  */
 class InvoiceTemplateTest extends TestCase {
 	private const NOW = 1_791_892_800;
@@ -125,20 +125,53 @@ class InvoiceTemplateTest extends TestCase {
 		$this->assertSame('422 The template is not a Word document: “word/document.xml” is missing.', $check($this->zip(['xl/workbook.xml' => '<x/>'])));
 	}
 
-	public function testOnlyTeamAdmins(): void {
+	public function testOnlyTeamAdminsWrite(): void {
 		$data = new MemAppData();
 		$s = $this->service($data);
 		$s->put(new Membership('pbadmin', 7, 'admin'), self::body('Rechnung.docx', $this->docx()));
-		$no = '403 Only Team Admins manage the invoice template.';
+		$s->put(new Membership('pbadmin', 7, 'admin'), self::body('Offerte.docx', $this->docx('Quote {title}')), InvoiceTemplateStore::QUOTE);
+		$no = ['invoice' => '403 Only Team Admins manage the invoice template.', 'quote' => '403 Only Team Admins manage the quote template.'];
 		foreach (['lead', 'user'] as $role) {
 			$m = new Membership('someone', 7, $role);
-			$this->assertSame($no, self::outcome(fn () => $s->info($m)), $role);
-			$this->assertSame($no, self::outcome(fn () => $s->get($m)), $role);
-			$this->assertSame($no, self::outcome(fn () => $s->put($m, self::body('Other.docx', $this->docx()))), $role);
-			$this->assertSame($no, self::outcome(fn () => $s->delete($m)), $role);
-			$this->assertSame($no, self::outcome(fn () => InvoiceTemplateService::allowed($m)), $role);
+			foreach (InvoiceTemplateStore::KINDS as $kind) {
+				// 0.34.0: every member reads the templates to fill documents.
+				$this->assertSame($kind === 'quote' ? 'Offerte.docx' : 'Rechnung.docx', $s->info($m, $kind)['name'], "$role $kind");
+				$this->assertArrayHasKey('base64', $s->get($m, $kind));
+				$this->assertSame($no[$kind], self::outcome(fn () => $s->put($m, self::body('Other.docx', $this->docx()), $kind)), "$role $kind");
+				$this->assertSame($no[$kind], self::outcome(fn () => $s->delete($m, $kind)), "$role $kind");
+				$this->assertSame($no[$kind], self::outcome(fn () => InvoiceTemplateService::allowed($m, $kind)), "$role $kind");
+			}
 		}
 		$this->assertSame('Rechnung.docx', $s->info(new Membership('pbadmin', 7, 'admin'))['name'], 'nothing changed');
+	}
+
+	/** The quote template (0.34.0) stands beside the invoice template; removing one leaves the other. */
+	public function testQuoteBesideInvoice(): void {
+		$data = new MemAppData();
+		$s = $this->service($data);
+		$admin = new Membership('pbadmin', 7, 'admin');
+		$this->assertSame('404 The team has no quote template.', self::outcome(fn () => $s->info($admin, InvoiceTemplateStore::QUOTE)));
+		$this->assertSame(['deleted' => false], $s->delete($admin, InvoiceTemplateStore::QUOTE));
+		$invoice = $this->docx();
+		$quote = $this->docx('Quote {quote.title}');
+		$s->put($admin, self::body('Rechnung.docx', $invoice));
+		$info = $s->put($admin, self::body('Offerte.docx', $quote), InvoiceTemplateStore::QUOTE);
+		$this->assertSame(['name' => 'Offerte.docx', 'size' => strlen($quote), 'sha256' => hash('sha256', $quote),
+			'modified_at' => '2026-10-13T12:00:00Z', 'modified_by' => 'pbadmin'], $info);
+		$this->assertSame(['templates/t7/invoice.docx', 'templates/t7/invoice.json', 'templates/t7/quote.docx', 'templates/t7/quote.json'], $data->paths());
+		$this->assertSame(base64_encode($quote), $s->get($admin, InvoiceTemplateStore::QUOTE)['base64']);
+		$this->assertSame(hash('sha256', $invoice), $s->info($admin)['sha256'], 'the invoice template is its own');
+		$this->assertSame(2, (new InvoiceTemplateStore($data))->count(7));
+		$this->assertSame(['deleted' => true], $s->delete($admin));
+		$this->assertSame(['templates/t7/quote.docx', 'templates/t7/quote.json'], $data->paths(), 'the quote template stays');
+		$this->assertSame('Offerte.docx', $s->info($admin, InvoiceTemplateStore::QUOTE)['name']);
+		$this->assertSame(['deleted' => true], $s->delete($admin, InvoiceTemplateStore::QUOTE));
+		$this->assertSame([], $data->paths());
+		// Deleting the team takes both.
+		$s->put($admin, self::body('Rechnung.docx', $invoice));
+		$s->put($admin, self::body('Offerte.docx', $quote), InvoiceTemplateStore::QUOTE);
+		(new InvoiceTemplateStore($data))->deleteAll(7);
+		$this->assertSame([], $data->paths());
 	}
 
 	public function testRoundTrip(): void {
@@ -240,11 +273,17 @@ class InvoiceTemplateTest extends TestCase {
 		$this->assertSame($bad, self::outcome(fn () => $read([ZipRules::TEMPLATE => $bytes])), 'file without meta');
 		$this->assertSame($bad, self::outcome(fn () => $read([ZipRules::TEMPLATE_META => $meta])), 'meta without file');
 		$this->assertSame($bad, self::outcome(fn () => $read([ZipRules::TEMPLATE => $this->docx('other'), ZipRules::TEMPLATE_META => $meta])), 'meta of another file');
+		// 0.34.0: the quote template beside it, read the same way.
+		$q = $read([ZipRules::TEMPLATE => $bytes, ZipRules::TEMPLATE_META => $meta, ZipRules::QUOTE_TEMPLATE => $bytes, ZipRules::QUOTE_TEMPLATE_META => $meta]);
+		$this->assertSame(['Rechnung.docx', ZipRules::QUOTE_TEMPLATE], [$q['quote_template']['meta']['name'] ?? null, $q['quote_template']['path'] ?? null]);
+		$this->assertNull($b['quote_template'], 'only an invoice template');
+		$this->assertSame('422 “templates/quote.json” in the backup is malformed.', self::outcome(fn () => $read([ZipRules::QUOTE_TEMPLATE => $bytes])));
 	}
 
 	public function testCapability(): void {
 		$apps = $this->createMock(IAppManager::class);
 		$apps->method('getAppVersion')->willReturn('0.16.0');
 		$this->assertSame(1, (new Capabilities($apps))->getCapabilities()['timesister']['invoice_template']);
+		$this->assertSame(1, (new Capabilities($apps))->getCapabilities()['timesister']['quote_template']);
 	}
 }

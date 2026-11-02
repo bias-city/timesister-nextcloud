@@ -272,9 +272,10 @@ async function testteam() {
 	head(`Team settings in /me (${TEAM.name}, read only)`)
 	{
 		const me = (await ocs(U1, 'GET', '/me')).data
-		// 0.17.0: `entries_since` (date or null) next to `backup_required`; `leads_see_calendars` is gone with the shares matrix. 0.18.0: `invoicing`. 0.19.0: `documents`. 0.20.0: `datev`, `webhooks`.
-		check('/me names settings with backup_required, entries_since, invoicing, documents, datev and webhooks', typeof me?.settings?.backup_required === 'boolean'
-			&& 'entries_since' in (me?.settings || {}) && typeof me?.settings?.invoicing === 'boolean' && isObj(me?.settings?.documents) && isObj(me?.settings?.datev) && Array.isArray(me?.settings?.webhooks) && Object.keys(me.settings).length === 6, me?.settings)
+		// 0.17.0: `entries_since` (date or null) next to `backup_required`; `leads_see_calendars` is gone with the shares matrix. 0.18.0: `invoicing`. 0.19.0: `documents`. 0.20.0: `datev`, `webhooks`. 0.24.0: `invoicing_mode`. 0.25.1: `catalogs`.
+		check('/me names settings with backup_required, entries_since, invoicing, documents, datev, webhooks, invoicing_mode and catalogs', typeof me?.settings?.backup_required === 'boolean'
+			&& 'entries_since' in (me?.settings || {}) && typeof me?.settings?.invoicing === 'boolean' && isObj(me?.settings?.documents) && isObj(me?.settings?.datev) && Array.isArray(me?.settings?.webhooks)
+			&& 'invoicing_mode' in me.settings && 'catalogs' in me.settings && Object.keys(me.settings).length === 8, me?.settings)
 		const team = (await ocs(A, 'GET', '/team')).data
 		check('/team names the same settings', JSON.stringify(team?.settings) === JSON.stringify(me?.settings), team?.settings)
 	}
@@ -305,15 +306,18 @@ async function testteam() {
 		const documents = { root: null, chain_mail: null }
 		const datev = { consultant: null, client: null, fiscal_year_start: null, account_length: null, debtor_account: null, revenue_domestic: null, revenue_eu: null, revenue_export: null, bu_domestic: null, bu_eu: null, bu_export: null, revenue_pass_through: null, expense_account: null }
 		const webhooks = []
-		const defaults = { backup_required: false, entries_since: null, invoicing: true, documents, datev, webhooks }
+		// 0.24.0 `invoicing_mode`, 0.25.1 `catalogs`: null is the default.
+		const invoicing_mode = null
+		const catalogs = null
+		const defaults = { backup_required: false, entries_since: null, invoicing: true, documents, datev, webhooks, invoicing_mode, catalogs }
 		check('settings: default values on creation', JSON.stringify(made.data?.settings) === JSON.stringify(defaults), made.data?.settings)
 		const who = { user: first, pass: `Test-2026-${first}!` }
 		check('member\'s /me: default values', JSON.stringify((await ocs(who, 'GET', '/me')).data?.settings) === JSON.stringify(defaults))
 		const req = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { backup_required: true } })
-		check('set only backup_required, entries_since stays', JSON.stringify(req.data?.settings) === JSON.stringify({ backup_required: true, entries_since: null, invoicing: true, documents, datev, webhooks }), req.text)
+		check('set only backup_required, entries_since stays', JSON.stringify(req.data?.settings) === JSON.stringify({ backup_required: true, entries_since: null, invoicing: true, documents, datev, webhooks, invoicing_mode, catalogs }), req.text)
 		expect('leads_see_calendars is gone (0.17.0): unknown key', await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, { ...base, settings: { leads_see_calendars: false } }), 422, 'invalid')
 		const same = await ocs(ADMIN, 'PUT', `/admin/teams/${id}`, base)
-		const want = { backup_required: true, entries_since: null, invoicing: true, documents, datev, webhooks }
+		const want = { backup_required: true, entries_since: null, invoicing: true, documents, datev, webhooks, invoicing_mode, catalogs }
 		check('PUT without settings: unchanged', JSON.stringify(same.data?.settings) === JSON.stringify(want), same.text)
 		check('/me, /team and /admin/teams read them', JSON.stringify((await ocs(who, 'GET', '/me')).data?.settings) === JSON.stringify(want)
 			&& JSON.stringify((await ocs(who, 'GET', '/team')).data?.settings) === JSON.stringify(want)

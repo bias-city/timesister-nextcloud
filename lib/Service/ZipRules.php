@@ -25,6 +25,9 @@ final class ZipRules {
 	/** The team's invoice template (0.16.0) and its meta: name, size, sha256, modified_at, modified_by. */
 	public const TEMPLATE = 'templates/invoice.docx';
 	public const TEMPLATE_META = 'templates/invoice.json';
+	/** 0.34.0: the team's quote template and its meta, the same form. */
+	public const QUOTE_TEMPLATE = 'templates/quote.docx';
+	public const QUOTE_TEMPLATE_META = 'templates/quote.json';
 	/** 0.18.0: the invoice ledger and the frozen invoices, for reading only – an import never recreates them. */
 	public const LEDGER = 'ledger.json';
 	public const INVOICES = 'invoices.json';

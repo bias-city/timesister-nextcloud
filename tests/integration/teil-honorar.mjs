@@ -17,7 +17,7 @@
 // TS_OCC); without them the booking and invoice checks are skipped. Leaves
 // zb as it found it: settings back, projects, customer, quote, events,
 // drafts and corrections removed (issued invoices and the ledger stay).
-import { deleteEvent, ensureTimeCalendar, ocs, putEvent, runJob } from './lib.mjs'
+import { APP_VERSION, deleteEvent, ensureTimeCalendar, ocs, putEvent, runJob } from './lib.mjs'
 import { RUN, check, expect, festschreiben, head, sha256, stornieren } from './harness.mjs'
 import { A, L, U1 } from './konten.mjs'
 
@@ -104,7 +104,7 @@ export async function honorar() {
 		head('Fee models: capability and the team’s levels')
 		{
 			const cap = (await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')).data?.capabilities?.timesister
-			check('capability fee_models: 1, version 0.33.0, invoice_layout 2, corrections 2', cap?.fee_models === 1 && cap?.version === '0.33.0' && cap?.invoice_layout === 2 && cap?.corrections === 2, cap)
+			check(`capability fee_models: 1, version ${APP_VERSION}, invoice_layout 2, corrections 2`, cap?.fee_models === 1 && cap?.version === APP_VERSION && cap?.invoice_layout === 2 && cap?.corrections === 2, cap)
 			const bad = await ocs(A, 'PUT', rpath('setting', 'settings'), { version: settingsVersion, data: { ...base, fee_model: 'hoai' } })
 			expect('settings with an unknown fee_model', bad, 422, 'invalid')
 			check('… fee_model_invalid, field fee_model', coded(bad, 'fee_model_invalid', 'fee_model'), bad.data)

@@ -16,6 +16,8 @@ import { execSync } from 'node:child_process'
 export const NC = (process.env.NC_URL || 'http://localhost:8081').replace(/\/$/, '')
 export const ADMIN = { user: process.env.NC_ADMIN_USER || 'admin', pass: process.env.NC_ADMIN_PASS || 'admin123' }
 export const API = '/ocs/v2.php/apps/timesister/api/v1'
+/** The app version from appinfo/info.xml - capability checks compare against it, so a version bump does not break them. */
+export const APP_VERSION = (await import('node:fs')).readFileSync(new URL('../../appinfo/info.xml', import.meta.url), 'utf8').match(/<version>([^<]+)<\/version>/)[1]
 
 const host = new URL(NC).hostname
 if (!['localhost', '127.0.0.1', '::1', '[::1]'].includes(host)) {

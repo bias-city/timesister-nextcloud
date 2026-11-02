@@ -12,7 +12,7 @@ namespace OCA\TimeSister\Service;
  */
 final class ZipReader {
 	/**
-	 * @return array{manifest:array<string,mixed>,team:array<string,mixed>,records:list<array<string,mixed>>,status:array<string,array<string,mixed>>,absences:array<string,list<array{source_uid:string,kind:string,start:string,end:string}>>,calendars:list<array{uid:string,path:string,size:int,missing:bool,list:bool}>,template:?array{meta:array{name:string,size:int,sha256:string,modified_at:string,modified_by:string},path:string}}
+	 * @return array{manifest:array<string,mixed>,team:array<string,mixed>,records:list<array<string,mixed>>,status:array<string,array<string,mixed>>,absences:array<string,list<array{source_uid:string,kind:string,start:string,end:string}>>,calendars:list<array{uid:string,path:string,size:int,missing:bool,list:bool}>,template:?array{meta:array{name:string,size:int,sha256:string,modified_at:string,modified_by:string},path:string},quote_template:?array{meta:array{name:string,size:int,sha256:string,modified_at:string,modified_by:string},path:string}}
 	 */
 	public static function read(ZipFile $zip): array {
 		$present = $zip->entries();
@@ -49,30 +49,32 @@ final class ZipReader {
 			'status' => isset($present[ZipRules::STATUS]) ? self::status($zip->readJson(ZipRules::STATUS)) : [],
 			'absences' => isset($present[ZipRules::ABSENCES]) ? self::absences($zip->readJson(ZipRules::ABSENCES)) : [],
 			'calendars' => $calendars,
-			'template' => self::template($zip, $present),
+			'template' => self::template($zip, $present, ZipRules::TEMPLATE, ZipRules::TEMPLATE_META),
+			'quote_template' => self::template($zip, $present, ZipRules::QUOTE_TEMPLATE, ZipRules::QUOTE_TEMPLATE_META),
 		];
 	}
 
 	/**
-	 * The invoice template (0.16.0): file and meta together, the meta
-	 * matching the file; null when the backup has none (older ones).
+	 * A Word template – invoice (0.16.0) or quote (0.34.0): file and meta
+	 * together, the meta matching the file; null when the backup has none
+	 * (older ones).
 	 *
 	 * @param array<string,int> $present
 	 * @return ?array{meta:array{name:string,size:int,sha256:string,modified_at:string,modified_by:string},path:string}
 	 */
-	private static function template(ZipFile $zip, array $present): ?array {
-		$file = isset($present[ZipRules::TEMPLATE]);
-		if (!$file && !isset($present[ZipRules::TEMPLATE_META])) {
+	private static function template(ZipFile $zip, array $present, string $path, string $metaPath): ?array {
+		$file = isset($present[$path]);
+		if (!$file && !isset($present[$metaPath])) {
 			return null;
 		}
-		$meta = $file && isset($present[ZipRules::TEMPLATE_META])
-			? InvoiceTemplateRules::readMeta($zip->readJson(ZipRules::TEMPLATE_META))
+		$meta = $file && isset($present[$metaPath])
+			? InvoiceTemplateRules::readMeta($zip->readJson($metaPath))
 			: null;
-		if ($meta === null || $meta['size'] !== $present[ZipRules::TEMPLATE]
-			|| hash('sha256', $zip->read(ZipRules::TEMPLATE)) !== $meta['sha256']) {
-			throw self::bad(ZipRules::TEMPLATE_META);
+		if ($meta === null || $meta['size'] !== $present[$path]
+			|| hash('sha256', $zip->read($path)) !== $meta['sha256']) {
+			throw self::bad($metaPath);
 		}
-		return ['meta' => $meta, 'path' => ZipRules::TEMPLATE];
+		return ['meta' => $meta, 'path' => $path];
 	}
 
 	/**

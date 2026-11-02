@@ -39,7 +39,8 @@ export async function datensaetze() {
 		expect('accounts is not a list of uids', await ocs(A, 'PUT', `/records/person/x-${RUN}`, { version: 0, data: { login: `x-${RUN}`, accounts: 'zbuser1' } }), 422, 'invalid')
 		expect('version is missing', await ocs(A, 'PUT', `/records/project/${P}`, { data }), 400, 'invalid')
 		expect('version is negative', await ocs(A, 'PUT', `/records/project/${P}`, { version: -1, data }), 400, 'invalid')
-		expect('key with a space', await ocs(A, 'PUT', '/records/project/a%20b', { version: 0, data: { id: 'a b' } }), 400, 'invalid')
+		// 0.26.2: spaces inside a key are allowed (account names), not at the start or end.
+		expect('key with a leading space', await ocs(A, 'PUT', '/records/project/%20ab', { version: 0, data: { id: ' ab' } }), 400, 'invalid')
 		expect('unknown kind', await ocs(A, 'PUT', `/records/budget/${P}`, { version: 0, data: { id: P } }), 400, 'invalid')
 		expect('kind in the body', await ocs(A, 'PUT', `/records/project/${P}`, { version: 2, kind: 'person', data }), 400, 'invalid')
 		expect('not JSON', await ocs(A, 'PUT', `/records/project/${P}`, undefined, { raw: '{kaputt' }), 400, 'invalid')
@@ -114,7 +115,8 @@ export async function datensaetze() {
 		expect('another customer directly', await ocs(L, 'GET', `/records/customer/${C}`), 403, 'forbidden')
 		expect('a customer that does not exist', await ocs(L, 'GET', `/records/customer/nie-${RUN}`), 403, 'forbidden')
 		const card = await ocs(L, 'GET', '/records/person/zbuser1')
-		const fields = ['accounts', 'first_name', 'initials', 'last_name', 'login', 'schema']
+		// The name card (PersonAccess::CARD); 0.27.0: company, and levels for a Lead.
+		const fields = ['accounts', 'company', 'first_name', 'initials', 'last_name', 'levels', 'login', 'schema']
 		check('another person directly: only the name card', card.status === 200 && card.data?.data?.login === 'zbuser1'
 			&& Object.keys(card.data?.data || {}).every((f) => fields.includes(f)), card.data?.data)
 		const inList = ((await ocs(L, 'GET', '/records')).data?.records || []).find((x) => x.kind === 'person' && x.key === NOAH)

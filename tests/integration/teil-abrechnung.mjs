@@ -38,8 +38,8 @@ export async function abrechnung() {
 		head('Feed only for those who may')
 		{
 			const asLead = await ocs(L, 'GET', `/records/person/${EXT}`)
-			// 0.14.0: a Lead reads others only as a name card.
-			const card = ['accounts', 'first_name', 'initials', 'last_name', 'login', 'schema']
+			// 0.14.0: a Lead reads others only as a name card; 0.27.0 adds company and, for Leads, levels.
+			const card = ['accounts', 'company', 'first_name', 'initials', 'last_name', 'levels', 'login', 'schema']
 			check('Lead: the external as a name card, without feed', asLead.status === 200 && asLead.data?.data?.first_name === 'Roman'
 				&& Object.keys(asLead.data?.data || {}).every((k) => card.includes(k)), asLead.data?.data)
 			check('Team Admin: with feed', (await ocs(V, 'GET', `/records/person/${EXT}`)).data?.data?.feed === FEED)

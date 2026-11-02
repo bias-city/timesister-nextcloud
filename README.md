@@ -22,7 +22,7 @@ API: [`docs/API.md`](docs/API.md).
 | Jobs: rules, transitions, who sees, notifications | `JobRules`, `JobFlow` (pure), `JobAccess`, `JobService`, `JobNotifications`, `JobMessages`, `JobWord`; records of kind `job` |
 | Invoices: content, Lead rule, number pattern, counter | `InvoiceRules`, `InvoiceNumbering` (pure), `InvoiceService`, `CounterMapper` (table `ts_counters`); records of kind `invoice` |
 | Quotes: content with budget, Lead rule (`leads` or led project) | `QuoteRules` (pure); records of kind `quote` |
-| Invoice template (one Word file per team) | `InvoiceTemplateRules` (pure), `InvoiceTemplateService`, `InvoiceTemplateStore` (app data `templates/t<team>/`), `TemplateController` |
+| Word templates (invoice and quote, one file each per team) | `InvoiceTemplateRules` (pure), `InvoiceTemplateService`, `InvoiceTemplateStore` (app data `templates/t<team>/`), `TemplateController` |
 | Tables `ts_*`, mappers | `lib/Db`, `lib/Migration` |
 | Admin page | `lib/Settings`, `templates/admin.php`, `js/admin.js`, `css/admin.css` |
 | Translations (admin page, API messages) | `l10n/de.json` (informal German, "du"), `l10n/de_DE.json` (formal, "Sie") |

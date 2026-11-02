@@ -1,5 +1,26 @@
 # Changes
 
+## 0.34.0 – 2026-11-02
+
+`api: 2` unchanged; capability `quote_template: 1`; no migration. Additive.
+
+- **The quote template.** Beside the invoice template the team keeps a
+  Word template for quotes: `GET /templates/quote/info`, `GET`, `PUT` and
+  `DELETE /templates/quote`, the same answers, checks, limits and rate
+  limits as `/templates/invoice`. Stored as `templates/t<team>/quote.docx`
+  and `quote.json` next to the invoice template; removing one leaves the
+  other. A client without `quote_template` uses the template shipped with
+  it.
+- **Every member reads the templates.** `GET …/info` and `GET` of both
+  templates answer every member of the team (to fill documents); `PUT` and
+  `DELETE` stay with Team Admins (`403 forbidden` “Only Team Admins manage
+  the quote template.” or “… the invoice template.”). Before 0.34.0 Leads
+  and Members got `403` on reading, too.
+- **Team ZIP.** The quote template travels as `templates/quote.docx` and
+  `templates/quote.json`, read, previewed (`quote_template`) and imported
+  (`quote_template` in the answer) like the invoice template. Deleting a
+  team removes both.
+
 ## 0.33.0 – 2026-10-30
 
 `api: 2` unchanged; capability `fee_models: 1`; migration adds `level`

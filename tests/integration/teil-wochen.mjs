@@ -52,7 +52,8 @@ export async function wochen() {
 		}
 		expect('not a Monday', await ocs(AU, 'POST', '/jobs/weeks', { weeks: [{ ...week(0), start: addDays(W0, 1) }] }), 422, 'invalid')
 		expect('weeks not a list', await ocs(AU, 'POST', '/jobs/weeks', { weeks: 'x' }), 422, 'invalid')
-		expect('a bad Job key', await ocs(AU, 'POST', '/jobs/weeks', { weeks: [week(0, { 'a b': { booked: 1, planned: 0 } })] }), 400, 'invalid')
+		// 0.26.2: a space inside a key is fine, not at the start.
+		expect('a bad Job key', await ocs(AU, 'POST', '/jobs/weeks', { weeks: [week(0, { ' ab': { booked: 1, planned: 0 } })] }), 400, 'invalid')
 		expect('more non-billable than booked', await ocs(AU, 'POST', '/jobs/weeks', { weeks: [week(0, { [key(1)]: { booked: 1, booked_nb: 2, planned: 0 } })] }), 422, 'invalid')
 		const rep = await ocs(AU, 'POST', '/jobs/weeks', { pensum: 50, jobs: [key(1), foreign], weeks: [
 			week(0, { [key(1)]: { booked: 0, planned: 5 }, [foreign]: { booked: 2, booked_nb: 0.5, planned: 3 } }),

@@ -171,7 +171,8 @@ versions add flags (`jobs`, `billing`, …); the current set is listed under
 | `customer` | `id` | customer including `contacts`, `cost_centers`, `quotes` |
 | `setting` | `targethours` or `settings` | target hours or settings (`vacation_code`) |
 
-- Key: `^[A-Za-z0-9@._+-]{1,128}$`.
+- Key: `^(?! )[A-Za-z0-9@._+' -]{1,128}(?<! )$` – every Nextcloud account name,
+  also with spaces (not at the start or end) and apostrophes (0.26.2).
 - `data` is a JSON object, at most 256 KB. Required: for `person` a field
   `login` equal to the key, for `region`, `project`, `customer` a field `id`
   equal to the key. Otherwise `422 invalid`.
@@ -923,10 +924,10 @@ take them as placeholders.
 
 ### The record
 
-Kind `job`, key `^[A-Za-z0-9@._+-]{1,64}$` (chosen by the client, so an
-offer sent again is recognised). Read through `/records` like any record;
-written **only** through `/jobs` – `PUT`, `DELETE`, batch and restore of a
-`job` answer `400 invalid`.
+Kind `job`, key like any record key (above), at most 64 characters
+(chosen by the client, so an offer sent again is recognised). Read
+through `/records` like any record; written **only** through `/jobs` –
+`PUT`, `DELETE`, batch and restore of a `job` answer `400 invalid`.
 
 ```json
 { "schema": 1, "id": "j-7f3a", "project": "D200", "code": "D200.1", "codes": ["D200.1"],
@@ -1255,6 +1256,8 @@ admin prefix; the write routes carry `#[BruteForceProtection]`.
   server and are not in the ZIP.
 - `templates/invoice.docx`, `templates/invoice.json` (since 0.16.0): the
   team's invoice template, if it has one – see “Invoice template, 0.16.0”.
+- `templates/quote.docx`, `templates/quote.json` (since 0.34.0): the
+  team's quote template, if it has one – see “Quote template, 0.34.0”.
 - Limits: 200 MB per ZIP, 50 MB per entry, 600 MB unpacked, 20 000 entries.
 
 ### Preview
@@ -2138,6 +2141,33 @@ ZIP; the counters do not – after moving a team to another server, raise
 `invoices: 1`: the kind `invoice`, `invoice_number` in `setting/settings`
 and `/invoices/next-number`.
 
+## Quote template, 0.34.0 (2026-11-02)
+
+Capability `quote_template: 1`. The second Word template of the team, for
+quotes. The Mac app ships one (as it ships an invoice template) and fills
+quotes into it; a Team Admin can replace it for the whole team.
+
+| Method | Path | Body / answer |
+|---|---|---|
+| GET | `/templates/quote/info` | `{ name, size, sha256, modified_at, modified_by }`; none stored: `404 not_found` “The team has no quote template.” |
+| GET | `/templates/quote` | the same plus `base64` (the file) |
+| PUT | `/templates/quote` | `{ "name": "Offerte.docx", "base64": "…" }` → the info object; replaces the stored one |
+| DELETE | `/templates/quote` | `{ "deleted": true }`; `{ "deleted": false }` when none was stored |
+
+- Everything else as the invoice template below: the checks on `PUT` in
+  the same order and with the same messages, 10 MB, the same rate limits.
+  Every member reads, Team Admins write (`403 forbidden` “Only Team Admins
+  manage the quote template.”). The server never opens or fills the file.
+- Stored as `templates/t<team>/quote.docx` and `quote.json`, next to the
+  invoice template. `DELETE` of one leaves the other.
+- Team ZIP: `templates/quote.docx` and `templates/quote.json`, listed in
+  the manifest like the invoice template, the same checks (`422`
+  ““templates/quote.json” in the backup is malformed.”`). Preview and
+  import answer `quote_template` beside `template`, with the same shapes
+  and the same `merge`/`replace` rules. Deleting a team removes both.
+- A client that finds no `quote_template` (an older app) keeps using the
+  quote template it ships and does not offer to replace it.
+
 ## Invoice template, 0.16.0 (2026-10-13)
 
 Capability `invoice_template: 1`. The Mac app fills invoices into a Word
@@ -2167,9 +2197,11 @@ GET /templates/invoice/info   (none stored)
 → 404 { "error": "not_found", "message": "The team has no invoice template." }
 ```
 
-- **Team Admins only, reading too.** Leads and Members get `403 forbidden`
-  “Only Team Admins manage the invoice template.” (a refused `PUT` or
-  `DELETE` counts for brute-force throttling, as every refused write).
+- **Writing: Team Admins only.** Leads and Members get `403 forbidden`
+  “Only Team Admins manage the invoice template.” on `PUT` and `DELETE` (a
+  refused `PUT` or `DELETE` counts for brute-force throttling, as every
+  refused write). Since 0.34.0 every member reads `…/info` and the file
+  (to fill invoices and quotes); before, reading was for Team Admins too.
   Every account reaches only its own team's template.
 - `size`: bytes of the file; `sha256`: hex of the file; `modified_at`:
   UTC, when it was uploaded; `modified_by`: the account that uploaded it.

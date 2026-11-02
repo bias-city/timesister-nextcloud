@@ -32,7 +32,7 @@ export async function offerten() {
 		head('Quotes: capability and setup')
 		{
 			const cap = await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')
-			check('capability quotes: 2', cap.data?.capabilities?.timesister?.quotes === 2, cap.data?.capabilities?.timesister)
+			check('capability quotes: 4 (texts, attachments and the number on issue since 0.32.0)', cap.data?.capabilities?.timesister?.quotes === 4, cap.data?.capabilities?.timesister)
 			expect('project led by zblead', await ocs(A, 'PUT', `/records/project/${OA}`, { version: 0, data: project(OA, ['zblead']) }), 200)
 			expect('project led by zbverw', await ocs(A, 'PUT', `/records/project/${OB}`, { version: 0, data: project(OB, ['zbverw']) }), 200)
 			expect('person via accounts (zbuser2)', await ensure(A, 'person', NOAH, { login: NOAH, accounts: ['zbuser2'] }), 200)
@@ -81,7 +81,7 @@ export async function offerten() {
 			await bad('accepted without project', Q3, quote({ status: 'accepted' }), 'An accepted quote needs “project”: the project that took over its budget.')
 			await bad('accepted without project (Lead)', Q3, quote({ status: 'accepted', leads: ['zblead'] }), 'An accepted quote needs “project”: the project that took over its budget.', L)
 			await bad('a key not q- and 8 hex digits', `Q-${h}1`, quote(), 'The key of a quote is “q-” and 8 lowercase hex digits.')
-			await bad('unknown status', Q3, quote({ status: 'active' }), '“status” of a quote is one of draft, quoted, accepted, declined.')
+			await bad('unknown status', Q3, quote({ status: 'active' }), '“status” of a quote is one of draft, quoted, negotiation, verbal, accepted, declined.')
 			await bad('pdf not http(s)', Q3, quote({ pdf: 'javascript:alert(1)' }), '“pdf” must be null or an http:// or https:// address of at most 2000 characters.')
 			await bad('budget without id', Q3, quote({ budget: { currency: 'CHF' } }), '“budget” must be null or an object with an “id” of 1 to 128 characters.')
 			await bad('rates in the budget', Q3, quote({ budget: budget({ rates: { zbuser1: 120 } }) }), '“rates” is no longer part of a budget; cost rates live on the person.')

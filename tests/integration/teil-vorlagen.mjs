@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// The team's invoice template (0.16.0): /templates/invoice for Team Admins
-// only – info, download, upload and delete –, the Word check, the 10 MB
-// limit and the template in the team ZIP. Leaves zb as it found it: a
-// template that was there is put back (with a new modified_at).
+// The team's invoice template (0.16.0): /templates/invoice – info, download,
+// upload and delete –, the Word check, the 10 MB limit and the template in
+// the team ZIP. 0.34.0: every member reads, Team Admins write; the quote
+// template /templates/quote beside it. Leaves zb as it found it: a template
+// that was there is put back (with a new modified_at).
 // The team's own project templates (0.25.0): the record kind `template`
 // (format, key, size, no person fields; Leads and Team Admins read, a Lead
 // writes their own), the project's `budget_label` and the team ZIP.
@@ -18,6 +19,8 @@ const MB10 = 10 * 1024 * 1024
 const TOO_LARGE = 'A template may be at most 10 MB.'
 const NOT_WORD = 'The template must be a Word document (.docx).'
 const NOT_ADMIN = 'Only Team Admins manage the invoice template.'
+const QUOTE = '/templates/quote'
+const NOT_ADMIN_QUOTE = 'Only Team Admins manage the quote template.'
 
 const CRC = Array.from({ length: 256 }, (_, n) => {
 	let c = n
@@ -321,6 +324,45 @@ export async function projektvorlagen() {
 	}
 }
 
+/** The quote template (0.34.0) beside the invoice template: rights, round trip, team ZIP, delete one. */
+async function angebot(invoice) {
+	const before = await ocs(A, 'GET', QUOTE)
+	const q = docx('Offerte {quote.title}')
+	try {
+		head('Quote template: rights, upload, beside the invoice template')
+		check('the team’s quote template read before (200 or 404)', [200, 404].includes(before.status), before.text.slice(0, 200))
+		expect('Team Admin starts without one', await ocs(A, 'DELETE', QUOTE), 200)
+		const none = await ocs(U1, 'GET', `${QUOTE}/info`)
+		expect('a Member reads the info without one', none, 404, 'not_found')
+		check('… “The team has no quote template.”', none.data?.message === 'The team has no quote template.', none.data)
+		const up = await ocs(L, 'PUT', QUOTE, { name: 'Offerte.docx', base64: q.toString('base64') })
+		expect('a Lead uploads one', up, 403, 'forbidden')
+		check(`… “${NOT_ADMIN_QUOTE}”`, up.data?.message === NOT_ADMIN_QUOTE, up.data)
+		expect('a Member deletes it', await ocs(U1, 'DELETE', QUOTE), 403, 'forbidden')
+		const r = await ocs(A, 'PUT', QUOTE, { name: 'Offerte.docx', base64: q.toString('base64') })
+		expect('Team Admin uploads Offerte.docx', r, 200)
+		check('… the info object', r.data?.name === 'Offerte.docx' && r.data?.sha256 === sha256(q) && r.data?.modified_by === 'zbadmin' && Object.keys(r.data).length === 5, r.data)
+		const got = await ocs(U1, 'GET', QUOTE)
+		expect('a Member downloads it', got, 200)
+		check('… the same bytes', Buffer.from(got.data?.base64 || '', 'base64').equals(q))
+		check('the invoice template is its own', (await ocs(A, 'GET', `${BASE}/info`)).data?.sha256 === sha256(invoice))
+		expect('not a Word file', await ocs(A, 'PUT', QUOTE, { name: 'Offerte.docx', base64: Buffer.from('Dear customer').toString('base64') }), 422, 'invalid')
+		expect('another team has none', await ocs(AA, 'GET', `${QUOTE}/info`), 404, 'not_found')
+		const exp = await exportZip((await ocs(A, 'GET', '/team')).data?.id)
+		check('the team ZIP holds templates/quote.docx and templates/quote.json', exp.status === 200 && exp.zip.includes('templates/quote.docx') && exp.zip.includes('templates/quote.json'), exp.status)
+		const d = await ocs(A, 'DELETE', QUOTE)
+		check('deleting the quote template → { deleted: true }', d.data?.deleted === true, d.data)
+		check('… the invoice template stays', (await ocs(A, 'GET', `${BASE}/info`)).data?.sha256 === sha256(invoice))
+	} finally {
+		if (before.status === 200) {
+			const back = await ocs(A, 'PUT', QUOTE, { name: before.data.name, base64: before.data.base64 })
+			expect('the team’s quote template put back', back, 200)
+		} else {
+			expect('no quote template left', await ocs(A, 'DELETE', QUOTE), 200)
+		}
+	}
+}
+
 export async function vorlagen() {
 	const before = await ocs(A, 'GET', BASE)
 	const first = docx('Rechnung {number}')
@@ -330,13 +372,16 @@ export async function vorlagen() {
 		{
 			const cap = await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')
 			check('capability invoice_template: 1', cap.data?.capabilities?.timesister?.invoice_template === 1, cap.data?.capabilities?.timesister)
+			check('capability quote_template: 1 (0.34.0)', cap.data?.capabilities?.timesister?.quote_template === 1, cap.data?.capabilities?.timesister)
 			check('the team’s template read before (200 or 404)', [200, 404].includes(before.status), before.text.slice(0, 200))
 			for (const [who, role] of [[U1, 'Member'], [L, 'Lead']]) {
+				// 0.34.0: members read the template to fill documents.
 				const info = await ocs(who, 'GET', `${BASE}/info`)
-				expect(`${role} reads the info`, info, 403, 'forbidden')
-				check('… with the message', info.data?.message === NOT_ADMIN, info.data)
-				expect(`${role} downloads it`, await ocs(who, 'GET', BASE), 403, 'forbidden')
-				expect(`${role} uploads one`, await put(who, 'Rechnung.docx', first), 403, 'forbidden')
+				check(`${role} reads the info (200 or 404)`, [200, 404].includes(info.status), info.text.slice(0, 200))
+				check(`${role} downloads it (200 or 404)`, [200, 404].includes((await ocs(who, 'GET', BASE)).status))
+				const up = await put(who, 'Rechnung.docx', first)
+				expect(`${role} uploads one`, up, 403, 'forbidden')
+				check('… with the message', up.data?.message === NOT_ADMIN, up.data)
 				expect(`${role} deletes it`, await ocs(who, 'DELETE', BASE), 403, 'forbidden')
 			}
 			// The account language decides.
@@ -344,7 +389,7 @@ export async function vorlagen() {
 			const langBefore = (await ocs(ADMIN, 'GET', userPath)).data?.language || 'en'
 			try {
 				await ocs(ADMIN, 'PUT', userPath, { key: 'language', value: 'de' })
-				const de = await ocs(U1, 'GET', `${BASE}/info`, undefined, { lang: 'de' })
+				const de = await ocs(U1, 'DELETE', BASE, undefined, { lang: 'de' })
 				check('… in German', de.data?.message === 'Die Rechnungsvorlage verwalten nur Team Admins.', de.data)
 			} finally {
 				await ocs(ADMIN, 'PUT', userPath, { key: 'language', value: langBefore })
@@ -415,6 +460,7 @@ export async function vorlagen() {
 		}
 
 		await teamZip()
+		await angebot(second)
 
 		head('Invoice template: delete')
 		{

@@ -144,7 +144,8 @@ final class TeamImportService {
 			$this->tenants->reset();
 			$groups = $this->joinGroup($tid, $b, $mapping);
 			$calendars = $this->storeCalendars($tid, $zip, $b, $mapping);
-			$template = $this->storeTemplate($tid, $zip, $b, $mapping, $mode);
+			$template = $this->storeTemplate($tid, $zip, $b, $mapping, $mode, InvoiceTemplateStore::INVOICE);
+			$quoteTemplate = $this->storeTemplate($tid, $zip, $b, $mapping, $mode, InvoiceTemplateStore::QUOTE);
 			$since = $this->applySince($t, $b, $mode);
 			$named = $this->nameCalendars($tid, $b, $mapping, $mode);
 		} finally {
@@ -172,6 +173,7 @@ final class TeamImportService {
 			'without_account' => $without,
 			'calendars' => $calendars,
 			'template' => $template,
+			'quote_template' => $quoteTemplate,
 			'entries_since' => $since,
 			'time_calendars' => $named,
 		];
@@ -209,6 +211,7 @@ final class TeamImportService {
 			'calendars' => $b['calendars'],
 			'absences' => count($b['absences']),
 			'template' => $b['template']['meta'] ?? null,
+			'quote_template' => $b['quote_template']['meta'] ?? null,
 			'entries_since' => $b['team']['settings']['entries_since'],
 			'time_calendars' => count($b['team']['time_calendars']),
 			'target' => $t === null ? null : ['id' => $t->getId(), 'name' => $t->getName(), 'empty' => !$this->hasContent($t->getId())],
@@ -219,7 +222,7 @@ final class TeamImportService {
 	/** Records, rows, members or an invoice template: then a backup is taken first. */
 	private function hasContent(int $tid): bool {
 		return $this->records->stats($tid)['all'] > 0
-			|| $this->templates->info($tid) !== null
+			|| $this->templates->count($tid) > 0
 			|| $this->members->entriesByTenant($tid) !== []
 			|| $this->consents->findByTenant($tid) !== []
 			|| $this->absences->byTenant($tid) !== [];
@@ -749,16 +752,16 @@ final class TeamImportService {
 	}
 
 	/**
-	 * The invoice template of the backup (0.16.0), after the transaction
-	 * like the calendars; null when the backup has none – then the team's
-	 * own stays, also with `replace`.
+	 * A template of the backup – invoice (0.16.0) or quote (0.34.0) –, after
+	 * the transaction like the calendars; null when the backup has none –
+	 * then the team's own stays, also with `replace`.
 	 *
 	 * @param array<string,mixed> $b
 	 * @param array<string,?string> $mapping
 	 * @return ?array<string,mixed>
 	 */
-	private function storeTemplate(int $tid, ZipFile $zip, array $b, array $mapping, string $mode): ?array {
-		$src = $b['template'] ?? null;
+	private function storeTemplate(int $tid, ZipFile $zip, array $b, array $mapping, string $mode, string $kind): ?array {
+		$src = $b[$kind === InvoiceTemplateStore::QUOTE ? 'quote_template' : 'template'] ?? null;
 		if (!is_array($src)) {
 			return null;
 		}
@@ -767,7 +770,7 @@ final class TeamImportService {
 			return null;
 		}
 		try {
-			$decision = ZipRules::decideTemplate($this->templates->info($tid), $meta, $mode);
+			$decision = ZipRules::decideTemplate($this->templates->info($tid, $kind), $meta, $mode);
 			if ($decision !== 'store') {
 				return ['name' => $meta['name'], 'stored' => false, 'reason' => $decision === 'same' ? 'same' : 'kept_existing'];
 			}
@@ -778,10 +781,10 @@ final class TeamImportService {
 				return ['name' => $meta['name'], 'stored' => false, 'reason' => 'not_a_template'];
 			}
 			$meta['modified_by'] = ZipRules::keepUid($meta['modified_by'], $mapping);
-			$this->templates->put($tid, $meta, $bytes);
+			$this->templates->put($tid, $meta, $bytes, $kind);
 			return ['name' => $meta['name'], 'stored' => true];
 		} catch (\Throwable $e) {
-			$this->logger->error('TimeSister: imported invoice template of team {team} not stored', ['app' => 'timesister', 'team' => $tid, 'exception' => $e]);
+			$this->logger->error('TimeSister: imported {kind} template of team {team} not stored', ['app' => 'timesister', 'kind' => $kind, 'team' => $tid, 'exception' => $e]);
 			return ['name' => $meta['name'], 'stored' => false, 'reason' => 'failed'];
 		}
 	}

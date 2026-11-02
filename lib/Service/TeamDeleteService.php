@@ -92,7 +92,7 @@ class TeamDeleteService {
 		return [
 			'records' => $this->records->stats($id)['all'],
 			'backups' => $this->backups->countByTenant($id),
-			'templates' => $this->templates->info($id) === null ? 0 : 1,
+			'templates' => $this->templates->count($id),
 		];
 	}
 
@@ -161,7 +161,7 @@ class TeamDeleteService {
 			$this->logger->warning('TimeSister: protected backups of deleted team {team} not removed', ['app' => 'timesister', 'team' => $id, 'exception' => $e]);
 		}
 		try {
-			$this->templates->delete($id);
+			$this->templates->deleteAll($id);
 		} catch (\Exception $e) {
 			$this->logger->warning('TimeSister: invoice template of deleted team {team} not removed', ['app' => 'timesister', 'team' => $id, 'exception' => $e]);
 		}

@@ -147,7 +147,19 @@ const BLEIBT = ['invoice_issued', 'issue_pending', 'receipt_approved_not_deleted
 export async function aufraeumen(run) {
 	for (const who of [A, AA]) {
 		const alle = ((await ocs(who, 'GET', '/records?since=0')).data?.records || []).filter((x) => !x.deleted && x.key.includes(run))
-		const live = alle.filter((x) => !bleibt(x))
+		// A Job is deleted only through /jobs by its sender (a run cut short leaves them behind).
+		const jobs = alle.filter((x) => x.kind === 'job')
+		if (jobs.length) {
+			const failed = []
+			for (const j of jobs) {
+				const d = await ocs(as(j.data?.sender || 'zblead'), 'DELETE', `/jobs/${encodeURIComponent(j.key)}`)
+				if (d.status !== 200) {
+					failed.push(`${j.key} ${d.status} ${d.text.slice(0, 120)}`)
+				}
+			}
+			check(`${who.user}: ${jobs.length} test Jobs deleted by their sender`, failed.length === 0, failed.join(' | ').slice(0, 400))
+		}
+		const live = alle.filter((x) => !bleibt(x) && x.kind !== 'job')
 		if (alle.length > live.length) {
 			console.log(`    --  ${who.user}: ${alle.length - live.length} issued invoices stay`)
 		}
