@@ -42,7 +42,8 @@ use OCP\Capabilities\ICapability;
  * team's Word template for invoices under /templates/invoice (Team Admins).
  * `quote_template: 1` since 0.34.0: the team's Word template for quotes
  * under /templates/quote, the same way; both templates are read by every
- * member, written by Team Admins.
+ * member, written by Team Admins. `credit_limit: 1` since 0.35.0: the
+ * field `credit_limit` in `setting/office_costs`.
  * `entries: 1` since 0.17.0: the app holds the team's time entries –
  * named time calendars, feeds read by the server, GET /entries by role; the
  * shares matrix (/team/access, 0.5.0 to 0.16.x) is gone. `invoicing: 1`
@@ -124,7 +125,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, quote_template: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, quote_documents: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int, fee_models: int}} */
+	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, quote_template: int, credit_limit: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, quote_documents: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int, fee_models: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -144,6 +145,7 @@ final class Capabilities implements ICapability {
 				'invoices' => 1,
 				'invoice_template' => 1,
 				'quote_template' => 1,
+				'credit_limit' => 1,
 				'entries' => 1,
 				'invoicing' => 1,
 				'invoice_documents' => 2,

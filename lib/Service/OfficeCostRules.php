@@ -14,7 +14,8 @@ namespace OCA\TimeSister\Service;
  *
  * `costs[]` {id, name, amount, due_day 1–31, rhythm, from, to?, kind,
  * note?, month13? 1–12, percent? 0–100}, `balances[]` {date, amount,
- * note?}, `reserve` (number ≥ 0 or null), `schema` (integer).
+ * note?}, `reserve` (number ≥ 0 or null), `credit_limit` (number ≥ 0 or
+ * null, since 0.35.0: the overdraft the bank grants), `schema` (integer).
  */
 final class OfficeCostRules {
 	public const KEY = 'office_costs';
@@ -37,8 +38,9 @@ final class OfficeCostRules {
 					}
 					break;
 				case 'reserve':
+				case 'credit_limit':
 					if ($value !== null && (!self::isNumber($value) || $value < 0)) {
-						throw ApiException::invalid(Message::of('“{field}” must be null or a number from 0.', ['field' => 'reserve']));
+						throw ApiException::invalid(Message::of('“{field}” must be null or a number from 0.', ['field' => $key]));
 					}
 					break;
 				case 'costs':

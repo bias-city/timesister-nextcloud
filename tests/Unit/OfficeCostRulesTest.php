@@ -45,6 +45,13 @@ class OfficeCostRulesTest extends TestCase {
 		$this->assertSame('ok', self::code(fn () => OfficeCostRules::validate(self::obj('{"costs":[],"balances":[],"reserve":null}'))));
 	}
 
+	/** 0.35.0: the credit limit is null or a number from 0. */
+	public function testCreditLimit(): void {
+		$this->assertSame('ok', self::code(fn () => OfficeCostRules::validate(self::obj('{"credit_limit":50000}'))));
+		$this->assertSame('ok', self::code(fn () => OfficeCostRules::validate(self::obj('{"credit_limit":null,"reserve":0}'))));
+		$this->assertSame('ok', self::code(fn () => OfficeCostRules::validate(self::obj('{"credit_limit":0.5}'))));
+	}
+
 	/** @return list<array{string}> */
 	public static function invalid(): array {
 		return [
@@ -52,6 +59,8 @@ class OfficeCostRulesTest extends TestCase {
 			['{"schema":"1"}'],
 			['{"reserve":-1}'],
 			['{"reserve":"viel"}'],
+			['{"credit_limit":-1}'],
+			['{"credit_limit":"50000"}'],
 			['{"costs":{}}'],
 			['{"costs":[1]}'],
 			['{"costs":[{"name":"","amount":1,"rhythm":"monthly","from":"2026-01-01","kind":"rent"}]}'],

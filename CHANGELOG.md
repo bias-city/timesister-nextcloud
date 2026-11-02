@@ -1,5 +1,14 @@
 # Changes
 
+## 0.35.0 – 2026-11-02
+
+`api: 2` unchanged; capability `credit_limit: 1`; no migration. Additive.
+
+- **Credit limit.** `setting/office_costs` takes `credit_limit`: null or a
+  number ≥ 0, the overdraft the bank grants. Before 0.35.0 the field was an
+  unknown field (`422 invalid`); a client without `credit_limit` leaves it
+  out.
+
 ## 0.34.0 – 2026-11-02
 
 `api: 2` unchanged; capability `quote_template: 1`; no migration. Additive.
