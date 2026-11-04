@@ -243,14 +243,18 @@ final class IssueRules {
 		return null;
 	}
 
-	/** The budget's currency, else the draft's; null when neither names one. */
-	public static function currencyOf(\stdClass $budget, \stdClass $d): ?string {
-		foreach ([$budget->currency ?? null, $d->currency ?? null] as $c) {
+	/**
+	 * The invoice's currency, the same chain as the Mac app (0.36.0): the
+	 * budget's, the draft's, the project's, the team's (`settings.currency`),
+	 * else CHF – a budget without its own no longer stops issuing.
+	 */
+	public static function currencyOf(\stdClass $budget, \stdClass $d, ?\stdClass $project = null, ?\stdClass $settings = null): string {
+		foreach ([$budget->currency ?? null, $d->currency ?? null, $project?->currency ?? null] as $c) {
 			if (is_string($c) && preg_match(ProjectRules::CURRENCY_PATTERN, $c) === 1) {
 				return strtoupper($c);
 			}
 		}
-		return null;
+		return ReceiptBooking::teamCurrency($settings);
 	}
 
 	/** The project's customer key (`customer`, older records `kunde`). */

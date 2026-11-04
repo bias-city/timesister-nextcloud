@@ -1,5 +1,18 @@
 # Changes
 
+## 0.36.0 – 2026-11-04
+
+`api: 2` unchanged; no new capability; no migration. Additive.
+
+- **Invoice currency without a budget currency.** Issuing and handing over
+  took the currency only from the budget or the draft and stopped with
+  “The budget has no currency.” Now the chain is the Mac app's: budget,
+  draft, project, the team's `settings.currency`, else CHF.
+- **Currency of a recurring expense.** `expense_rule` takes `currency`: null
+  (the team's) or three capital letters. A rule in another currency makes
+  its receipts in that currency and leaves them open until the rate is taken
+  over – approving one still needs `booked` in the team's currency.
+
 ## 0.35.0 – 2026-11-02
 
 `api: 2` unchanged; capability `credit_limit: 1`; no migration. Additive.

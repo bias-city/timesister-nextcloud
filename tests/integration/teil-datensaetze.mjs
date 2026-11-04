@@ -167,6 +167,35 @@ export async function datensaetze() {
 		// Back to the record as it was before this part.
 		expect('zbuser1 restored', await ocs(A, 'PUT', '/records/person/zbuser1', { version: cur.version + 2, data: cur.data }), 200)
 	}
+	// ---------------------------------------------------------------------------
+	head('Credit limit in the office costs (0.35.0): Team Admins alone')
+	{
+		const caps = await ocs(U1, 'GET', '/ocs/v1.php/cloud/capabilities?format=json')
+		check('capability credit_limit: 1', caps.data?.capabilities?.timesister?.credit_limit === 1, caps.data?.capabilities?.timesister)
+		const OC = '/records/setting/office_costs'
+		const cur = await ocs(A, 'GET', OC)
+		const alt = cur.status === 200 ? cur.data : null
+		const basis = { schema: 1, costs: [], balances: [], reserve: null, ...(alt?.data || {}) }
+		const w = await ocs(A, 'PUT', OC, { version: alt?.version || 0, data: { ...basis, credit_limit: 50000 } })
+		check('admin writes credit_limit and reads it back', w.status === 200 && w.data?.data?.credit_limit === 50000, w.text.slice(0, 300))
+		const again = await ocs(V, 'GET', OC)
+		check('second Team Admin reads it', again.data?.data?.credit_limit === 50000, again.text.slice(0, 200))
+		let v = w.data?.version
+		expect('negative credit limit', await ocs(A, 'PUT', OC, { version: v, data: { ...basis, credit_limit: -1 } }), 422, 'invalid')
+		expect('credit limit as text', await ocs(A, 'PUT', OC, { version: v, data: { ...basis, credit_limit: '50000' } }), 422, 'invalid')
+		const leer = await ocs(A, 'PUT', OC, { version: v, data: { ...basis, credit_limit: null } })
+		check('null clears it', leer.status === 200 && leer.data?.data?.credit_limit === null, leer.text.slice(0, 200))
+		v = leer.data?.version
+		for (const [wer, k] of [['lead', L], ['member', U1]]) {
+			const r = await ocs(k, 'GET', OC)
+			check(`${wer} reads no office costs`, r.status === 403 || r.status === 404, `${r.status} ${r.text.slice(0, 120)}`)
+			const s = await ocs(k, 'PUT', OC, { version: v, data: { ...basis, credit_limit: 1 } })
+			check(`${wer} writes no credit limit`, s.status === 403 || s.status === 404, `${s.status} ${s.text.slice(0, 120)}`)
+		}
+		// Back to the record as it was before this part.
+		if (alt) expect('office costs restored', await ocs(A, 'PUT', OC, { version: v, data: alt.data }), 200)
+		else expect('office costs removed again', await ocs(A, 'DELETE', `${OC}?version=${v}`), 200)
+	}
 
 	head('Permissions: both Team Admins (zbverw, zbadmin)')
 	{

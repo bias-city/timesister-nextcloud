@@ -38,6 +38,10 @@ class ExpenseRulesTest extends TestCase {
 		$this->assertSame('ok', self::outcome(fn () => ExpenseRuleRules::validate(self::rule())));
 		$this->assertSame('ok', self::outcome(fn () => ExpenseRuleRules::validate(self::rule(['project' => 'd1', 'budget' => 'b1', 'cost' => 1, 'to' => '2026-12-31']))));
 		$this->assertSame('422 “period” must be one of monthly, quarterly, yearly.', self::outcome(fn () => ExpenseRuleRules::validate(self::rule(['period' => 'weekly']))));
+		// 0.36.0: the currency of the amount, null for the team's.
+		$this->assertSame('ok', self::outcome(fn () => ExpenseRuleRules::validate(self::rule(['currency' => 'EUR']))));
+		$this->assertSame('ok', self::outcome(fn () => ExpenseRuleRules::validate(self::rule(['currency' => null]))));
+		$this->assertSame('422 “currency” must be null or three capital letters, for example EUR.', self::outcome(fn () => ExpenseRuleRules::validate(self::rule(['currency' => 'eur']))));
 		$this->assertSame('422 “amount” must be a number ≥ 0.', self::outcome(fn () => ExpenseRuleRules::validate(self::rule(['amount' => -1]))));
 		$this->assertSame('422 “from” must not be after “to”.', self::outcome(fn () => ExpenseRuleRules::validate(self::rule(['to' => '2026-01-01']))));
 		$this->assertSame('422 “text” must be text of 1 to 300 characters.', self::outcome(fn () => ExpenseRuleRules::validate(self::rule(['text' => ' ']))));

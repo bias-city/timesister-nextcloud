@@ -107,7 +107,7 @@ final class DraftResolver {
 		$projectKey = (string)$d->project;
 		$project = $this->live($tenantId, 'project', $projectKey) ?? throw ApiException::invalid('The invoice’s project does not exist.');
 		$budget = IssueRules::budgetOf($project, (string)$d->budget) ?? throw ApiException::invalid('The invoice’s budget is not in the project.');
-		$currency = IssueRules::currencyOf($budget, $d) ?? throw ApiException::invalid('The budget has no currency.');
+		$currency = IssueRules::currencyOf($budget, $d, $project, $this->live($tenantId, 'setting', 'settings'));
 		$quotes = array_values(array_filter(array_map(
 			static fn ($r) => InvoiceRules::decode($r->getData()),
 			$this->records->findLiveByKind($tenantId, 'quote'))));

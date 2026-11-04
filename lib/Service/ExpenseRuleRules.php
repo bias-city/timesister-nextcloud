@@ -43,6 +43,11 @@ final class ExpenseRuleRules {
 		if ($rate !== null && !(ProjectRules::isRate($rate) && $rate <= 100)) {
 			throw ApiException::invalid(Message::of('“{field}” must be null or a percentage from 0 to 100.', ['field' => 'vat_rate']));
 		}
+		// 0.36.0: the currency of the amount (a subscription in EUR); null is the team's.
+		$cur = $d->currency ?? null;
+		if ($cur !== null && (!is_string($cur) || preg_match('/^[A-Z]{3}$/', $cur) !== 1)) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or three capital letters, for example EUR.', ['field' => 'currency']));
+		}
 		if (!in_array($d->period ?? null, self::PERIODS, true)) {
 			throw ReceiptRules::oneOf('period', self::PERIODS);
 		}

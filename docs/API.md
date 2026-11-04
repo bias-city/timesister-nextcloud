@@ -3646,7 +3646,9 @@ returned): `status`, `file`, `invoice`, `report`, `created_by`,
 > receipt names it – see “Expense table, settling and exchange rates,
 > 0.30.0”, G.
 
-`{ schema: 1, person, text, amount, vat_rate|null, period: "monthly"|"quarterly"|"yearly", from: "YYYY-MM-DD", to: null|"YYYY-MM-DD", project|null, budget|null, cost|null }`;
+`{ schema: 1, person, text, amount, vat_rate|null, currency|null, period: "monthly"|"quarterly"|"yearly", from: "YYYY-MM-DD", to: null|"YYYY-MM-DD", project|null, budget|null, cost|null }`;
+`currency` (0.36.0): the currency of `amount`, null for the team's; a rule in
+another currency makes `open` receipts in it, approved once `booked` is set.
 server-owned `approved_by`, `approved_on`. Written by the person
 (member: only for themselves) and Team Admins; `POST
 /expense-rules/{key}/approve` by Team Admins (with project: also its

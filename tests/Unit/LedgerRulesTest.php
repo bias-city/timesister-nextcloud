@@ -150,7 +150,11 @@ class LedgerRulesTest extends TestCase {
 		$this->assertNull(IssueRules::customerKeyOf((object)['customer' => '']));
 		$this->assertSame('CHF', IssueRules::currencyOf(IssueRules::budgetOf($project, 'b1') ?? new \stdClass(), (object)[]));
 		$this->assertSame('EUR', IssueRules::currencyOf(IssueRules::budgetOf($project, 'b2') ?? new \stdClass(), (object)['currency' => 'EUR']), 'the draft’s when the budget has none');
-		$this->assertNull(IssueRules::currencyOf((object)[], (object)[]));
+		// 0.36.0: without budget and draft currency the project's, then the team's, then CHF – never a stop.
+		$this->assertSame('EUR', IssueRules::currencyOf((object)[], (object)[], (object)['currency' => 'eur']), 'the project’s');
+		$this->assertSame('USD', IssueRules::currencyOf((object)[], (object)[], (object)[], (object)['currency' => 'USD']), 'the team’s');
+		$this->assertSame('CHF', IssueRules::currencyOf((object)[], (object)[], (object)['currency' => 'xx'], (object)[]), 'else CHF');
+		$this->assertSame('CHF', IssueRules::currencyOf(IssueRules::budgetOf($project, 'b1') ?? new \stdClass(), (object)['currency' => 'EUR'], (object)['currency' => 'USD']), 'the budget’s first');
 		$this->assertNull(IssueRules::budgetOf($project, 'b3'));
 		$settings = (object)['issuer' => (object)['name' => 'Muster'], 'vat' => 8.1];
 		$this->assertSame('Muster', IssueRules::issuerOf($settings)?->name);
