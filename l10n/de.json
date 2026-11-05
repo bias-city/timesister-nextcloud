@@ -886,7 +886,6 @@
 		"The number of an issued quote does not change; a changed offer is a new quote.": "Die Nummer einer gestellten Offerte ändert sich nicht; ein geändertes Angebot ist eine neue Offerte.",
 		"“kind” must be “sent” or “signed”.": "„kind“ muss „sent“ oder „signed“ sein.",
 		"“kind” must be “timesister”, “sent” or “signed”.": "„kind“ muss „timesister“, „sent“ oder „signed“ sein.",
-		"“mean_rate” is the rate of the model “mean_rate”; leave it null in the other models.": "„mean_rate“ ist der Satz des Modells „mean_rate“; lass ihn in den anderen Modellen null.",
 		"“cap_mode” must be null, “cap” or “flat”.": "„cap_mode“ muss null, „cap“ oder „flat“ sein.",
 		"“cap_mode” needs a “cap”: a ceiling or a price.": "„cap_mode“ braucht ein „cap“: ein Kostendach oder einen Preis.",
 		"“fee_model” must be null, “category”, “mean_rate” or “role”.": "„fee_model“ muss null, „category“, „mean_rate“ oder „role“ sein.",

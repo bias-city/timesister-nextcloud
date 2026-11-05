@@ -6097,6 +6097,24 @@ mismatch search), `QuoteRules` (`texts`, `attachments`, the frozen
 `DocumentService` (filing, serving, `verify?files`), `QuoteIssueService`,
 `QuoteDocumentService` (three kinds), the job `IssueExpiry`.
 
+## Rule receipts, 0.37.0 (2026-11-04) – a recurring receipt is deleted by the writer of its rule (`rule_receipts: 1`)
+
+A `recurring` receipt is approved by its expense rule, not by a person. Its
+writer (the person, a Team Admin) deletes it while it is not on a fixed or paid
+expense report, not billed and on no invoice – the client does that when the
+rule ends earlier, moves its start or is deleted. Other approved receipts still
+need a reopen first (`409 receipt_approved_not_deleted`).
+
+## Planning rate, 0.37.0 (2026-11-04) – `mean_rate` in every fee model (`planning_rate: 1`)
+
+A budget's `mean_rate` is its **planning rate**: one number per budget that turns
+amounts into hours, in every model (`category`, `role`, `mean_rate`). Before
+0.37.0 the server rejected it outside the model `mean_rate`
+(`422 fee_model_invalid`). The billing rate of a booking is unchanged: by the
+planning rate (model `mean_rate`), by the level of the work package
+(`category`) or by the level of the person (`role`). A work package's `rate`
+is no longer used by the Mac app for planning; it may still be present.
+
 ## Fee models, 0.33.0 (2026-10-29) – money leads, the fee model per budget, one list of levels (`fee_models: 1`)
 
 PLAN-HONORAR §2–§4 and §9 (decisions E1–E7 of 2026-10-29, E8 – the fee

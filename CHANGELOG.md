@@ -1,5 +1,22 @@
 # Changes
 
+## 0.37.0 – 2026-11-04
+
+`api: 2` unchanged; capabilities `planning_rate: 1`, `rule_receipts: 1`; no migration. Additive.
+
+- **Receipts of an expense rule are deleted by the rule's writer.** A
+  `recurring` receipt is approved by its rule, not by a person: the person
+  or a Team Admin deletes it while nothing is settled or billed – when the
+  rule ends earlier, moves its start or goes. Before 0.37.0 that needed a
+  reopen per receipt (`409 receipt_approved_not_deleted`).
+
+- **Planning rate in every fee model.** A budget's `mean_rate` is its planning
+  rate: one number that turns amounts into hours, in the models `category` and
+  `role` as well. Before 0.37.0 a `mean_rate` outside the model `mean_rate` was
+  `422 fee_model_invalid`. Billing is unchanged: by the planning rate, by the
+  level of the work package or by the level of the person. A work package's
+  `rate` is no longer used for planning by the Mac app (it may still be sent).
+
 ## 0.36.0 – 2026-11-04
 
 `api: 2` unchanged; no new capability; no migration. Additive.

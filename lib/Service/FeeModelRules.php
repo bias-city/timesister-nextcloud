@@ -29,7 +29,7 @@ final class FeeModelRules {
 	}
 
 	/**
-	 * The budget's fee fields: `fee_model`, `mean_rate` (only in its model),
+	 * The budget's fee fields: `fee_model`, `mean_rate` (the planning rate, any model),
 	 * `cap_mode` (only with a cap), `tolerance` 0–100.
 	 *
 	 * @throws ApiException 422
@@ -39,15 +39,11 @@ final class FeeModelRules {
 		if ($model !== null && !in_array($model, self::MODELS, true)) {
 			throw self::invalidModel();
 		}
+		// 0.37.0: `mean_rate` is the planning rate of the budget in every model (it turns amounts
+		// into hours); in the model `mean_rate` it is the billing rate as well.
 		$mean = $b->mean_rate ?? null;
-		if ($mean !== null) {
-			if (!ProjectRules::isRate($mean)) {
-				throw ApiException::invalid(Message::of('“{field}” must be null or a number ≥ 0.', ['field' => 'mean_rate']))->field('mean_rate');
-			}
-			if ($model !== self::MEAN_RATE) {
-				throw ApiException::invalid('“mean_rate” is the rate of the model “mean_rate”; leave it null in the other models.')
-					->code(ErrorCode::FEE_MODEL_INVALID)->field('mean_rate');
-			}
+		if ($mean !== null && !ProjectRules::isRate($mean)) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or a number ≥ 0.', ['field' => 'mean_rate']))->field('mean_rate');
 		}
 		$mode = $b->cap_mode ?? null;
 		if ($mode !== null) {

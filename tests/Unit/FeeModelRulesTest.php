@@ -64,12 +64,13 @@ class FeeModelRulesTest extends TestCase {
 		}
 		$this->assertSame('422 fee_model_invalid fee_model', self::budget('"fee_model":"hoai"'));
 		$this->assertSame('422 fee_model_invalid fee_model', self::budget('"fee_model":1'));
-		// mean_rate: only in its model; a number ≥ 0.
+		// mean_rate: the planning rate, in every model since 0.37.0; a number ≥ 0.
 		$this->assertSame('', self::budget('"fee_model":"mean_rate","mean_rate":176'));
 		$this->assertSame('', self::budget('"fee_model":"mean_rate","mean_rate":null'), 'null while drafting');
 		$this->assertSame('', self::budget('"fee_model":"category","mean_rate":null'));
-		$this->assertSame('422 fee_model_invalid mean_rate', self::budget('"fee_model":"category","mean_rate":176'));
-		$this->assertSame('422 fee_model_invalid mean_rate', self::budget('"mean_rate":176'), 'missing model reads as role');
+		$this->assertSame('', self::budget('"fee_model":"category","mean_rate":176'), 'the planning rate of a budget billed by level');
+		$this->assertSame('', self::budget('"fee_model":"role","mean_rate":90'));
+		$this->assertSame('', self::budget('"mean_rate":176'), 'missing model reads as role');
 		$this->assertSame('422 - mean_rate', self::budget('"fee_model":"mean_rate","mean_rate":-1'));
 		$this->assertSame('422 - mean_rate', self::budget('"fee_model":"mean_rate","mean_rate":"176"'));
 		// cap and cap_mode.
