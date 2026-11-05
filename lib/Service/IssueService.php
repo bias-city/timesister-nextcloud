@@ -150,7 +150,10 @@ final class IssueService {
 		$sums = $r['sums'];
 		$hours = $r['hours'];
 		$customerBlock = $r['customerBlock'];
-		$dueOn = IssueRules::dueOn($issuedOn, $dueDays ?? CustomerRules::paymentDays($r['customer']) ?? IssueRules::DUE_DAYS);
+		// 0.38.0: the request's `due_days`, the invoice's `payment_days`, the customer's term, the default.
+		$paymentDays = $d->payment_days ?? null;
+		$dueOn = IssueRules::dueOn($issuedOn, $dueDays ?? (is_int($paymentDays) ? $paymentDays : null) ?? CustomerRules::paymentDays($r['customer']) ?? IssueRules::DUE_DAYS);
+		[$from, $to] = IssueRules::periodOf($d, $issuedOn);
 
 		// The team lock first: one issue at a time, the revision for the marks and the record.
 		$receipts = $r['receipts'];
@@ -169,11 +172,14 @@ final class IssueService {
 		$row->setNumber($number);
 		$row->setStatus(InvInvoice::ISSUING);
 		$row->setDocumentState('none');
-		$row->setProject($projectKey);
-		$row->setBudget((string)$d->budget);
+		$row->setProject($projectKey === '' ? null : $projectKey);
+		$row->setBudget($r['budgetId']);
 		$row->setCustomer($customerKey);
-		$row->setPeriodFrom((string)$d->from);
-		$row->setPeriodTo((string)$d->to);
+		$row->setPaymentDays(is_int($paymentDays) ? $paymentDays : null);
+		$row->setKind(InvoiceRules::keyOf($d->kind ?? null));
+		$row->setCompanion(InvoiceRules::keyOf($d->companion ?? null));
+		$row->setPeriodFrom($from);
+		$row->setPeriodTo($to);
 		$row->setCurrency($currency);
 		$row->setIssuerJson(Json::encode($issuer));
 		$row->setCustomerJson(Json::encode($customerBlock));
@@ -210,6 +216,10 @@ final class IssueService {
 		$d->number = $number;
 		$d->issued_on = $issuedOn;
 		$d->due_on = $dueOn;
+		// 0.38.0: the record shows what was frozen – the period and the customer.
+		$d->from = $from;
+		$d->to = $to;
+		$d->customer = $customerKey;
 		$d->hours = IssueRules::totalHours($hours);
 		// 0.21.0: the record's amount is what the customer pays.
 		$d->amount = $sums->total;
@@ -469,10 +479,10 @@ final class IssueService {
 		$positions = is_array($positions) ? array_values(array_filter($positions, static fn (mixed $x): bool => $x instanceof \stdClass)) : [];
 		$hours = array_map(static fn (InvHour $h): array => $h->present(), $this->hours->findByInvoice($row->getTenantId(), $row->getId()));
 		$layout = $row->getLayoutJson() === null ? null : InvoiceRules::decode($row->getLayoutJson());
-		return IssueRules::payload($row->getRkey(), $row->getNumber(), $row->getIssuedOn(), $row->getIssuedBy(), $row->getDueOn(), $row->getProject(), $row->getBudget(), $row->getCustomer(),
+		return IssueRules::payload($row->getRkey(), $row->getNumber(), $row->getIssuedOn(), $row->getIssuedBy(), $row->getDueOn(), $row->getProject(), $row->getCustomer(),
 			$row->getPeriodFrom(), $row->getPeriodTo(), $row->getCurrency(), InvoiceFixed::sumsOf($row), InvoiceRules::decode($row->getIssuerJson()) ?? new \stdClass(),
 			InvoiceRules::decode($row->getCustomerJson()) ?? new \stdClass(), $positions, $hours, $row->getGreeting(), $row->getBody(), $row->getFooter(),
-			$row->getReverses(), $row->getCredits(), $row->getQrReference(), $layout);
+			$row->getReverses(), $row->getCredits(), $row->getQrReference(), $layout, $row->getCompanion());
 	}
 
 	/**
@@ -705,7 +715,7 @@ final class IssueService {
 		}
 		$top = $this->tenants->bumpRevision($tid, 1);
 		$this->lock->require($tid, $now);
-		[$number, $counterNo] = $this->takeNumber($tid, $settings, $issuedOn, $orig->getProject(), $orig->getCustomer(), $now);
+		[$number, $counterNo] = $this->takeNumber($tid, $settings, $issuedOn, $orig->getProject() ?? '', $orig->getCustomer(), $now);
 
 		$row = new InvInvoice();
 		$row->setTenantId($tid);
@@ -716,6 +726,8 @@ final class IssueService {
 		$row->setProject($orig->getProject());
 		$row->setBudget($orig->getBudget());
 		$row->setCustomer($orig->getCustomer());
+		$row->setKind($orig->getKind());
+		$row->setCompanion($orig->getCompanion());
 		$row->setPeriodFrom($orig->getPeriodFrom());
 		$row->setPeriodTo($orig->getPeriodTo());
 		$row->setCurrency($orig->getCurrency());

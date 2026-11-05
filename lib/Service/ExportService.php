@@ -86,8 +86,9 @@ final class ExportService {
 		$out .= ExportRules::line(ExportRules::DATEV_HEAD);
 		$names = [];
 		foreach ($rows as $row) {
-			$key = $row->getProject();
-			$names[$key] ??= DraftResolver::nameOf($this->drafts->live($m->tenantId, 'project', $key), $key);
+			// 0.38.0: an invoice without a project has no project name in the text.
+			$key = $row->getProject() ?? '';
+			$names[$key] ??= $key === '' ? '' : DraftResolver::nameOf($this->drafts->live($m->tenantId, 'project', $key), $key);
 			$f = $this->fixed->of($row);
 			// 0.21.0: pass-through items need their own revenue account.
 			if (VatLines::fromFixed($f)->passThrough !== 0.0) {

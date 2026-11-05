@@ -51,7 +51,19 @@ final class ErrorCode {
 	public const NO_ISSUER = 'no_issuer';
 	public const INVOICE_ISSUED = 'invoice_issued';
 	public const INVOICE_NOT_DRAFT = 'invoice_not_draft';
+	/** Retired since 0.38.0: an invoice no longer needs a budget. */
 	public const INVOICE_NO_BUDGET = 'invoice_no_budget';
+	// 0.38.0: invoices without a budget, planned invoices, the budget assigned after issuing.
+	public const INVOICE_NO_CUSTOMER = 'invoice_no_customer';
+	public const INVOICE_BUDGET_WITHOUT_PROJECT = 'invoice_budget_without_project';
+	public const INVOICE_NOT_PLANNED = 'invoice_not_planned';
+	// 0.39.0: advances, their deductions and the expenses invoice beside the main one.
+	public const ADVANCE_UNKNOWN = 'advance_unknown';
+	public const ADVANCE_DEDUCTED_TWICE = 'advance_deducted_twice';
+	public const ADVANCE_POSITION_COUNT = 'advance_position_count';
+	public const ADVANCE_AMOUNT = 'advance_amount';
+	public const COMPANION_UNKNOWN = 'companion_unknown';
+	public const INVOICE_NOT_FIXED = 'invoice_not_fixed';
 	public const INVOICE_HANDED_OVER = 'invoice_handed_over';
 	public const INVOICE_NOT_HANDED_OVER = 'invoice_not_handed_over';
 	public const INVOICE_LEAD_ONLY = 'invoice_lead_only';

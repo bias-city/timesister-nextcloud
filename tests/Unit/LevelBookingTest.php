@@ -189,7 +189,7 @@ class LevelBookingTest extends TestCase {
 		$this->assertStringStartsWith('Position 1:', self::message(fn () => InvoiceRules::validate(self::invoice(['positions' => [self::obj('{"kind":"hours","level":"b","text":"x","hours":1,"amount":1}')]]))));
 		// A fee line: the base of the expense percentage.
 		$lines = [self::obj('{"kind":"hours","level":"b","text":"x","hours":10,"rate":100,"amount":1000}'), self::obj('{"kind":"expense_percent","text":"Spesen","rate":5,"amount":50}')];
-		$this->assertSame('', self::err(fn () => ReceiptLineRules::check($lines, [], 'p1', 'b1', 'inv-1', static fn (string $k): string => $k)));
+		$this->assertSame('', self::err(fn () => ReceiptLineRules::check($lines, [], 'p1', 'b1', 'k1', 'inv-1', static fn (string $k): string => $k, static fn (string $p): ?string => null)));
 		// bookings[].level: null or an id; carried into the invoice's hours. A leftover category passes, unread.
 		$b = static fn (string $more): \stdClass => self::invoice(['bookings' => [self::obj('{"person":"anna","uid":"e1","start":"2027-01-12T08:00:00","hours":2,"rate":197,"code":"N410.31"' . $more . '}')]]);
 		$this->assertSame('', self::err(fn () => InvoiceRules::validate($b(',"level":"b"'))));

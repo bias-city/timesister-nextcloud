@@ -36,6 +36,8 @@ final class LedgerRules {
 	/** 0.24.1: the accounting system's PDF stored in the document tree, and its cancellation there; `invoice` is 0. */
 	public const EXTERNAL_DOCUMENT = 'external_document';
 	public const EXTERNAL_CANCELLED = 'external_cancelled';
+	/** 0.38.0: a budget assigned to a fixed invoice (or released), `{ key, number, budget_before, budget }`. */
+	public const ASSIGN = 'assign';
 	public const HASH_PATTERN = '/^[0-9a-f]{64}$/';
 
 	/** `at` of an entry: UTC, `YYYY-MM-DDTHH:MM:SSZ`. */

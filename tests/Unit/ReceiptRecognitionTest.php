@@ -101,7 +101,7 @@ class ReceiptRecognitionTest extends TestCase {
 		$rc = ['rc-1' => (object)['status' => 'approved', 'project' => 'd1', 'budget' => 'b1', 'cost' => 1, 'invoice_effect' => 'charge', 'invoice' => null, 'note' => null,
 			'net' => 100.0, 'vat_rate' => null, 'vat' => 5.35, 'vat_lines' => [(object)['rate' => 2.6, 'net' => 50.0, 'vat' => 1.3], (object)['rate' => 8.1, 'net' => 50.0, 'vat' => 4.05]]]];
 		$line = static fn (float $amount, mixed $vat, array $over = []): \stdClass => (object)array_merge(['kind' => 'costs', 'text' => 'Market', 'amount' => $amount, 'cost' => 1, 'receipts' => ['rc-1'], 'vat' => $vat], $over);
-		$check = static fn (array $p): string => self::outcome(fn () => ReceiptLineRules::check($p, $rc, 'd1', 'b1', 'inv-1', static fn (string $k): string => $k));
+		$check = static fn (array $p): string => self::outcome(fn () => ReceiptLineRules::check($p, $rc, 'd1', 'b1', 'k1', 'inv-1', static fn (string $k): string => $k, static fn (string $p): ?string => null));
 		$this->assertSame('ok', $check([$line(50, 2.6), $line(50, 8.1)]));
 		$this->assertSame('422 Position 1: The receipt rc-1 has several VAT rates; its line names one of them in “vat” (2.6 %, 8.1 %).', $check([$line(100, null)]));
 		$this->assertSame('422 Position 2: The receipt rc-1 is on the invoice twice.', $check([$line(50, 2.6), $line(50, 2.6)]));

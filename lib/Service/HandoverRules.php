@@ -109,14 +109,15 @@ final class HandoverRules {
 	}
 
 	/**
-	 * The ledger payload of `external_issued`.
+	 * The ledger payload of `external_issued` (since 0.38.0 `project` and
+	 * `budget` may be null).
 	 *
 	 * @param array{system:string,id:string,number:string,url:?string,issued_on:string} $v
 	 * @param list<\stdClass> $bookings
 	 * @param list<string> $receipts
 	 * @return array<string,mixed>
 	 */
-	public static function payload(string $key, array $v, string $project, string $budget, string $customer, string $currency, array $bookings, array $receipts): array {
+	public static function payload(string $key, array $v, ?string $project, ?string $budget, string $customer, string $currency, array $bookings, array $receipts): array {
 		return [
 			'key' => $key, 'system' => $v['system'], 'id' => $v['id'], 'number' => $v['number'], 'url' => $v['url'], 'issued_on' => $v['issued_on'],
 			'project' => $project, 'budget' => $budget, 'customer_key' => $customer, 'currency' => $currency,

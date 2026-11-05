@@ -125,7 +125,9 @@ class LedgerRulesTest extends TestCase {
 		$this->assertSame('ok', self::outcome(fn () => IssueRules::requireIssuable($d(['bookings' => [], 'positions' => [(object)['kind' => 'flat', 'text' => 'x', 'amount' => 1]]]))));
 		$this->assertSame('422 Only a draft can be issued.', self::outcome(fn () => IssueRules::requireIssuable($d(['status' => 'issued']))));
 		$this->assertSame('422 The draft already has a number.', self::outcome(fn () => IssueRules::requireIssuable($d(['number' => 'RE-1']))));
-		$this->assertSame('422 “budget” is required: every invoice belongs to a budget.', self::outcome(fn () => IssueRules::requireIssuable($d(['budget' => ' ']))));
+		// 0.38.0: no budget is needed to issue.
+		$this->assertSame('ok', self::outcome(fn () => IssueRules::requireIssuable($d(['budget' => null]))));
+		$this->assertSame('422 Only a draft can be issued.', self::outcome(fn () => IssueRules::requireIssuable($d(['status' => 'planned', 'bookings' => []]))), 'planned is never issued');
 		$this->assertSame('422 The draft has neither positions nor bookings.', self::outcome(fn () => IssueRules::requireIssuable($d(['bookings' => []]))));
 
 		$this->assertSame('2026-10-15', IssueRules::issuedOn(null, gmmktime(12, 0, 0, 10, 15, 2026)));
@@ -154,7 +156,10 @@ class LedgerRulesTest extends TestCase {
 		$this->assertSame('EUR', IssueRules::currencyOf((object)[], (object)[], (object)['currency' => 'eur']), 'the project’s');
 		$this->assertSame('USD', IssueRules::currencyOf((object)[], (object)[], (object)[], (object)['currency' => 'USD']), 'the team’s');
 		$this->assertSame('CHF', IssueRules::currencyOf((object)[], (object)[], (object)['currency' => 'xx'], (object)[]), 'else CHF');
-		$this->assertSame('CHF', IssueRules::currencyOf(IssueRules::budgetOf($project, 'b1') ?? new \stdClass(), (object)['currency' => 'EUR'], (object)['currency' => 'USD']), 'the budget’s first');
+		// 0.38.0: the invoice's own currency first, then the budget's.
+		$this->assertSame('EUR', IssueRules::currencyOf(IssueRules::budgetOf($project, 'b1') ?? new \stdClass(), (object)['currency' => 'EUR'], (object)['currency' => 'USD']), 'the invoice’s first');
+		$this->assertSame('CHF', IssueRules::currencyOf(IssueRules::budgetOf($project, 'b1') ?? new \stdClass(), (object)[], (object)['currency' => 'USD']), 'then the budget’s');
+		$this->assertSame('USD', IssueRules::currencyOf(null, (object)[], (object)['currency' => 'USD']), 'without a budget: the project’s');
 		$this->assertNull(IssueRules::budgetOf($project, 'b3'));
 		$settings = (object)['issuer' => (object)['name' => 'Muster'], 'vat' => 8.1];
 		$this->assertSame('Muster', IssueRules::issuerOf($settings)?->name);

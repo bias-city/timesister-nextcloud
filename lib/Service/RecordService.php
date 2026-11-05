@@ -499,8 +499,9 @@ final class RecordService {
 					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
 				}
 			}
-			if ($op['kind'] === QuoteRules::KIND || $op['kind'] === InvoiceRules::KIND) {
-				// A Lead's invoice or quote against the stored state, under the team lock.
+			if ($op['kind'] === QuoteRules::KIND || ($op['kind'] === InvoiceRules::KIND && !$system)) {
+				// A Lead's invoice or quote against the stored state, under the team lock (0.38.0: the server's
+				// own invoice writes – issue, assign – check their rights themselves).
 				try {
 					if ($op['kind'] === QuoteRules::KIND) {
 						$this->rights->requireQuoteWrite($m, $cur, $op['json'], $own ??= $this->ownKeys($m));
@@ -536,8 +537,11 @@ final class RecordService {
 			if ($op['kind'] === InvoiceRules::KIND && !$system) {
 				// 0.24.0: a handed-over invoice is frozen until revoked; only the server sets the status external.
 				try {
-					HandoverRules::checkClientWrite($cur === null || $cur->isTombstone() ? null : InvoiceRules::decode($cur->getData()),
-						$op['json'] === null ? null : InvoiceRules::decode($op['json']));
+					$stored = $cur === null || $cur->isTombstone() ? null : InvoiceRules::decode($cur->getData());
+					$next = $op['json'] === null ? null : InvoiceRules::decode($op['json']);
+					HandoverRules::checkClientWrite($stored, $next);
+					// 0.38.0: planned → draft, never back.
+					InvoiceRules::checkTransition($stored, $next);
 				} catch (ApiException $e) {
 					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
 				}

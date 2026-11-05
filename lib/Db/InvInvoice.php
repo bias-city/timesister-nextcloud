@@ -22,12 +22,18 @@ use OCP\DB\Types;
  * @method void setNumber(string $number)
  * @method string getStatus()
  * @method void setStatus(string $status)
- * @method string getProject()
- * @method void setProject(string $project)
- * @method string getBudget()
- * @method void setBudget(string $budget)
+ * @method string|null getProject()
+ * @method void setProject(?string $project)
+ * @method string|null getBudget()
+ * @method void setBudget(?string $budget)
  * @method string|null getCustomer()
  * @method void setCustomer(?string $customer)
+ * @method int|null getPaymentDays()
+ * @method void setPaymentDays(?int $paymentDays)
+ * @method string|null getKind()
+ * @method void setKind(?string $kind)
+ * @method string|null getCompanion()
+ * @method void setCompanion(?string $companion)
  * @method string getPeriodFrom()
  * @method void setPeriodFrom(string $periodFrom)
  * @method string getPeriodTo()
@@ -138,9 +144,13 @@ final class InvInvoice extends Entity {
 	protected string $number = '';
 	// Defaults differ from every stored value: the mapper inserts only fields that changed.
 	protected string $status = '';
-	protected string $project = '';
-	protected string $budget = '';
+	// 0.38.0: project and budget optional (null = without); the payment term, the kind and the companion invoice.
+	protected ?string $project = null;
+	protected ?string $budget = null;
 	protected ?string $customer = null;
+	protected ?int $paymentDays = null;
+	protected ?string $kind = null;
+	protected ?string $companion = null;
 	protected string $periodFrom = '';
 	protected string $periodTo = '';
 	protected string $currency = '';
@@ -202,6 +212,9 @@ final class InvInvoice extends Entity {
 		$this->addType('project', Types::STRING);
 		$this->addType('budget', Types::STRING);
 		$this->addType('customer', Types::STRING);
+		$this->addType('paymentDays', Types::INTEGER);
+		$this->addType('kind', Types::STRING);
+		$this->addType('companion', Types::STRING);
 		$this->addType('periodFrom', Types::STRING);
 		$this->addType('periodTo', Types::STRING);
 		$this->addType('currency', Types::STRING);

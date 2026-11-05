@@ -9,6 +9,7 @@ namespace OCA\TimeSister\Service;
 use OCA\TimeSister\Db\Entry;
 use OCA\TimeSister\Db\EntryMapper;
 use OCA\TimeSister\Db\InvHourMapper;
+use OCA\TimeSister\Db\Record;
 use OCA\TimeSister\Db\Tenant;
 use OCA\TimeSister\Db\TenantMapper;
 use OCA\TimeSister\Db\TimeCalendar;
@@ -340,10 +341,23 @@ final class EntryService {
 			}
 		}
 		$texts = $ids === [] ? [] : $this->entries->icsByIds($ids);
+		// 0.38.0: the invoice of each live entry, from the team's invoice records (read once, only when needed).
+		$invoices = $ids === [] ? [] : EntryInvoices::index(array_map(
+			static fn (Record $r): array => [$r->getRkey(), InvoiceRules::decode($r->getData())],
+			$this->records->findLiveByKind($m->tenantId, InvoiceRules::KIND)));
+		$ledKeys = [];
+		if ($invoices !== [] && $m->role === Role::LEAD) {
+			foreach ($this->team->leadOf($m->tenantId, $m->uid) as $p) {
+				$ledKeys[$p['key']] = true;
+			}
+		}
 		$out = [];
 		foreach ($page['entries'] as $e) {
 			$e->setIcs($texts[$e->getId()] ?? '');
-			$out[] = $e->present();
+			$row = $e->present();
+			$row['invoice'] = $e->getDeleted() === 1 ? null
+				: EntryInvoices::shown($invoices[EntryInvoices::id($e->getUid(), $e->getEventUid())] ?? null, $m->manages(), $ledKeys);
+			$out[] = $row;
 		}
 		// Two entries never share a revision, so a cut page continues cleanly with the highest one delivered.
 		return ['revision' => $this->tenants->entriesRevision($m->tenantId), 'entries' => $out, 'more' => $page['more']];

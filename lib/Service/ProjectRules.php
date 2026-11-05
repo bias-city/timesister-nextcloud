@@ -39,6 +39,9 @@ final class ProjectRules {
 	public const WP_TAG_MAX = 60;
 	/** 0.25.1: the planned invoices as `{date, share?, amount?, title?}` beside `invoice_dates`. */
 	public const BILLING_PLAN = 'billing_plan';
+	/** 0.39.0: how the invoice plan bills – `hours` (default) or `advance` (advances in percent, the last date the final invoice). */
+	public const PLAN_KIND = 'plan_kind';
+	public const PLAN_KINDS = ['hours', 'advance'];
 	public const BILLING_PLAN_MAX = 200;
 	public const BILLING_PLAN_KEYS = ['date', 'share', 'amount', 'title'];
 	public const BILLING_TITLE_MAX = 200;
@@ -234,6 +237,11 @@ final class ProjectRules {
 			}
 		}
 		self::checkBillingPlan($b->{self::BILLING_PLAN} ?? null);
+		// 0.39.0: the plan's kind – by hours or advances in percent; only the values.
+		$kind = $b->{self::PLAN_KIND} ?? null;
+		if ($kind !== null && !in_array($kind, self::PLAN_KINDS, true)) {
+			throw ApiException::invalid(Message::of('“{field}” must be one of {values}.', ['field' => self::PLAN_KIND, 'values' => implode(', ', self::PLAN_KINDS)]))->field(self::PLAN_KIND);
+		}
 		// 0.21.0: the cost positions beside the work packages (module «costs»).
 		CostRules::check($b->{CostRules::FIELD} ?? null);
 		self::checkAddenda($b);

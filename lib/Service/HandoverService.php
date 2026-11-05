@@ -72,7 +72,7 @@ final class HandoverService {
 		}
 		$h = $this->drafts->head($tid, $key);
 		$d = $h['d'];
-		[$bookings, , $receipts] = $this->drafts->billables($tid, $key, $d, $h['projectKey']);
+		[$bookings, , $receipts] = $this->drafts->billables($tid, $key, $d, $h['projectKey'], $h['customerKey']);
 
 		$marks = [];
 		foreach ($bookings as $b) {
@@ -80,7 +80,7 @@ final class HandoverService {
 		}
 		// The team lock first, as in IssueService.
 		$top = $this->tenants->bumpRevision($tid, 1 + count($marks) + count($receipts));
-		$payload = HandoverRules::payload($key, $v, $h['projectKey'], (string)$d->budget, $h['customerKey'], $h['currency'], $bookings, array_keys($receipts));
+		$payload = HandoverRules::payload($key, $v, $h['projectKey'] === '' ? null : $h['projectKey'], $h['budgetId'], $h['customerKey'], $h['currency'], $bookings, array_keys($receipts));
 		$entry = $this->appender->append($tid, $m->uid, LedgerRules::EXTERNAL_ISSUED, 0, $v['number'], LedgerRules::canonical($payload), $now);
 
 		$ops = [];
@@ -93,6 +93,8 @@ final class HandoverService {
 		$d->status = HandoverRules::STATUS;
 		$d->number = null;
 		$d->issued_on = $v['issued_on'];
+		// 0.38.0: the customer handed over stays on the record.
+		$d->customer = $h['customerKey'];
 		$d->{ExportRules::EXTERNAL_FIELD} = HandoverRules::externalBlock($v, $entry->getAt(), $m->uid);
 		$ops[] = $this->invoiceOp($key, $h['record'], $d);
 		$written = $this->recordService->applyWithin($m, $ops, false, $top, true);

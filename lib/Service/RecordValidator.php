@@ -119,6 +119,10 @@ final class RecordValidator {
 		if ($kind === 'setting' && $key === 'settings' && property_exists($data, ExchangeRateRules::SETTING)) {
 			ExchangeRateRules::validateSetting($data->{ExchangeRateRules::SETTING});
 		}
+		// 0.39.0: the invoice rules, so far `expenses_separate`; only the form.
+		if ($kind === 'setting' && $key === 'settings' && property_exists($data, AdvanceRules::SETTING)) {
+			AdvanceRules::validateSetting($data->{AdvanceRules::SETTING});
+		}
 		if ($kind === 'person') {
 			if (!isset($data->login) || !is_string($data->login) || $data->login !== $key) {
 				throw ApiException::invalid('For a person, “login” must equal the key.');

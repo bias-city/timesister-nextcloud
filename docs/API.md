@@ -26,7 +26,7 @@ deviates from it changes this file first. Plan and rationale: `PLAN-NC-APP.md`.
   to the place that resolves it.
 - Times as ISO 8601 in UTC (`2026-09-26T08:15:00Z`), days as `YYYY-MM-DD`.
 
-## Error codes (0.31.0, extended 0.32.0 and 0.33.0)
+## Error codes (0.31.0, extended 0.32.0, 0.33.0, 0.38.0 and 0.39.0)
 
 `data = { "error", "message", "code"?, "field"?, … }`. `error` stays the
 coarse class (`no_team`, `ambiguous_team`, `forbidden`, `not_found`,
@@ -75,8 +75,17 @@ as *retired*. Message wording may change at any time.
 | `no_currency` | 422 invalid | the team has no currency (`field: currency`); reserved – the server falls back to CHF, the Mac app raises it locally |
 | `no_issuer` | 422 invalid | the team has no invoice issuer (`field: issuer`) |
 | `invoice_issued` | 409 issued | an issued invoice does not change; reverse it |
-| `invoice_not_draft` | 409 conflict (hand-over), 422 invalid (issue) | the action needs a draft without a number |
-| `invoice_no_budget` | 422 invalid | every invoice belongs to a budget (`field: budget`) |
+| `invoice_not_draft` | 409 conflict (hand-over), 422 invalid (issue) | the action needs a draft without a number; since 0.38.0 also a client write that takes a `planned` invoice anywhere but to `draft` (422, `field: status`) |
+| `invoice_no_budget` | 422 invalid | *retired since 0.38.0* (an invoice needs no budget any more); was: every invoice belongs to a budget (`field: budget`) |
+| `invoice_no_customer` | 422 invalid | since 0.38.0: issuing or handing over needs a customer – the invoice's `customer`, else the accepted quote of its budget, else its project's customer (`field: customer`) |
+| `invoice_budget_without_project` | 422 invalid | since 0.38.0: a `budget` needs a `project` – on the record and in `POST …/assign` (`field: budget`) |
+| `invoice_not_planned` | 422 invalid | since 0.38.0: an invoice that is not `planned` (any more) does not become `planned` (`field: status`) |
+| `advance_position_count` | 422 invalid | since 0.39.0: an invoice `kind: advance` has exactly one `advance` line, no `hours` line and no bookings (`field: positions`) |
+| `advance_unknown` | 422 invalid | since 0.39.0: an `advance_deduction` names no issued or paid advance invoice of the same budget (project, customer) (`field: positions`) |
+| `advance_deducted_twice` | 422 invalid | since 0.39.0: the advance is deducted twice on the invoice or already on another living invoice (`field: positions`) |
+| `advance_amount` | 422 invalid | since 0.39.0: a deduction is not the advance's amount negated (`field: positions`) |
+| `companion_unknown` | 422 invalid | since 0.39.0: an invoice `kind: expenses` names no invoice of the same customer (draft to paid) in `companion` (`field: companion`) |
+| `invoice_not_fixed` | 409 conflict | since 0.38.0: `POST /invoices/{key}/assign` needs an `issued`, `paid` or `external` invoice; a draft or a planned invoice changes its budget by a record write |
 | `invoice_handed_over` | 409 conflict | the invoice is handed over to an external system; revoke the hand-over first |
 | `invoice_not_handed_over` | 409 conflict | revoking, the system's PDF and the cancelled mark need a handed-over invoice |
 | `invoice_lead_only` | 403 forbidden | only Team Admins and the project's Leads write invoices |
@@ -1995,10 +2004,11 @@ not compute amounts.
 | Field | Rule |
 |---|---|
 | `schema` | optional integer 1–1000 |
-| `project` | required, a project key (record key pattern); the rights hang on it |
-| `budget` | **required**, the budget's id, 1–128 characters: every invoice belongs to a budget. Missing, `null`, empty or blank: `422` ““budget” is required: every invoice belongs to a budget.” |
-| `from`, `to` | required days `YYYY-MM-DD`, `from` ≤ `to` |
-| `status` | required: `draft`, `issued`, `paid` or `cancelled` |
+| `project` | a project key (record key pattern); the rights hang on it. **Since 0.38.0 optional:** missing, `null` or `""` = without a project (stored as `null`; Team Admins only) |
+| `budget` | the budget's id, 1–128 characters. Until 0.37.0 required (`422 invoice_no_budget`); **since 0.38.0 optional:** missing, `null`, `""` or blank = without a budget (stored as `null`); a budget without `project` is `422 invoice_budget_without_project` |
+| `customer`, `payment_days`, `kind`, `companion`, `plan` | since 0.38.0, see «Invoices without a budget, 0.38.0» |
+| `from`, `to` | days `YYYY-MM-DD`, `from` ≤ `to`; required until 0.37.0, **optional since 0.38.0** (each `null` or missing; when both are there `from` ≤ `to`) |
+| `status` | required: `draft`, `issued`, `paid` or `cancelled` (later `issuing`, `external`; since 0.38.0 `planned`) |
 | `number` | `null` or text of 1–64 characters (no empty string), no control characters |
 | `bookings` | required list, at most **5000** (may be empty) |
 | `bookings[].person` | required, 1–64 characters: the account whose event it is |
@@ -2566,7 +2576,8 @@ revision is not an error: `entries` is empty, `more` false.
 Answer `{ "revision": <current>, "entries": [ … ], "more": bool }`, entries
 in `revision` order, each
 `{ "uid", "source", "event_uid", "object_uri", "etag", "ics", "codes": [ … ], "cancelled", "kept", "deleted", "revision", "modified_at" }`
-(`ics` empty on a tombstone). Clients remember the highest `revision`
+(`ics` empty on a tombstone); since 0.38.0 also `"invoice": { "key", "number", "status" } | null`
+(see «Invoices without a budget, 0.38.0»). Clients remember the highest `revision`
 they applied and ask with it next time; with `more` they ask again at
 once. The filter is applied when reading: a Lead whose projects change
 (`/me.lead_of` differs from last time) starts over with `since=0` and
@@ -2728,8 +2739,9 @@ write: `409 issued` “An issued invoice does not change; reverse it.”
 `POST /invoices/{key}/issue` – Team Admins, body `{ "issued_on"?: "YYYY-MM-DD", "due_days"?: 1–365 }`
 (default: today, 30). One transaction:
 
-1. The draft must exist, be `draft` without `number`, have a `budget`, at
-   least one position or booking, and a resolvable customer
+1. The draft must exist, be `draft` without `number`, have a `budget`
+   (until 0.37.0; optional since 0.38.0), at least one position or booking,
+   and a resolvable customer
    (`project.customer`, a `customer` record). Otherwise `422 invalid`
    naming what is missing.
 2. Every booking must be in the book (`ts_entries`, `uid` + `event_uid`,
@@ -5333,7 +5345,7 @@ and in the history. No new capability. Fields, all optional:
              { "id": "c-3", "name": "AHV", "amount": 0, "due_day": 10, "rhythm": "monthly",
                "from": "2026-01-01", "kind": "social", "percent": 10.5 } ],
   "balances": [ { "date": "2026-10-20", "amount": 248000, "note": "Bank and cash" } ],
-  "reserve": 150000 }
+  "reserve": 150000, "credit_limit": 50000 }
 ```
 
 | Field | Rule |
@@ -5341,6 +5353,7 @@ and in the history. No new capability. Fields, all optional:
 | `costs[]` | a list of at most 200 objects; `name` text 1–120, `amount` number ≥ 0, `due_day` integer 1–31 (default 1), `rhythm` one of `monthly`, `quarterly`, `half_yearly`, `yearly`, `once`, `from` a day `YYYY-MM-DD`, `to` null or a day on or after `from`, `kind` one of `rent`, `insurance`, `licenses`, `salaries`, `social`, `vat`, `other`, `note` null or text ≤ 500, `id` null or text ≤ 64 (the client assigns it), `month13` null or 1–12 (salaries: the month of the 13th salary), `percent` null or 0–100 (social: of the month's salaries; vat: of the invoices issued in the preceding period – set, it replaces `amount`) |
 | `balances[]` | a list of at most 500 `{ "date": "YYYY-MM-DD", "amount": number, "note"?: ≤ 500 }` – a history; the client keeps one per day and takes the latest up to its reference date |
 | `reserve` | null or a number ≥ 0 |
+| `credit_limit` | since 0.35.0 (`credit_limit: 1`): null or a number ≥ 0 – the overdraft the bank grants; the Mac app treats a liquidity down to minus this limit as covered |
 
 Unknown fields `422 invalid`. The server stores, it does not compute: the
 forecast (fixed costs by rhythm, 13th salary, VAT estimate, liquidity) is
@@ -5679,8 +5692,9 @@ Body as in 0.18.0: `{ "issued_on"?: "YYYY-MM-DD", "due_days"?: 1–365 }`
 (default today, 30). One transaction:
 
 1. The checks of 0.18.0 steps 1–2 unchanged: a `draft` without `number`
-   (`invoice_not_draft`), a `budget` (`invoice_no_budget`), at least one
-   position or booking, a resolvable customer, an issuer (`no_issuer`),
+   (`invoice_not_draft`), a `budget` (`invoice_no_budget`; optional since
+   0.38.0), at least one position or booking, a resolvable customer
+   (`invoice_no_customer` since 0.38.0), an issuer (`no_issuer`),
    every booking in the book and not billed by another invoice
    (`booking_billed`); the mode (`invoice_issue_external`).
 2. **One issue at a time per team.** Another invoice of the team is
@@ -6096,6 +6110,274 @@ mismatch search), `QuoteRules` (`texts`, `attachments`, the frozen
 (reserve, close, cancel, expiry; `LedgerAppender::appendReserved`),
 `DocumentService` (filing, serving, `verify?files`), `QuoteIssueService`,
 `QuoteDocumentService` (three kinds), the job `IssueExpiry`.
+
+## Advances, companions and receipts by customer, 0.39.0 (2026-11-05) – `advance_rules: 1`, `expenses_separate: 1`, `receipts_by_customer: 1`
+
+PLAN-RECHNUNGEN §7.4 (R5, advance plan) and §7.5 (R6, third-party costs
+apart). `api: 2` stays; no migration. The server checks and stores; the
+client plans the advances and splits the receipts off into an invoice of
+their own.
+
+### Budget: `plan_kind`
+
+| Field | Rule |
+|---|---|
+| `plan_kind` | **new** on a budget (in a project and in a quote), optional: `null`/missing (= `hours`), `hours` (the invoice plan bills the hours) or `advance` (each date an advance in percent, the last one the final invoice). Anything else: `422` ““plan_kind” must be one of hours, advance.” (`field: plan_kind`). Only the value list – the shares in `billing_plan` are not summed |
+
+A budget already accepted fields the server does not know; `plan_kind` is
+now checked.
+
+### Issuing: advances and their deductions
+
+Checked when a draft is issued (`POST /invoices/{key}/issue`), after the
+bookings and receipts, in this order:
+
+1. **`kind: advance`**: exactly one `advance` line, no `hours` line and no
+   bookings; else `422 advance_position_count` (`field: positions`). Other
+   lines (a text, a discount) may stand beside it.
+2. **Every `advance_deduction` line** (its `invoice` names the advance
+   invoice's key), in the order of the lines:
+   - the named invoice is **issued or paid**, has an `advance` line, is no
+     reversal or credit note, and belongs to the **same budget** (with a
+     budget on the invoice: same `project` and `budget`; without a budget:
+     same `project`; without a project: same `customer`) – else
+     `422 advance_unknown` (also for a missing invoice or the invoice itself);
+   - it is **deducted once**: not twice on this invoice and not on another
+     living invoice (`draft`, `issuing`, `issued`, `paid`, `external`; a
+     reversal or credit note deducts nothing, a `cancelled` one released it)
+     – else `422 advance_deducted_twice`;
+   - its **amount** is the negated sum of the advance invoice's `advance`
+     lines, within a cent – else `422 advance_amount` (the message names the
+     amount).
+3. **`kind: expenses`**: `companion` names another invoice of the **same
+   customer** (resolved as when issuing: its `customer`, the quote of its
+   budget, its project's) in `draft`, `issuing`, `issued` or `paid` – else
+   `422 companion_unknown` (`field: companion`), also when `companion` is
+   missing.
+
+The three deduction errors and `advance_position_count` carry
+`field: positions`; the message starts with “Position {n}: ” for a line.
+Hand-over (`invoice_handover`) does not run these checks.
+
+### The ledger: `companion`
+
+The payload of `issued` (and of a reversal or credit note, which take the
+original's `companion`) holds **`companion`** when the invoice names one;
+without one the key is missing, so older entries keep their exact payload.
+
+### Receipts by customer (`receipts_by_customer: 1`)
+
+A receipt on a `costs` line (`receipts`) must be `approved`, not billed by
+another invoice and meant for the invoice, as before. Where it belongs:
+
+| Invoice | Receipt | Fits when |
+|---|---|---|
+| with a budget | with a cost position (`cost`) | its `project`, `budget` and `cost` are the invoice's and the line's, as before – else `422` “…belongs to another project, budget or cost position.”; the line then needs `cost` (“A line with receipts of a cost position needs “cost”.”) |
+| with a budget | without a cost position | its project is the invoice's, or that project's `customer` is the invoice's customer |
+| without a budget | any | likewise: the same project, or a project of the invoice's customer |
+
+Otherwise `422` “Position {n}: The receipt {key} belongs to another
+customer.” A receipt without a project (a general cost) fits no invoice. The
+invoice's customer is resolved as when issuing (its `customer`, the quote of
+its budget, its project's). `cost` on a `costs` line and on a `markup` is
+optional now: a markup without `cost` is the percentage of the charged
+receipt lines without `cost` (“A markup needs “cost”.” is gone).
+
+### Team rule: `invoicing.expenses_separate`
+
+In the settings record (`setting/settings`, written by Team Admins like the
+issuer or the VAT):
+
+```json
+{ "invoicing": { "expenses_separate": true } }
+```
+
+`invoicing` is `null` or an object (`422` ““invoicing” must be null or an
+object.”), `expenses_separate` `null`/missing (= `true`) or a boolean
+(`422` ““invoicing.expenses_separate” must be true or false.”). Other members
+of `invoicing` are kept as sent. On, the client issues the receipts of an
+invoice as a second invoice `kind: expenses` with `companion` = the main
+invoice (and the main invoice's `companion` = the expenses invoice); the
+server only checks the form. Not the same as the team setting `invoicing`
+(`PUT /team/settings`, a boolean: issuing on the server).
+
+### Capability
+
+```json
+"timesister": { …, "advance_rules": 1, "expenses_separate": 1, "receipts_by_customer": 1 }
+```
+
+`advance_rules: 1`: the advance and companion checks, `companion` in the
+payload, `plan_kind`. `expenses_separate: 1`: the settings member.
+`receipts_by_customer: 1`: receipts by customer, `cost` optional.
+
+### Classes
+
+Pure: `AdvanceRules` (`checkKind`, `checkDeductions`, `checkCompanion`,
+`validateSetting`, `expensesSeparate`), `ReceiptLineRules::check` (the
+customer and a project's customer), `ProjectRules::checkBudget`
+(`plan_kind`), `IssueRules::payload` (`companion`). Service:
+`DraftResolver` (`requireLinks`, `customerKeyOf`).
+
+## Invoices without a budget, 0.38.0 (2026-11-05) – `invoices_free: 1`, `invoice_plan_records: 1`, `entry_invoice: 1`
+
+PLAN-RECHNUNGEN §7.1. **The invoice is the record; project and budget are
+connections it may have.** An invoice needs neither a project nor a budget;
+it names its own customer, payment term and kind. A budget is an assignment
+for controlling: it leaves the fixed content (the ledger payload of an
+issue) and changes, also after issuing, through `POST /invoices/{key}/assign`.
+The status `planned` is the container of an invoice plan. `GET /entries`
+names each entry's invoice. `api: 2` stays; invoices with a budget behave as
+before (the currency chain aside, below). The server checks and stores; it
+computes no amounts.
+
+**Empty means «without»:** `null` and `""` (and a blank string) are the same for
+`project`, `budget`, `customer` and `companion` – stored as `null`.
+
+### The record (`invoice`), changed and new fields
+
+| Field | Rule |
+|---|---|
+| `project` | optional: a project key, or `null`/`""` = without a project. Rights without a project: Team Admins only – a Lead neither reads nor writes such an invoice (`403 invoice_lead_only`). A given value that is not a key: `422` ““project” must be the key of a project.” (`field: project`) |
+| `budget` | optional: the budget's id (1–128 characters), or `null`/`""`/blank = without. A budget without a `project`: `422 invoice_budget_without_project` (`field: budget`). `invoice_no_budget` is retired |
+| `customer` | **new**, optional in a draft: `null` or a customer key (`422` ““customer” must be null or the key of a customer.”). **Required when issuing and handing over**, resolved as: `customer` → the customer of the accepted quote of the budget → `project.customer`; none: `422 invoice_no_customer` (`field: customer`). Issue and hand-over write the resolved key into the record |
+| `currency` | as 0.36.0, but the invoice's own `currency` comes **first**: `invoice.currency`, the budget's, the project's, the team's (`settings.currency`), else CHF (0.36.0: budget before invoice) |
+| `payment_days` | **new**, optional: `null` or an integer 0–365. When issuing: `due_on` = `issued_on` + the request's `due_days`, else `payment_days`, else the customer's `payment_days`, else 30 |
+| `kind` | **new**, optional: `null` or one of `hours` (the default when missing), `flat`, `advance`, `final`, `expenses` – a value list only, no rule hangs on it yet (`422` ““kind” must be one of …”) |
+| `from`, `to` | **optional**: each `null`, missing or a day; when both are there `from` ≤ `to`. When issuing a missing day is filled: `from` = the earliest day of the bookings (and `to`, if given), `to` = the latest (and `from`, if given), without bookings the issue day; the record then holds the period that was fixed |
+| `status` | new value `planned` (below) beside `draft`, `issuing`, `issued`, `paid`, `cancelled`, `external` |
+| `plan` | **new**, only with `status: "planned"` – on any other status `422` “Only a planned invoice has a “plan”.” (`field: plan`) |
+| `companion` | **new**, optional: `null` or the key of another invoice (the expenses invoice to …, PLAN-RECHNUNGEN R6); only its form is checked |
+
+### Planned invoices (`invoice_plan_records: 1`)
+
+`status: "planned"` is the container of an invoice plan: no `number`
+(`422`, `field: number`), `bookings` an empty list (`422`, `field: bookings`)
+and a `plan`:
+
+```json
+{ "schema": 1, "project": "d200", "budget": "b1", "customer": "k-muster", "status": "planned", "number": null, "bookings": [],
+  "plan": { "target_amount": 12000, "share": null, "due": "2026-12-31", "codes": ["D200.31"], "until": "2026-12-15", "only_recorded": true } }
+```
+
+| `plan.` | Rule |
+|---|---|
+| `target_amount` | `null` or a number ≥ 0 – the target in the invoice's currency |
+| `share` | `null` or a percentage 0–100 of the budget's volume |
+| | at least one of `target_amount` and `share`; otherwise `422` “A plan names its target: “target_amount” or “share”.” |
+| `due` | required day `YYYY-MM-DD` |
+| `codes` | optional list of at most 100 codes (1–64 characters): what the container collects |
+| `until` | `null` or a day: collect bookings up to that day |
+| `only_recorded` | boolean, default `true` |
+
+Every plan error is `422` with `field: plan` (`plan.only_recorded` for a
+non-boolean); the stored plan holds exactly these six members. **Transitions
+by a record write:** `planned` → `draft` («Stellen») and `planned` →
+`planned`; an invoice that is not `planned` never becomes `planned`
+(`422 invoice_not_planned`, `field: status`); a `planned` invoice goes
+nowhere but `draft` (`422 invoice_not_draft`, `field: status`). `planned` is
+never issued or handed over (`issue`: `422 invoice_not_draft`). A Lead
+writes planned invoices of the projects they lead like drafts (no number).
+
+### Issuing and handing over
+
+- No budget needed: `requireIssuable` checks status, number and something
+  to bill. Levels and fee model (`no_levels`, `level_rate_missing`) are
+  checked only with a budget; without one the rate of each booking and line
+  stands as sent.
+- The customer, the currency, the payment term and the period as in the
+  table above; issue and hand-over write `customer` (and the issue `from`,
+  `to`) into the record.
+- `ts_inv_invoices`: `project` and `budget` may be `NULL`, `customer` is
+  set, new `payment_days`, `kind`, `companion` (from the record). `GET
+  /invoices/{key}/fixed` and the team ZIP carry `payment_days`, `kind`,
+  `companion`; `project` and `budget` may be `null`, `budget` follows
+  `assign`. A reversal or credit note takes `kind` and `companion` of the
+  original.
+- Receipts on a `costs` line still have to match project, budget and cost
+  position (since 0.39.0 by customer, «Advances, companions and receipts by
+  customer»).
+- Number pattern: `{project}` is empty without a project.
+
+### The ledger: an issue without `budget`, the action `assign`
+
+The payload of `issued`, `reversal` and `credit` no longer holds `budget`
+(the hash chain covers positions, amounts, customer and project; `project`
+is `null` without one). Entries before 0.38.0 keep their payload – the chain
+checks the stored text. The payload of `external_issued` keeps `project` and
+`budget`, both `null` when absent. New action **`assign`**:
+
+```json
+{ "key": "inv-1a2b3c4d", "number": "RE-2026-0012", "budget_before": "b1", "budget": "b2" }
+```
+
+`invoice` is the row's id (0 for a handed-over or a hand-set invoice without
+a row), `number` the invoice's number (a handed-over one: the accounting
+system's). `assign` fires no webhook.
+
+### `POST /invoices/{key}/assign`
+
+Body `{ "budget": "<id>" | null }` – `null` or `""` releases the budget.
+Team Admins and the Leads of the invoice's project (none without a project:
+`403 invoice_lead_only`); independent of the team setting `invoicing`. In
+one transaction: the record's `budget`, `ts_inv_invoices.budget` (when the
+invoice has a row) and the ledger entry `assign`.
+
+| Case | Answer |
+|---|---|
+| status `issued`, `paid` or `external` | `200 { "record": …, "ledger": { "seq", "prev_hash", "hash" } }` |
+| the same budget again | `200 { "record": …, "ledger": null }` – no entry |
+| `draft`, `planned`, `issuing`, `cancelled` | `409 invoice_not_fixed` – a draft or planned invoice changes its budget by a record write |
+| `budget` missing in the body | `422` (`field: budget`); longer than 128 characters: `422` |
+| a budget and the invoice has no project | `422 invoice_budget_without_project` |
+| the budget is not in the project | `422` “The invoice’s budget is not in the project.” (`field: budget`) |
+| an issue of the team is pending | `409 issue_pending` (the ledger is closed) |
+| no such invoice | `404` for Team Admins, `403 invoice_lead_only` for others |
+
+Rate limit 60 per minute; brute-force protection like every write.
+
+### Entries name their invoice (`entry_invoice: 1`)
+
+`GET /entries` gives every live entry `"invoice": { "key", "number", "status" } | null`
+– the living invoice (`draft`, `issuing`, `issued`, `paid`, `external`)
+whose `bookings` hold an occurrence of the entry's event (`bookings[].person`
+= the entry's `uid`, `bookings[].uid` = `event_uid`). A billed one wins over a
+draft; of several the first. `number` is `null` for a draft, the
+accounting system's for `external`. Tombstones carry `null`. Who sees what:
+Team Admins every invoice; others a billed one (as its billing mark tells
+already) and a draft of a project they lead – else `null`. `billed` stays
+derived as before (an issued, paid or handed-over invoice, or a hand mark).
+The field is the state when read: an invoice write gives the entry no new
+`revision` – a client keeping a delta follows the invoice records (their
+`bookings`) as before.
+
+### Stored
+
+Migration `Version1026Date20261105120000`: `ts_inv_invoices.project` and
+`.budget` nullable; new `payment_days` (SMALLINT), `kind` (16), `companion`
+(128), all nullable. Nothing dropped, no row changed.
+
+### Capability
+
+```json
+"timesister": { …, "invoices_free": 1, "invoice_plan_records": 1, "entry_invoice": 1 }
+```
+
+`invoices_free: 1`: optional `project`/`budget`, `customer`, `payment_days`,
+`kind`, `companion`, the customer required when issuing, the issue payload
+without `budget`, `assign`. `invoice_plan_records: 1`: `planned` and `plan`.
+`entry_invoice: 1`: `invoice` on entries. A client without these keeps
+sending invoices with project and budget; they work as before.
+
+### Classes
+
+Pure: `InvoiceRules` (the optional keys, `checkPlanned`, `checkPlan`,
+`checkTransition`, `assignedBudget`, `requireAssign`, `assignPayload`),
+`IssueRules` (`customerOf`, `noCustomer`, `periodOf`, the payload without
+budget), `EntryInvoices` (the index and what a reader sees). Services:
+`InvoiceAssignService` (`assign`), `DraftResolver::head` (project and
+budget optional), `RecordService` (the transition; the server's own invoice
+writes check their rights themselves), `EntryService::page`.
 
 ## Rule receipts, 0.37.0 (2026-11-04) – a recurring receipt is deleted by the writer of its rule (`rule_receipts: 1`)
 

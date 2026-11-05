@@ -15,7 +15,7 @@ use OCA\TimeSister\Db\RecordMapper;
 
 /**
  * Reads everything an invoice draft needs to be issued (0.18.0) – the
- * project, the budget and its currency, the customer, the settings'
+ * project, the budget and its currency (both optional since 0.38.0), the customer, the settings'
  * issuer and VAT, the bookings in the book and not billed elsewhere, the
  * positions and the sums – and names what is missing (422/409). Shared by
  * issuing and by the preview (0.19.0), which runs the same checks without
@@ -48,14 +48,17 @@ final class DraftResolver {
 
 	/**
 	 * The draft with everything resolved; throws what issuing would throw.
+	 * Since 0.38.0 `project` and `budget` may be null (`projectKey` then "").
 	 *
-	 * @return array{record:Record,d:\stdClass,project:\stdClass,projectKey:string,budget:\stdClass,currency:string,customerKey:string,customer:\stdClass,customerBlock:\stdClass,settings:?\stdClass,issuer:\stdClass,vat:float,bookings:list<\stdClass>,positions:list<\stdClass>,sums:VatLines,hours:list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string,level:?string}>,receipts:array<string,\stdClass>}
+	 * @return array{record:Record,d:\stdClass,project:?\stdClass,projectKey:string,budget:?\stdClass,budgetId:?string,currency:string,customerKey:string,customer:\stdClass,customerBlock:\stdClass,settings:?\stdClass,issuer:\stdClass,vat:float,bookings:list<\stdClass>,positions:list<\stdClass>,sums:VatLines,hours:list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string,level:?string}>,receipts:array<string,\stdClass>}
 	 */
 	public function resolve(int $tenantId, string $key): array {
 		$h = $this->head($tenantId, $key);
 		$settings = $this->live($tenantId, 'setting', 'settings');
 		$issuer = IssueRules::issuerOf($settings) ?? throw ApiException::invalid('The team has no invoice issuer; set “issuer” in the settings first.')->code(ErrorCode::NO_ISSUER)->field('issuer');
-		[$bookings, $positions, $receipts] = $this->billables($tenantId, $key, $h['d'], $h['projectKey']);
+		[$bookings, $positions, $receipts] = $this->billables($tenantId, $key, $h['d'], $h['projectKey'], $h['customerKey']);
+		// 0.39.0: advances and their deductions, the expenses invoice's main invoice.
+		$this->requireLinks($tenantId, $key, $h['d'], $positions, count($bookings), $h['projectKey'], $h['budgetId'], $h['customerKey']);
 		$positions = ReceiptLineRules::prepare($positions, $receipts);
 		$cur = $h['record'];
 		$d = $h['d'];
@@ -79,6 +82,7 @@ final class DraftResolver {
 			'project' => $project,
 			'projectKey' => $projectKey,
 			'budget' => $budget,
+			'budgetId' => $h['budgetId'],
 			'currency' => $currency,
 			'customerKey' => $customerKey,
 			'customer' => $customer,
@@ -97,25 +101,88 @@ final class DraftResolver {
 	/**
 	 * The draft's record, project, budget, currency and customer, as
 	 * issuing needs them (422 naming what is missing); shared with the
-	 * hand-over (0.24.0).
+	 * hand-over (0.24.0). Since 0.38.0 project and budget are optional and
+	 * the customer is the invoice's own, else the budget's quote's, else the
+	 * project's – none is `422 invoice_no_customer`.
 	 *
-	 * @return array{record:Record,d:\stdClass,project:\stdClass,projectKey:string,budget:\stdClass,currency:string,customerKey:string,customer:\stdClass}
+	 * @return array{record:Record,d:\stdClass,project:?\stdClass,projectKey:string,budget:?\stdClass,budgetId:?string,currency:string,customerKey:string,customer:\stdClass}
 	 */
 	public function head(int $tenantId, string $key): array {
 		[$cur, $d] = $this->invoiceRecord($tenantId, $key);
 		IssueRules::requireIssuable($d);
-		$projectKey = (string)$d->project;
-		$project = $this->live($tenantId, 'project', $projectKey) ?? throw ApiException::invalid('The invoice’s project does not exist.');
-		$budget = IssueRules::budgetOf($project, (string)$d->budget) ?? throw ApiException::invalid('The invoice’s budget is not in the project.');
+		$projectKey = InvoiceRules::keyOf($d->project ?? null) ?? '';
+		$budgetId = InvoiceRules::keyOf($d->budget ?? null);
+		$project = null;
+		$budget = null;
+		if ($projectKey !== '') {
+			$project = $this->live($tenantId, 'project', $projectKey) ?? throw ApiException::invalid('The invoice’s project does not exist.');
+		}
+		if ($budgetId !== null) {
+			if ($project === null) {
+				throw ApiException::invalid('A budget belongs to a project: “budget” needs “project”.')->code(ErrorCode::INVOICE_BUDGET_WITHOUT_PROJECT)->field('budget');
+			}
+			$budget = IssueRules::budgetOf($project, $budgetId) ?? throw ApiException::invalid('The invoice’s budget is not in the project.');
+		}
 		$currency = IssueRules::currencyOf($budget, $d, $project, $this->live($tenantId, 'setting', 'settings'));
-		$quotes = array_values(array_filter(array_map(
-			static fn ($r) => InvoiceRules::decode($r->getData()),
-			$this->records->findLiveByKind($tenantId, 'quote'))));
-		$customerKey = IssueRules::customerKeyFor($project, $projectKey, (string)$d->budget, $quotes)
-			?? throw ApiException::invalid('Neither the quote of the budget nor the project names a customer.');
-		$customer = $this->live($tenantId, 'customer', $customerKey) ?? throw ApiException::invalid('The project’s customer does not exist.');
-		return ['record' => $cur, 'd' => $d, 'project' => $project, 'projectKey' => $projectKey, 'budget' => $budget,
+		$customerKey = IssueRules::customerOf($d, $project, $projectKey, $budgetId, $this->quotes($tenantId, $d, $budgetId)) ?? throw IssueRules::noCustomer();
+		$customer = $this->live($tenantId, 'customer', $customerKey) ?? throw ApiException::invalid('The invoice’s customer does not exist.')->field('customer');
+		return ['record' => $cur, 'd' => $d, 'project' => $project, 'projectKey' => $projectKey, 'budget' => $budget, 'budgetId' => $budgetId,
 			'currency' => $currency, 'customerKey' => $customerKey, 'customer' => $customer];
+	}
+
+	/**
+	 * The checks of 0.39.0 against the team's other invoices: an advance
+	 * invoice has one advance line and no hours; a deduction names an
+	 * issued advance of the same budget (project, customer) not deducted
+	 * elsewhere, by its amount; an expenses invoice names its main invoice
+	 * of the same customer in `companion`.
+	 *
+	 * @param list<\stdClass> $positions
+	 */
+	private function requireLinks(int $tenantId, string $key, \stdClass $d, array $positions, int $bookings, string $projectKey, ?string $budgetId, string $customerKey): void {
+		AdvanceRules::checkKind($d, $positions, $bookings);
+		$deducts = AdvanceRules::deducts($positions);
+		if (!$deducts && ($d->kind ?? null) !== AdvanceRules::EXPENSES) {
+			return;
+		}
+		$invoices = [];
+		foreach ($this->records->findLiveByKind($tenantId, InvoiceRules::KIND) as $r) {
+			$o = InvoiceRules::decode($r->getData());
+			if ($o !== null) {
+				$invoices[$r->getRkey()] = $o;
+			}
+		}
+		if ($deducts) {
+			AdvanceRules::checkDeductions($key, $positions, $projectKey === '' ? null : $projectKey, $budgetId, $customerKey, $invoices);
+		}
+		AdvanceRules::checkCompanion($key, $d, $customerKey, $invoices, fn (\stdClass $o): ?string => $this->customerKeyOf($tenantId, $o));
+	}
+
+	/** The customer key of an invoice record (its customer, the quote, the project), null when none names one. */
+	public function customerKeyOf(int $tenantId, \stdClass $d): ?string {
+		$projectKey = InvoiceRules::keyOf($d->project ?? null) ?? '';
+		$project = $projectKey === '' ? null : $this->live($tenantId, 'project', $projectKey);
+		$budgetId = InvoiceRules::keyOf($d->budget ?? null);
+		return IssueRules::customerOf($d, $project, $projectKey, $budgetId, $this->quotes($tenantId, $d, $budgetId));
+	}
+
+	/**
+	 * The team's live quotes, read only when the customer may come from the budget's quote.
+	 *
+	 * @return list<\stdClass>
+	 */
+	private function quotes(int $tenantId, \stdClass $d, ?string $budgetId): array {
+		if ($budgetId === null || InvoiceRules::keyOf($d->customer ?? null) !== null) {
+			return [];
+		}
+		$out = [];
+		foreach ($this->records->findLiveByKind($tenantId, 'quote') as $r) {
+			$q = InvoiceRules::decode($r->getData());
+			if ($q !== null) {
+				$out[] = $q;
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -124,7 +191,7 @@ final class DraftResolver {
 	 *
 	 * @return array{0:list<\stdClass>,1:list<\stdClass>,2:array<string,\stdClass>}
 	 */
-	public function billables(int $tenantId, string $key, \stdClass $d, string $projectKey): array {
+	public function billables(int $tenantId, string $key, \stdClass $d, string $projectKey, ?string $customerKey = null): array {
 		$bookings = IssueRules::bookingsOf($d);
 		$this->requireBillable($tenantId, $bookings);
 		$positions = IssueRules::positionsOf($d);
@@ -135,28 +202,17 @@ final class DraftResolver {
 				$receipts[$k] = $rd;
 			}
 		}
-		ReceiptLineRules::check($positions, $receipts, $projectKey, (string)$d->budget, $key,
-			fn (string $k): string => $this->invoices->findByKey($tenantId, $k)?->getNumber() ?? $this->externalNumber($tenantId, $k) ?? $k);
+		ReceiptLineRules::check($positions, $receipts, $projectKey, InvoiceRules::keyOf($d->budget ?? null) ?? '', $customerKey ?? $this->customerKeyOf($tenantId, $d), $key,
+			fn (string $k): string => $this->invoices->findByKey($tenantId, $k)?->getNumber() ?? $this->externalNumber($tenantId, $k) ?? $k,
+			fn (string $p): ?string => ($pd = $this->live($tenantId, 'project', $p)) === null ? null : IssueRules::customerKeyOf($pd));
 		return [$bookings, $positions, $receipts];
 	}
 
-	/** The customer's name of an invoice record (project, budget, quote), '' when it cannot be told (0.24.1, file names). */
+	/** The customer's name of an invoice record (its customer, the quote, the project), '' when it cannot be told (0.24.1, file names). */
 	public function customerName(int $tenantId, \stdClass $d): string {
-		try {
-			$projectKey = (string)($d->project ?? '');
-			$project = $this->live($tenantId, 'project', $projectKey);
-			if ($project === null) {
-				return '';
-			}
-			$quotes = array_values(array_filter(array_map(
-				static fn ($r) => InvoiceRules::decode($r->getData()),
-				$this->records->findLiveByKind($tenantId, 'quote'))));
-			$key = IssueRules::customerKeyFor($project, $projectKey, (string)($d->budget ?? ''), $quotes);
-			$name = $key === null ? null : ($this->live($tenantId, 'customer', $key)?->name ?? null);
-			return is_string($name) ? $name : '';
-		} catch (ApiException) {
-			return '';
-		}
+		$key = $this->customerKeyOf($tenantId, $d);
+		$name = $key === null ? null : ($this->live($tenantId, 'customer', $key)?->name ?? null);
+		return is_string($name) ? $name : '';
 	}
 
 	/** The accounting system's number of a handed-over invoice (0.24.0), else null. */

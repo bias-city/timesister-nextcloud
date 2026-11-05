@@ -28,17 +28,13 @@ final class IssueRules {
 	private const CUSTOMER_FIELDS = ['id', 'name', 'address_extra', 'street', 'postcode', 'city', 'country', 'email', 'phone', 'vat_id', 'leitweg_id', 'datev_account'];
 	private const CONTROL_TEXT = '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/';
 
-	/** The draft's fitness for issuing: a draft without number, with a budget and something to bill. */
+	/** The draft's fitness for issuing: a draft without number and something to bill; since 0.38.0 a budget is optional. */
 	public static function requireIssuable(\stdClass $d): void {
 		if (($d->status ?? null) !== InvoiceRules::DRAFT) {
 			throw ApiException::invalid('Only a draft can be issued.')->code(ErrorCode::INVOICE_NOT_DRAFT);
 		}
 		if (($d->number ?? null) !== null) {
 			throw ApiException::invalid('The draft already has a number.');
-		}
-		$budget = $d->budget ?? null;
-		if (!is_string($budget) || trim($budget) === '') {
-			throw ApiException::invalid('“budget” is required: every invoice belongs to a budget.')->code(ErrorCode::INVOICE_NO_BUDGET)->field('budget');
 		}
 		if (self::positionsOf($d) === [] && self::bookingsOf($d) === []) {
 			throw ApiException::invalid('The draft has neither positions nor bookings.');
@@ -55,10 +51,14 @@ final class IssueRules {
 	 * @throws ApiException 422 `no_levels`, `level_rate_missing`
 	 */
 	public static function requireLevels(\stdClass $d, ?\stdClass $settings, ?\stdClass $project, ?\stdClass $budget, string $currency, string $issuedOn): void {
+		// 0.38.0: levels and fee model only with a budget; without one the rate of each booking stands as sent.
+		if ($budget === null) {
+			return;
+		}
 		$positions = self::positionsOf($d);
 		$hours = self::bookingsOf($d) !== [] || array_filter($positions, static fn (\stdClass $p): bool => ($p->kind ?? null) === 'hours') !== [];
 		if ($hours && FeeModelRules::modelOf($budget) !== FeeModelRules::MEAN_RATE && !LevelRules::hasLevels($settings)) {
-			throw self::noLevels((string)($budget?->id ?? ''));
+			throw self::noLevels((string)($budget->id ?? ''));
 		}
 		$to = $d->to ?? null;
 		$day = is_string($to) && Time::isDay($to) ? $to : $issuedOn;
@@ -244,17 +244,64 @@ final class IssueRules {
 	}
 
 	/**
-	 * The invoice's currency, the same chain as the Mac app (0.36.0): the
-	 * budget's, the draft's, the project's, the team's (`settings.currency`),
-	 * else CHF – a budget without its own no longer stops issuing.
+	 * The invoice's currency, the same chain as the Mac app: since 0.38.0
+	 * the invoice's own first, then the budget's (0.36.0: budget, draft),
+	 * the project's, the team's (`settings.currency`), else CHF.
 	 */
-	public static function currencyOf(\stdClass $budget, \stdClass $d, ?\stdClass $project = null, ?\stdClass $settings = null): string {
-		foreach ([$budget->currency ?? null, $d->currency ?? null, $project?->currency ?? null] as $c) {
+	public static function currencyOf(?\stdClass $budget, \stdClass $d, ?\stdClass $project = null, ?\stdClass $settings = null): string {
+		foreach ([$d->currency ?? null, $budget?->currency ?? null, $project?->currency ?? null] as $c) {
 			if (is_string($c) && preg_match(ProjectRules::CURRENCY_PATTERN, $c) === 1) {
 				return strtoupper($c);
 			}
 		}
 		return ReceiptBooking::teamCurrency($settings);
+	}
+
+	/**
+	 * The customer of an invoice when it is issued (0.38.0): the invoice's
+	 * own `customer`, else the accepted quote of its budget, else its
+	 * project's customer; null when none names one.
+	 *
+	 * @param list<\stdClass> $quotes data of the team's live quote records
+	 */
+	public static function customerOf(\stdClass $d, ?\stdClass $project, string $projectKey, ?string $budgetId, array $quotes): ?string {
+		$own = InvoiceRules::keyOf($d->customer ?? null);
+		if ($own !== null) {
+			return $own;
+		}
+		if ($project === null) {
+			return null;
+		}
+		return $budgetId === null ? self::customerKeyOf($project) : self::customerKeyFor($project, $projectKey, $budgetId, $quotes);
+	}
+
+	/** 422 `invoice_no_customer`: issuing needs a customer. */
+	public static function noCustomer(): ApiException {
+		return ApiException::invalid('The invoice names no customer, nor do the quote of its budget or its project; set “customer”.')->code(ErrorCode::INVOICE_NO_CUSTOMER)->field('customer');
+	}
+
+	/**
+	 * The period of an issued invoice (0.38.0, `from` and `to` optional): a
+	 * missing day comes from the bookings' days (and the other day given),
+	 * else the issue day.
+	 *
+	 * @return array{0:string,1:string}
+	 */
+	public static function periodOf(\stdClass $d, string $issuedOn): array {
+		$from = $d->from ?? null;
+		$to = $d->to ?? null;
+		$from = is_string($from) && Time::isDay($from) ? $from : null;
+		$to = is_string($to) && Time::isDay($to) ? $to : null;
+		$days = [];
+		foreach (self::bookingsOf($d) as $b) {
+			$start = $b->start ?? null;
+			if (is_string($start) && Time::isDay(substr($start, 0, 10))) {
+				$days[] = substr($start, 0, 10);
+			}
+		}
+		$low = $days === [] ? ($to ?? $issuedOn) : min([...$days, ...($to === null ? [] : [$to])]);
+		$high = $days === [] ? ($from ?? $issuedOn) : max([...$days, ...($from === null ? [] : [$from])]);
+		return [$from ?? $low, $to ?? $high];
 	}
 
 	/** The project's customer key (`customer`, older records `kunde`). */
@@ -341,22 +388,22 @@ final class IssueRules {
 	/**
 	 * The payload the ledger hashes when an invoice is issued, reversed or
 	 * credited: the whole frozen content, nothing that changes later
-	 * (status, paid, reversed_by, documents).
+	 * (status, paid, reversed_by, documents; since 0.38.0 the budget).
 	 *
 	 * @param list<\stdClass> $positions
 	 * @param list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string,level?:?string}> $hours
 	 * @return array<string,mixed>
 	 */
-	public static function payload(string $key, string $number, string $issuedOn, string $issuedBy, string $dueOn, string $project, string $budget, ?string $customerKey, string $from, string $to, string $currency, VatLines $sums, \stdClass $issuer, \stdClass $customer, array $positions, array $hours, ?string $greeting, ?string $body, ?string $footer, ?string $reverses, ?string $credits, ?string $qrReference = null, ?\stdClass $layout = null): array {
-		// 0.26.0: the layout only when set - older entries keep their exact payload.
-		return ($layout === null ? [] : ['layout' => $layout]) + [
+	public static function payload(string $key, string $number, string $issuedOn, string $issuedBy, string $dueOn, ?string $project, ?string $customerKey, string $from, string $to, string $currency, VatLines $sums, \stdClass $issuer, \stdClass $customer, array $positions, array $hours, ?string $greeting, ?string $body, ?string $footer, ?string $reverses, ?string $credits, ?string $qrReference = null, ?\stdClass $layout = null, ?string $companion = null): array {
+		// 0.26.0: the layout only when set - older entries keep their exact payload; 0.39.0 likewise the companion invoice.
+		return ($layout === null ? [] : ['layout' => $layout]) + ($companion === null ? [] : ['companion' => $companion]) + [
 			'key' => $key,
 			'number' => $number,
 			'issued_on' => $issuedOn,
 			'issued_by' => $issuedBy,
 			'due_on' => $dueOn,
 			'project' => $project,
-			'budget' => $budget,
+			// 0.38.0: no `budget` – it is an assignment for controlling, changed through `assign`.
 			'customer_key' => $customerKey,
 			'period' => ['from' => $from, 'to' => $to],
 			'currency' => $currency,

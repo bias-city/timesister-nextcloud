@@ -1,5 +1,66 @@
 # Changes
 
+## 0.39.0 – 2026-11-05
+
+`api: 2` unchanged; capabilities `advance_rules: 1`, `expenses_separate: 1`,
+`receipts_by_customer: 1`; no migration. Additive except the stricter checks
+when issuing an advance, a deduction or an expenses invoice.
+
+- **Advances checked when issuing.** An invoice `kind: advance` has exactly
+  one advance line and no hours (`422 advance_position_count`). Every
+  advance deduction names an issued or paid advance invoice of the same
+  budget (without a budget the project, without a project the customer;
+  `422 advance_unknown`), deducted on no other living invoice and once here
+  (`422 advance_deducted_twice`), by the advance's amount negated
+  (`422 advance_amount`).
+- **Expenses invoice beside the main one.** An invoice `kind: expenses`
+  names an invoice of the same customer (draft to paid) in `companion`
+  (`422 companion_unknown`); the issue payload in the ledger holds
+  `companion` when set.
+- **Receipts by customer.** A receipt fits an invoice when its project is
+  the invoice's or has the invoice's customer; project, budget and cost
+  position are compared only when the invoice has a budget and the receipt
+  a cost position. `cost` on a costs line and on a markup is optional.
+- **Plan kind and team rule.** A budget's `plan_kind` (`hours`, `advance`);
+  `invoicing.expenses_separate` (boolean, default true) in the settings
+  record – both only their form.
+
+## 0.38.0 – 2026-11-05
+
+`api: 2` unchanged; capabilities `invoices_free: 1`, `invoice_plan_records: 1`,
+`entry_invoice: 1`; migration (`ts_inv_invoices`: `project`, `budget`
+nullable, new `payment_days`, `kind`, `companion`). Additive for clients
+that keep sending project and budget.
+
+- **Invoices without a budget.** An invoice's `project` and `budget` are
+  optional (`null` and `""` both mean «without», stored as `null`); a budget
+  needs a project (`422 invoice_budget_without_project`). `invoice_no_budget`
+  is retired. An invoice without a project is a Team Admin's alone.
+- **The customer at the invoice.** New `customer` (a customer key), required
+  when issuing and handing over: the invoice's own, else the accepted quote
+  of its budget, else the project's; none is `422 invoice_no_customer`. New
+  `payment_days` (0–365, before the customer's term), `kind` (`hours`,
+  `flat`, `advance`, `final`, `expenses`) and `companion` (another invoice's
+  key). The invoice's own `currency` now comes before the budget's.
+- **Optional period.** `from` and `to` may be missing; issuing fills a
+  missing day from the bookings (else the issue day) and writes the period
+  into the record.
+- **Planned invoices.** Status `planned` with a `plan` (`target_amount` or
+  `share`, `due`, `codes`, `until`, `only_recorded`): no number, no bookings.
+  It becomes a draft by a record write, never back
+  (`422 invoice_not_planned`), and is never issued as planned.
+- **Levels only with a budget.** Without a budget the rate of each booking
+  stands as sent; `no_levels` and `level_rate_missing` need a budget.
+- **The ledger without budget; `assign`.** The payload of an issue, reversal
+  or credit note no longer holds `budget`. `POST /invoices/{key}/assign
+  {budget}` sets or releases the budget of an issued, paid or handed-over
+  invoice – record, frozen row and a ledger entry `assign` (`{ key, number,
+  budget_before, budget }`); Team Admins and the project's Leads; other
+  statuses `409 invoice_not_fixed`.
+- **Entries name their invoice.** `GET /entries` carries `invoice: { key,
+  number, status } | null` per entry – the living invoice whose bookings hold
+  an occurrence; drafts only for Team Admins and the project's Leads.
+
 ## 0.37.0 – 2026-11-04
 
 `api: 2` unchanged; capabilities `planning_rate: 1`, `rule_receipts: 1`; no migration. Additive.

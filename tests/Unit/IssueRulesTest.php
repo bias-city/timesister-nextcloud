@@ -34,9 +34,12 @@ class IssueRulesTest extends TestCase {
 		$this->assertSame(['key' => 'inv-7', 'number' => 'RE-2026-0017', 'expires_at' => LedgerRules::at(1793000000)], $e->toData()['pending']);
 		$this->assertSame(['kind' => 'pdf', 'name' => 'a.pdf', 'size' => 3, 'sha256' => 'ab'], IssueRules::documentBlock('pdf', 'a.pdf', 3, 'ab'));
 		// The payload of a close: the frozen invoice of 0.18.0 plus the document; one hash covers content and PDF.
-		$payload = IssueRules::payload('inv-7', 'RE-1', '2026-10-29', 'pbadmin', '2026-11-28', 'p', 'b', 'c', '2026-10-01', '2026-10-31', 'CHF',
+		$payload = IssueRules::payload('inv-7', 'RE-1', '2026-10-29', 'pbadmin', '2026-11-28', 'p', 'c', '2026-10-01', '2026-10-31', 'CHF',
 			\OCA\TimeSister\Service\VatLines::of([], 8.1, 'domestic'), new \stdClass(), new \stdClass(), [], [], null, null, null, null, null) + ['document' => IssueRules::documentBlock('pdf', 'a.pdf', 3, 'ab')];
 		$canonical = LedgerRules::canonical($payload);
+		// 0.38.0: the budget is an assignment, not part of what is fixed.
+		$this->assertArrayNotHasKey('budget', $payload);
+		$this->assertStringContainsString('"customer_key":"c"', $canonical);
 		$this->assertStringContainsString('"document":{"kind":"pdf","name":"a.pdf","sha256":"ab","size":3}', $canonical);
 		$this->assertNotSame(LedgerRules::payloadHash($canonical), LedgerRules::payloadHash(LedgerRules::canonical(['document' => ['sha256' => 'ac']] + $payload)), 'a changed byte of the PDF changes the entry');
 	}

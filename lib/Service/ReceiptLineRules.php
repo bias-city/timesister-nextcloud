@@ -39,12 +39,19 @@ final class ReceiptLineRules {
 
 	/**
 	 * The receipt lines, the markup and the expense percentage of a draft.
+	 * Since 0.39.0 receipts go by the customer: project, budget and cost
+	 * position are compared only when the invoice has a budget and the
+	 * receipt a cost position; otherwise the receipt's project is the
+	 * invoice's or has the invoice's customer. `cost` on a line (and a
+	 * markup) is then optional; a markup without one adds to the lines
+	 * without one.
 	 *
 	 * @param list<\stdClass> $positions
 	 * @param array<string,\stdClass> $receipts the receipts named, by key (missing: not found)
 	 * @param callable(string):string $numberOf the number of an invoice by key
+	 * @param callable(string):?string $customerOf the customer of a project by key
 	 */
-	public static function check(array $positions, array $receipts, string $project, string $budget, string $invoiceKey, callable $numberOf): void {
+	public static function check(array $positions, array $receipts, string $project, string $budget, ?string $customer, string $invoiceKey, callable $numberOf, callable $customerOf): void {
 		$seen = [];
 		$charged = [];
 		$hours = 0.0;
@@ -58,9 +65,7 @@ final class ReceiptLineRules {
 			$list = is_array($p->receipts ?? null) ? $p->receipts : null;
 			if ($list !== null) {
 				$cost = $p->cost ?? null;
-				if (!is_int($cost)) {
-					throw self::at($n, Message::of('A line with receipts needs “cost”.'));
-				}
+				$cost = is_int($cost) ? $cost : null;
 				$show = 0;
 				foreach ($list as $k) {
 					$k = (string)$k;
@@ -75,7 +80,7 @@ final class ReceiptLineRules {
 						$seen[$k] = is_array($seen[$k] ?? null) ? $seen[$k] : [];
 						$seen[$k][$rate] = true;
 					}
-					self::requireReceipt($n, $k, $r, $project, $budget, $cost, $invoiceKey, $numberOf);
+					self::requireReceipt($n, $k, $r, $project, $budget, $customer, $cost, $invoiceKey, $numberOf, $customerOf);
 					$show += ($r?->invoice_effect ?? null) === ReceiptRules::SHOW_ONLY ? 1 : 0;
 				}
 				if ($show > 0 && $show < count($list)) {
@@ -85,7 +90,7 @@ final class ReceiptLineRules {
 					throw self::at($n, Message::of('A line of receipts the customer paid has the amount 0.'));
 				}
 				if ($show === 0) {
-					$charged[$cost] = ($charged[$cost] ?? 0.0) + self::num($p->amount ?? 0);
+					$charged[$cost ?? 0] = ($charged[$cost ?? 0] ?? 0.0) + self::num($p->amount ?? 0);
 				}
 			}
 		}
@@ -103,18 +108,18 @@ final class ReceiptLineRules {
 			$kind = $p->kind ?? null;
 			if ($kind === self::MARKUP) {
 				$cost = $p->cost ?? null;
-				if (!is_int($cost)) {
-					throw self::at($i + 1, Message::of('A markup needs “cost”.'));
-				}
-				self::requireAmount($i + 1, $p, $charged[$cost] ?? 0.0);
+				self::requireAmount($i + 1, $p, $charged[is_int($cost) ? $cost : 0] ?? 0.0);
 			} elseif ($kind === self::EXPENSE_PERCENT) {
 				self::requireAmount($i + 1, $p, $hours);
 			}
 		}
 	}
 
-	/** @param callable(string):string $numberOf */
-	private static function requireReceipt(int $n, string $k, ?\stdClass $r, string $project, string $budget, int $cost, string $invoiceKey, callable $numberOf): void {
+	/**
+	 * @param callable(string):string $numberOf
+	 * @param callable(string):?string $customerOf
+	 */
+	private static function requireReceipt(int $n, string $k, ?\stdClass $r, string $project, string $budget, ?string $customer, ?int $cost, string $invoiceKey, callable $numberOf, callable $customerOf): void {
 		$p = ['key' => $k];
 		if ($r === null) {
 			throw self::at($n, Message::of('The receipt {key} does not exist.', $p));
@@ -126,8 +131,20 @@ final class ReceiptLineRules {
 		if (($r->status ?? null) !== ReceiptRules::APPROVED) {
 			throw self::at($n, Message::of('The receipt {key} is not approved.', $p));
 		}
-		if (($r->project ?? null) !== $project || ($r->budget ?? null) !== $budget || ($r->cost ?? null) !== $cost) {
-			throw self::at($n, Message::of('The receipt {key} belongs to another project, budget or cost position.', $p));
+		// 0.39.0: the cost position counts only on an invoice with a budget and a receipt with one.
+		if ($budget !== '' && ($r->cost ?? null) !== null) {
+			if ($cost === null) {
+				throw self::at($n, Message::of('A line with receipts of a cost position needs “cost”.'));
+			}
+			if (($r->project ?? null) !== $project || ($r->budget ?? null) !== $budget || ($r->cost ?? null) !== $cost) {
+				throw self::at($n, Message::of('The receipt {key} belongs to another project, budget or cost position.', $p));
+			}
+		} else {
+			$rp = $r->project ?? null;
+			$same = is_string($rp) && $rp !== '' && ($rp === $project || ($customer !== null && $customerOf($rp) === $customer));
+			if (!$same) {
+				throw self::at($n, Message::of('The receipt {key} belongs to another customer.', $p));
+			}
 		}
 		if (($r->invoice_effect ?? null) === ReceiptRules::NONE) {
 			throw self::at($n, Message::of('The receipt {key} is not for the invoice.', $p));

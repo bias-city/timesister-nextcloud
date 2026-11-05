@@ -97,12 +97,14 @@ class InvoiceRulesTest extends TestCase {
 	}
 
 	public function testInvalidFields(): void {
-		$this->assertSame('422 “project” must be the key of a project.', self::check([], ['project']));
+		// 0.38.0: project and budget are optional; a given project must be a key.
+		$this->assertSame('ok', self::check(['budget' => null], ['project']));
 		$this->assertSame('422 “project” must be the key of a project.', self::check(['project' => 'a/b']));
 		$this->assertSame('422 “project” must be the key of a project.', self::check(['project' => 7]));
-		foreach ([[], ['budget' => ''], ['budget' => '  '], ['budget' => 3], ['budget' => null]] as $i => $over) {
-			$this->assertSame('422 “budget” is required: every invoice belongs to a budget.', $i === 0 ? self::check([], ['budget']) : self::check($over), (string)$i);
+		foreach ([[], ['budget' => ''], ['budget' => '  '], ['budget' => null]] as $i => $over) {
+			$this->assertSame('ok', $i === 0 ? self::check([], ['budget']) : self::check($over), 'without a budget ' . $i);
 		}
+		$this->assertSame('422 “budget” must be text of at most 128 characters.', self::check(['budget' => 3]));
 		$this->assertSame('422 “budget” must be text of at most 128 characters.', self::check(['budget' => str_repeat('b', 129)]));
 		foreach ([-1, '12', true, [1]] as $bad) {
 			$this->assertSame('422 “hours” must be null or a number ≥ 0.', self::check(['hours' => $bad]), var_export($bad, true));
@@ -120,10 +122,12 @@ class InvoiceRulesTest extends TestCase {
 			$this->assertSame('422 “currency” must be three letters, for example CHF.', self::check(['currency' => $bad]), var_export($bad, true));
 		}
 		$this->assertSame('422 “from” must be a day in the format YYYY-MM-DD.', self::check(['from' => '2026-02-30']));
-		$this->assertSame('422 “to” must be a day in the format YYYY-MM-DD.', self::check([], ['to']));
+		$this->assertSame('422 “to” must be a day in the format YYYY-MM-DD.', self::check(['to' => '30.09.2026']));
+		$this->assertSame('ok', self::check([], ['to']), '0.38.0: the period is optional');
+		$this->assertSame('ok', self::check(['from' => null, 'to' => null]));
 		$this->assertSame('422 “from” must not be after “to”.', self::check(['from' => '2026-10-01']));
-		$this->assertSame('422 “status” of an invoice is one of draft, issuing, issued, paid, cancelled, external.', self::check(['status' => 'open']));
-		$this->assertSame('422 “status” of an invoice is one of draft, issuing, issued, paid, cancelled, external.', self::check([], ['status']));
+		$this->assertSame('422 “status” of an invoice is one of draft, issuing, issued, paid, cancelled, external, planned.', self::check(['status' => 'open']));
+		$this->assertSame('422 “status” of an invoice is one of draft, issuing, issued, paid, cancelled, external, planned.', self::check([], ['status']));
 		foreach (['', str_repeat('x', 65), 12, "RE\n1"] as $n) {
 			$this->assertSame('422 “number” must be null or text of 1 to 64 characters.', self::check(['number' => $n]), var_export($n, true));
 		}

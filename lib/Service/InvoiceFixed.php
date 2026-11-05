@@ -40,6 +40,10 @@ final class InvoiceFixed {
 			'project' => $row->getProject(),
 			'budget' => $row->getBudget(),
 			'customer_key' => $row->getCustomer(),
+			// 0.38.0: the payment term given on the invoice, what it bills, the companion invoice.
+			'payment_days' => $row->getPaymentDays(),
+			'kind' => $row->getKind(),
+			'companion' => $row->getCompanion(),
 			'period' => ['from' => $row->getPeriodFrom(), 'to' => $row->getPeriodTo()],
 			'issued_on' => $row->getIssuedOn(),
 			'issued_by' => $row->getIssuedBy(),

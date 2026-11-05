@@ -14,14 +14,23 @@ namespace OCA\TimeSister\Service;
  *
  * Team Admins read and write every invoice. A Lead reads the invoices of
  * the active projects they lead and writes only drafts without a number –
- * before and after the write. Members see none.
+ * before and after the write. Members see none. Since 0.38.0 project,
+ * budget and customer are optional (an invoice without a project is a
+ * Team Admin's alone) and `planned` holds an invoice plan's container.
  */
 final class InvoiceRules {
 	public const KIND = 'invoice';
 	public const DRAFT = 'draft';
 	/** 0.24.0: `external`, handed over to the accounting system that issues it (set by the server only). */
 	/** 0.32.0: `issuing` – reserved on the server, the app's PDF not filed yet. */
-	public const STATUSES = [self::DRAFT, 'issuing', 'issued', 'paid', 'cancelled', HandoverRules::STATUS];
+	/** 0.38.0: `planned`, the container of an invoice plan – no number, no bookings, a `plan`; it becomes a draft, never back. */
+	public const PLANNED = 'planned';
+	public const STATUSES = [self::DRAFT, 'issuing', 'issued', 'paid', 'cancelled', HandoverRules::STATUS, self::PLANNED];
+	/** 0.38.0: the statuses a budget is assigned in through POST …/assign (fixed invoices). */
+	public const ASSIGNABLE = ['issued', 'paid', HandoverRules::STATUS];
+	/** 0.38.0: what an invoice bills, a list of values only. */
+	public const KINDS = ['hours', 'flat', 'advance', 'final', 'expenses'];
+	public const PLAN_CODES_MAX = 100;
 	public const MAX_BOOKINGS = 5000;
 	/** 5000 bookings with their event UIDs need more than the usual 256 KB. */
 	public const MAX_BYTES = 786432;
@@ -73,30 +82,56 @@ final class InvoiceRules {
 		if ($s !== null && (!is_int($s) || $s < 1 || $s > 1000)) {
 			throw ApiException::invalidField('schema');
 		}
-		$project = $d->project ?? null;
-		if (!is_string($project) || !RecordValidator::isKey($project)) {
-			throw ApiException::invalid('“project” must be the key of a project.');
+		// 0.38.0: project, budget and customer are optional; null and "" both mean «without» and are stored as null.
+		$project = self::blankToNull($d->project ?? null);
+		if ($project !== null && (!is_string($project) || !RecordValidator::isKey($project))) {
+			throw ApiException::invalid('“project” must be the key of a project.')->field('project');
 		}
-		// Every invoice belongs to a budget (0.16.0, decided before release).
-		$budget = $d->budget ?? null;
-		if (!is_string($budget) || trim($budget) === '') {
-			throw ApiException::invalid('“budget” is required: every invoice belongs to a budget.')->code(ErrorCode::INVOICE_NO_BUDGET)->field('budget');
-		}
+		$d->project = $project;
+		$budget = self::blankToNull($d->budget ?? null);
 		self::text($budget, 'budget', self::BUDGET_MAX, self::CONTROL);
+		$d->budget = $budget;
+		if ($budget !== null && $d->project === null) {
+			throw ApiException::invalid('A budget belongs to a project: “budget” needs “project”.')->code(ErrorCode::INVOICE_BUDGET_WITHOUT_PROJECT)->field('budget');
+		}
+		$customer = self::blankToNull($d->customer ?? null);
+		if ($customer !== null && (!is_string($customer) || !RecordValidator::isKey($customer))) {
+			throw ApiException::invalid('“customer” must be null or the key of a customer.')->field('customer');
+		}
+		if (property_exists($d, 'customer')) {
+			$d->customer = $customer;
+		}
+		$pd = $d->payment_days ?? null;
+		if ($pd !== null && (!is_int($pd) || $pd < 0 || $pd > IssueRules::DUE_DAYS_MAX)) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or an integer from {min} to {max}.', ['field' => 'payment_days', 'min' => 0, 'max' => IssueRules::DUE_DAYS_MAX]))->field('payment_days');
+		}
+		$kind = $d->kind ?? null;
+		if ($kind !== null && !in_array($kind, self::KINDS, true)) {
+			throw ApiException::invalid(Message::of('“{field}” must be one of {values}.', ['field' => 'kind', 'values' => implode(', ', self::KINDS)]))->field('kind');
+		}
+		$companion = self::blankToNull($d->companion ?? null);
+		if ($companion !== null && (!is_string($companion) || !RecordValidator::isKey($companion))) {
+			throw ApiException::invalid('“companion” must be null or the key of an invoice.')->field('companion');
+		}
+		if (property_exists($d, 'companion')) {
+			$d->companion = $companion;
+		}
+		// 0.38.0: the period is optional; when both days are there, from ≤ to.
 		$days = [];
 		foreach (['from', 'to'] as $f) {
 			$v = $d->{$f} ?? null;
-			if (!is_string($v) || !Time::isDay($v)) {
+			if ($v !== null && (!is_string($v) || !Time::isDay($v))) {
 				throw ApiException::invalid(Message::of('“{field}” must be a day in the format YYYY-MM-DD.', ['field' => $f]));
 			}
 			$days[] = $v;
 		}
-		if ($days[0] > $days[1]) {
+		if ($days[0] !== null && $days[1] !== null && $days[0] > $days[1]) {
 			throw ApiException::invalid('“from” must not be after “to”.');
 		}
 		if (!in_array($d->status ?? null, self::STATUSES, true)) {
 			throw ApiException::invalid(Message::of('“status” of an invoice is one of {statuses}.', ['statuses' => implode(', ', self::STATUSES)]));
 		}
+		self::checkPlanned($d);
 		$number = $d->number ?? null;
 		if ($number !== null && (!is_string($number) || $number === '' || mb_strlen($number) > self::NUMBER_MAX || preg_match(self::CONTROL, $number))) {
 			throw ApiException::invalid(Message::of('“{field}” must be null or text of 1 to {max} characters.', ['field' => 'number', 'max' => self::NUMBER_MAX]));
@@ -415,6 +450,108 @@ final class InvoiceRules {
 		return false;
 	}
 
+	/**
+	 * 0.38.0: a `planned` invoice has no number, no bookings and a `plan`;
+	 * any other status has no `plan`. The plan is normalised to its known
+	 * members (`only_recorded` true when missing).
+	 */
+	private static function checkPlanned(\stdClass $d): void {
+		$planned = ($d->status ?? null) === self::PLANNED;
+		$plan = $d->plan ?? null;
+		if (!$planned) {
+			if ($plan !== null) {
+				throw ApiException::invalid('Only a planned invoice has a “plan”.')->field('plan');
+			}
+			return;
+		}
+		if (($d->number ?? null) !== null) {
+			throw ApiException::invalid('A planned invoice has no number yet.')->field('number');
+		}
+		$bookings = $d->bookings ?? null;
+		if (is_array($bookings) && $bookings !== []) {
+			throw ApiException::invalid('A planned invoice holds no bookings; they come when it becomes a draft.')->field('bookings');
+		}
+		$d->plan = self::checkPlan($plan);
+	}
+
+	/**
+	 * The plan of a planned invoice: `target_amount` null or ≥ 0, `share`
+	 * null or 0–100 (at least one of the two), `due` a day, `codes` a list
+	 * of codes, `until` null or a day, `only_recorded` a boolean.
+	 */
+	public static function checkPlan(mixed $v): \stdClass {
+		if (!($v instanceof \stdClass)) {
+			throw ApiException::invalid('A planned invoice needs its “plan”: a JSON object with “due” and “target_amount” or “share”.')->field('plan');
+		}
+		$out = new \stdClass();
+		$amount = $v->target_amount ?? null;
+		if ($amount !== null && !ProjectRules::isRate($amount)) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or a number ≥ 0.', ['field' => 'plan.target_amount']))->field('plan');
+		}
+		$share = $v->share ?? null;
+		if ($share !== null && !(ProjectRules::isRate($share) && $share <= 100)) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or a percentage from 0 to 100.', ['field' => 'plan.share']))->field('plan');
+		}
+		if ($amount === null && $share === null) {
+			throw ApiException::invalid('A plan names its target: “target_amount” or “share”.')->field('plan');
+		}
+		$due = $v->due ?? null;
+		if (!is_string($due) || !Time::isDay($due)) {
+			throw ApiException::invalid(Message::of('“{field}” must be a day in the format YYYY-MM-DD.', ['field' => 'plan.due']))->field('plan');
+		}
+		$codes = $v->codes ?? [];
+		if (!is_array($codes) || !array_is_list($codes) || count($codes) > self::PLAN_CODES_MAX) {
+			throw ApiException::invalid(Message::of('“{field}” must be a list of at most {max} codes.', ['field' => 'plan.codes', 'max' => self::PLAN_CODES_MAX]))->field('plan');
+		}
+		foreach ($codes as $c) {
+			self::required($c, 'plan.codes', self::CODE_MAX);
+		}
+		$until = $v->until ?? null;
+		if ($until !== null && (!is_string($until) || !Time::isDay($until))) {
+			throw ApiException::invalid(Message::of('“{field}” must be a day in the format YYYY-MM-DD.', ['field' => 'plan.until']))->field('plan');
+		}
+		$only = $v->only_recorded ?? true;
+		if (!is_bool($only)) {
+			throw ApiException::notBool('plan.only_recorded');
+		}
+		$out->target_amount = $amount;
+		$out->share = $share;
+		$out->due = $due;
+		$out->codes = $codes;
+		$out->until = $until;
+		$out->only_recorded = $only;
+		return $out;
+	}
+
+	/**
+	 * A client's status change against the stored invoice (0.38.0): a
+	 * planned invoice becomes a draft (or stays planned), nothing else; an
+	 * invoice that is not planned never becomes planned again.
+	 */
+	public static function checkTransition(?\stdClass $before, ?\stdClass $after): void {
+		if ($before === null || $after === null) {
+			return;
+		}
+		$was = $before->status ?? null;
+		$is = $after->status ?? null;
+		if ($is === self::PLANNED && $was !== self::PLANNED) {
+			throw ApiException::invalid('An invoice that left “planned” does not go back to it.')->code(ErrorCode::INVOICE_NOT_PLANNED)->field('status');
+		}
+		if ($was === self::PLANNED && $is !== self::PLANNED && $is !== self::DRAFT) {
+			throw ApiException::invalid('A planned invoice becomes a draft first; it is never issued as planned.')->code(ErrorCode::INVOICE_NOT_DRAFT)->field('status');
+		}
+	}
+
+	/** null, an empty or blank string: «without» (0.38.0). */
+	private static function blankToNull(mixed $v): mixed {
+		return $v === null || (is_string($v) && trim($v) === '') ? null : $v;
+	}
+
+	/** A key field of the record (project, budget, customer, companion): its text, or null for «without» (0.38.0). */
+	public static function keyOf(mixed $v): ?string {
+		return is_string($v) && trim($v) !== '' ? $v : null;
+	}
+
 	private static function bookings(mixed $list): void {
 		if (!is_array($list) || !array_is_list($list) || count($list) > self::MAX_BOOKINGS) {
 			throw ApiException::invalid(Message::of('“bookings” must be a list of at most {max} bookings.', ['max' => self::MAX_BOOKINGS]));
@@ -475,6 +612,53 @@ final class InvoiceRules {
 		}
 	}
 
+	// ------------------------------------------------------- assign (0.38.0)
+
+	/** The body of `POST /invoices/{key}/assign`: `budget`, null (or "") to release, else text of 1–128 characters. */
+	public static function assignedBudget(\stdClass $b): ?string {
+		if (!property_exists($b, 'budget')) {
+			throw ApiException::missing('budget');
+		}
+		$v = self::blankToNull($b->budget);
+		self::text($v, 'budget', self::BUDGET_MAX, self::CONTROL);
+		return is_string($v) ? $v : null;
+	}
+
+	/**
+	 * Who assigns a budget: Team Admins, and the Leads of the invoice's
+	 * project (none without a project); the budget needs the project.
+	 *
+	 * @param array<string,true> $led the active projects the caller leads
+	 */
+	public static function requireAssign(bool $manages, array $led, \stdClass $d, ?string $budget): void {
+		$project = self::keyOf($d->project ?? null);
+		if (!$manages && ($project === null || !isset($led[$project]))) {
+			throw ApiException::forbidden('Only Team Admins and the project’s Leads write invoices.')->code(ErrorCode::INVOICE_LEAD_ONLY);
+		}
+		if (!in_array($d->status ?? null, self::ASSIGNABLE, true)) {
+			throw ApiException::conflict('A budget is assigned this way to an issued, paid or handed-over invoice; change a draft or a planned invoice by writing it.')->code(ErrorCode::INVOICE_NOT_FIXED);
+		}
+		if ($budget !== null && $project === null) {
+			throw ApiException::invalid('A budget belongs to a project: “budget” needs “project”.')->code(ErrorCode::INVOICE_BUDGET_WITHOUT_PROJECT)->field('budget');
+		}
+	}
+
+	/** The ledger payload of `assign`: the invoice, its number and the budget before and after. @return array<string,mixed> */
+	public static function assignPayload(string $key, string $number, ?string $before, ?string $budget): array {
+		return ['key' => $key, 'number' => $number, 'budget_before' => $before, 'budget' => $budget];
+	}
+
+	/** The number an invoice is known by: its own, else the accounting system's (handed over), else "". */
+	public static function numberOf(\stdClass $d): string {
+		$n = $d->number ?? null;
+		if (is_string($n) && $n !== '') {
+			return $n;
+		}
+		$x = $d->external ?? null;
+		$e = $x instanceof \stdClass ? ($x->number ?? null) : null;
+		return is_string($e) ? $e : '';
+	}
+
 	/** The project of a stored invoice (a tombstone keeps its last data); null if none. */
 	public static function projectOf(?string $raw): ?string {
 		$d = self::decode($raw);
@@ -497,7 +681,8 @@ final class InvoiceRules {
 	/**
 	 * A Lead's write: the stored invoice (`$before`, null when new) and the
 	 * new one (`$after`, null when deleted) both of a project they lead,
-	 * both drafts, both without a number. Otherwise 403.
+	 * both drafts (or planned, 0.38.0), both without a number. Otherwise
+	 * 403. An invoice without a project is a Team Admin's alone.
 	 *
 	 * @param array<string,true> $led the active projects the caller leads
 	 */
@@ -509,7 +694,8 @@ final class InvoiceRules {
 			}
 		}
 		foreach ([$before, $after] as $d) {
-			if ($d !== null && (($d->status ?? null) !== self::DRAFT || ($d->number ?? null) !== null)) {
+			// 0.38.0: a planned invoice is a Lead's like a draft.
+			if ($d !== null && (!in_array($d->status ?? null, [self::DRAFT, self::PLANNED], true) || ($d->number ?? null) !== null)) {
 				throw ApiException::forbidden('A Lead writes only drafts without a number; issuing, payment and cancelling are for Team Admins.')->code(ErrorCode::INVOICE_LEAD_DRAFT_ONLY);
 			}
 		}

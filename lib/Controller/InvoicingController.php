@@ -9,6 +9,7 @@ namespace OCA\TimeSister\Controller;
 use OCA\TimeSister\Service\ApiException;
 use OCA\TimeSister\Service\DocumentRules;
 use OCA\TimeSister\Service\DocumentService;
+use OCA\TimeSister\Service\InvoiceAssignService;
 use OCA\TimeSister\Service\IssueService;
 use OCA\TimeSister\Service\Json;
 use OCA\TimeSister\Service\TenantService;
@@ -28,7 +29,8 @@ use OCP\IRequest;
  * Leads read `fixed`); 404 when the team setting `invoicing` is off.
  * Since 0.32.0 the issue has two steps: `issue` reserves, the app's PDF
  * sent to `PUT …/document` closes, `issue/cancel` releases; `preview` and
- * `render` are gone (410) – the server renders nothing.
+ * `render` are gone (410) – the server renders nothing. Since 0.38.0
+ * `assign` sets the budget of a fixed invoice (Leads of the project too).
  */
 final class InvoicingController extends BaseController {
 	/** `positions` of a credit note may be sent along. */
@@ -40,6 +42,7 @@ final class InvoicingController extends BaseController {
 		IL10N $l,
 		private IssueService $issues,
 		private DocumentService $documents,
+		private InvoiceAssignService $assigns,
 	) {
 		parent::__construct($request, $tenants, $l);
 	}
@@ -116,6 +119,15 @@ final class InvoicingController extends BaseController {
 	#[UserRateLimit(limit: 60, period: 60)]
 	public function dunning(string $key): DataResponse {
 		return $this->run(fn () => $this->issues->dunning($this->tenants->current(), $key, $this->body(self::MAX_BODY)));
+	}
+
+	/** POST /invoices/{key}/assign {"budget": text|null} – the budget of an issued, paid or handed-over invoice (0.38.0); Team Admins and the project's Leads. */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/invoices/{key}/assign')]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	#[UserRateLimit(limit: 60, period: 60)]
+	public function assign(string $key): DataResponse {
+		return $this->run(fn () => $this->assigns->assign($this->tenants->current(), $key, $this->body(self::MAX_BODY)));
 	}
 
 	/** GET /invoices/{key}/fixed – the frozen content; Team Admins and the project's Leads. */

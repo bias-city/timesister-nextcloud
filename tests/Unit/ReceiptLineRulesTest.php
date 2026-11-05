@@ -42,9 +42,11 @@ class ReceiptLineRulesTest extends TestCase {
 		return array_values(array_map(static fn (array $x): \stdClass => (object)$x, array_filter($p)));
 	}
 
-	private static function check(array $positions, ?array $receipts = null): string {
+	private static function check(array $positions, ?array $receipts = null, string $project = 'd1', string $budget = 'b1', ?string $customer = 'k1'): string {
 		try {
-			ReceiptLineRules::check($positions, $receipts ?? self::receipts(), 'd1', 'b1', 'inv-1', static fn (string $k): string => 'RE-' . $k);
+			// d1 and d2 belong to the customer k1, d3 to k2.
+			ReceiptLineRules::check($positions, $receipts ?? self::receipts(), $project, $budget, $customer, 'inv-1', static fn (string $k): string => 'RE-' . $k,
+				static fn (string $p): ?string => ['d1' => 'k1', 'd2' => 'k1', 'd3' => 'k2'][$p] ?? null);
 			return 'ok';
 		} catch (ApiException $e) {
 			return $e->getStatus() . ' ' . $e->getMessage();
@@ -62,8 +64,9 @@ class ReceiptLineRulesTest extends TestCase {
 		$this->assertSame('422 Position 3: The amount must be 30.00.', self::check(self::positions([2 => ['amount' => 33]])));
 		$this->assertSame('422 Position 5: The amount must be 30.00.', self::check(self::positions([4 => ['amount' => 31]])));
 		$this->assertSame('422 Position 5: “rate” must be a percentage from 0 to 100.', self::check(self::positions([4 => ['rate' => null]])));
-		$this->assertSame('422 Position 3: A markup needs “cost”.', self::check(self::positions([2 => ['cost' => null]])));
-		$this->assertSame('422 Position 2: A line with receipts needs “cost”.', self::check(self::positions([1 => ['cost' => null]])));
+		// 0.39.0: a markup without a cost position adds to the lines without one.
+		$this->assertSame('422 Position 3: The amount must be 0.00.', self::check(self::positions([2 => ['cost' => null]])));
+		$this->assertSame('422 Position 2: A line with receipts of a cost position needs “cost”.', self::check(self::positions([1 => ['cost' => null]])));
 		$this->assertSame('422 Position 4: The receipt rc-1 is on the invoice twice.', self::check(self::positions([3 => ['receipts' => ['rc-1']]])));
 		$this->assertSame('422 Position 2: The receipt rc-9 does not exist.', self::check(self::positions([1 => ['receipts' => ['rc-9']]])));
 		$rc['rc-1']->status = 'open';
@@ -94,6 +97,32 @@ class ReceiptLineRulesTest extends TestCase {
 		$this->assertSame('422 Position 1: “receipts” must be a list of 1 to 500 receipt keys.', $bad(['kind' => 'costs', 'text' => 'x', 'amount' => 1, 'receipts' => ['x']]));
 		$this->assertSame('ok', $bad(['kind' => 'markup', 'text' => 'x', 'amount' => 1, 'cost' => 1, 'rate' => 10]));
 		$this->assertSame('422 Position 1: “rate” must be null or a percentage from 0 to 100.', $bad(['kind' => 'markup', 'text' => 'x', 'amount' => 1, 'rate' => 110]));
+	}
+
+	/** 0.39.0: receipts go by the customer; project, budget and cost position only with a budget and a cost position. */
+	public function testReceiptsByCustomer(): void {
+		$rc = self::receipts();
+		// Without a budget on the invoice: the same project or a project of the same customer.
+		$this->assertSame('ok', self::check(self::positions(), $rc, 'd1', ''));
+		$this->assertSame('ok', self::check(self::positions(), $rc, '', '', 'k1'), 'no project: the customer');
+		$this->assertSame('ok', self::check(self::positions([1 => ['cost' => null], 2 => ['cost' => null]]), $rc, 'd1', ''), 'no cost position needed');
+		$rc['rc-2']->project = 'd2';
+		$rc['rc-2']->budget = 'b9';
+		$this->assertSame('ok', self::check(self::positions(), $rc, 'd1', ''), 'another project of the customer');
+		$rc['rc-2']->project = 'd3';
+		$this->assertSame('422 Position 2: The receipt rc-2 belongs to another customer.', self::check(self::positions(), $rc, 'd1', ''));
+		$this->assertSame('422 Position 2: The receipt rc-2 belongs to another customer.', self::check(self::positions(), $rc, 'd1', '', null), 'no customer: only the same project');
+		$rc['rc-2']->project = null;
+		$this->assertSame('422 Position 2: The receipt rc-2 belongs to another customer.', self::check(self::positions(), $rc, 'd1', ''), 'a general cost has no customer');
+		// With a budget: a receipt without a cost position goes by the customer too.
+		$rc = self::receipts();
+		$rc['rc-2']->project = 'd2';
+		$rc['rc-2']->budget = null;
+		$rc['rc-2']->cost = null;
+		$this->assertSame('ok', self::check(self::positions(), $rc));
+		$rc['rc-2']->cost = 1;
+		$rc['rc-2']->budget = 'b1';
+		$this->assertSame('422 Position 2: The receipt rc-2 belongs to another project, budget or cost position.', self::check(self::positions(), $rc));
 	}
 
 	public function testShowOnlyLinesAtZero(): void {

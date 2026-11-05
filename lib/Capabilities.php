@@ -118,6 +118,22 @@ use OCP\Capabilities\ICapability;
  * `level_name` on `hours` lines, `bookings[].level`, the appendix
  * `by_level` and the issue checks of quotes and invoices (`no_levels`,
  * `level_rate_missing`, `amount_without_rate`).
+ * `planning_rate: 1` since 0.37.0: `mean_rate` in every fee model;
+ * `rule_receipts: 1`: the writer of an expense rule deletes its receipts.
+ * `invoices_free: 1` since 0.38.0: an invoice's `project` and `budget` are
+ * optional, `customer`, `payment_days`, `kind`, `companion` on the record,
+ * the customer is required when issuing, the ledger payload of an issue
+ * without `budget`, `POST /invoices/{key}/assign`. `invoice_plan_records: 1`:
+ * the status `planned` with its `plan`. `entry_invoice: 1`: `GET /entries`
+ * names each entry's `invoice`.
+ * `advance_rules: 1` since 0.39.0: issuing checks an advance invoice's one
+ * advance line, each deduction against an issued advance (`advance_unknown`,
+ * `advance_deducted_twice`, `advance_amount`) and an expenses invoice's
+ * `companion` (`companion_unknown`, in the ledger payload); a budget's
+ * `plan_kind`. `expenses_separate: 1`: `invoicing.expenses_separate` in the
+ * settings record. `receipts_by_customer: 1`: a receipt fits an invoice of
+ * its project's customer; project, budget and cost position only with a
+ * budget on the invoice and a cost position on the receipt.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -125,7 +141,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, quote_template: int, credit_limit: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, quote_documents: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int, fee_models: int, planning_rate: int, rule_receipts: int}} */
+	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, quote_template: int, credit_limit: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, quote_documents: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int, fee_models: int, planning_rate: int, rule_receipts: int, invoices_free: int, invoice_plan_records: int, entry_invoice: int, advance_rules: int, expenses_separate: int, receipts_by_customer: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -168,6 +184,12 @@ final class Capabilities implements ICapability {
 				'fee_models' => 1,
 				'planning_rate' => 1,
 				'rule_receipts' => 1,
+				'invoices_free' => 1,
+				'invoice_plan_records' => 1,
+				'entry_invoice' => 1,
+				'advance_rules' => 1,
+				'expenses_separate' => 1,
+				'receipts_by_customer' => 1,
 			],
 		];
 	}
