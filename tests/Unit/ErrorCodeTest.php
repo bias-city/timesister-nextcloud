@@ -27,6 +27,8 @@ class ErrorCodeTest extends TestCase {
 		'FeeModelRules', 'LevelRules', 'CorrectionRules',
 		// 0.38.0: assigning a budget to a fixed invoice.
 		'InvoiceAssignService',
+		// 0.40.0: the bank and the schema of the office costs.
+		'BankRules', 'BankService', 'OfficeCostRules',
 	];
 
 	public function testBodyCarriesCodeAndField(): void {

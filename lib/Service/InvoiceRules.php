@@ -56,6 +56,11 @@ final class InvoiceRules {
 	public const DUNNING_MAX = 3;
 	public const PAYMENTS_MAX = 200;
 	public const PAYMENT_NOTE_MAX = 500;
+	/** 0.40.0 (PLAN-BANK §3.4): what a payment is; a reversal is negative, the others above 0. */
+	public const PAYMENT_KINDS = ['payment', 'writeoff', 'reversal'];
+	public const REVERSAL = 'reversal';
+	/** 0.40.0: the payment reference set on issue – QRR (27 digits) or RF (ISO 11649). */
+	public const REFERENCE_PATTERN = '/^(\d{27}|RF\d{2}[A-Z0-9]{1,21})$/';
 	/**
 	 * 0.27.0: the approval mark on a draft. A Lead submits the draft
 	 * (`requested`, with `by`, `at`, `note`); `changed_at` says it changed
@@ -199,10 +204,18 @@ final class InvoiceRules {
 		if (($d->payments ?? null) !== null) {
 			self::checkPayments($d->payments);
 		}
+		$ref = $d->reference ?? null;
+		if ($ref !== null && (!is_string($ref) || preg_match(self::REFERENCE_PATTERN, $ref) !== 1)) {
+			throw ApiException::invalidField('reference');
+		}
 		self::bookings($d->bookings ?? null);
 	}
 
-	/** `payments`: a list of at most 200 `{ date, amount, note? }` - a day, a number above 0, a note of at most 500 characters. */
+	/**
+	 * `payments`: a list of at most 200 `{ date, amount, note?, source?, key?, kind? }` - a day, a
+	 * number above 0 (a `reversal` below 0), a note of at most 500 characters; 0.40.0: `source`
+	 * camt, csv or manual, `key` the bank entry (≤ 160), `kind` payment, writeoff or reversal.
+	 */
 	public static function checkPayments(mixed $list): void {
 		$bad = fn (): ApiException => ApiException::invalid(Message::of('“payments” must be null or a list of at most {max} payments, each with a day “date”, an “amount” above 0 and an optional “note”.', ['max' => self::PAYMENTS_MAX]));
 		if (!is_array($list) || !array_is_list($list) || count($list) > self::PAYMENTS_MAX) {
@@ -214,7 +227,13 @@ final class InvoiceRules {
 			}
 			$date = $p->date ?? null;
 			$amount = $p->amount ?? null;
-			if (!is_string($date) || !Time::isDay($date) || !(is_int($amount) || (is_float($amount) && is_finite($amount))) || $amount <= 0) {
+			$kind = $p->kind ?? 'payment';
+			if (!is_string($date) || !Time::isDay($date) || !(is_int($amount) || (is_float($amount) && is_finite($amount))) || !in_array($kind, self::PAYMENT_KINDS, true)
+				|| ($kind === self::REVERSAL ? $amount >= 0 : $amount <= 0)) {
+				throw $bad();
+			}
+			$key = $p->key ?? null;
+			if (!in_array($p->source ?? 'manual', BankRules::SOURCES, true) || ($key !== null && (!is_string($key) || $key === '' || mb_strlen($key) > 160 || preg_match(self::CONTROL, $key)))) {
 				throw $bad();
 			}
 			$note = $p->note ?? null;
@@ -222,6 +241,17 @@ final class InvoiceRules {
 				throw $bad();
 			}
 		}
+	}
+
+	/** 0.40.0: does a payment from the bank (camt, csv) stand on the record? */
+	public static function fromBank(\stdClass $d): bool {
+		$list = $d->payments ?? null;
+		foreach (is_array($list) ? $list : [] as $p) {
+			if ($p instanceof \stdClass && in_array($p->source ?? 'manual', ['camt', 'csv'], true)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** The sum of the payments of a record (none: 0). */

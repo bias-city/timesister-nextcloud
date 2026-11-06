@@ -26,7 +26,7 @@ deviates from it changes this file first. Plan and rationale: `PLAN-NC-APP.md`.
   to the place that resolves it.
 - Times as ISO 8601 in UTC (`2026-09-26T08:15:00Z`), days as `YYYY-MM-DD`.
 
-## Error codes (0.31.0, extended 0.32.0, 0.33.0, 0.38.0 and 0.39.0)
+## Error codes (0.31.0, extended 0.32.0, 0.33.0, 0.38.0, 0.39.0 and 0.40.0)
 
 `data = { "error", "message", "code"?, "field"?, … }`. `error` stays the
 coarse class (`no_team`, `ambiguous_team`, `forbidden`, `not_found`,
@@ -126,6 +126,11 @@ as *retired*. Message wording may change at any time.
 | `amount_without_rate` | 422 invalid | since 0.33.0: an amount needs its rate – an `hours` position with a `level` and without `rate` (`field: rate`); when issuing a quote, a work package with an amount but no rate in its model: no `mean_rate` (`field: mean_rate`) or no `level` in the category model (`field: level`) |
 | `cap_mode_invalid` | 422 invalid | since 0.33.0: `cap_mode` is none of `cap`, `flat` (`field: cap_mode`), or is set while `cap` is null (`field: cap`) |
 | `correction_lead_only` | 403 forbidden | since 0.33.0: title, code and billable of a booking, its level outside a budget in the model `category`, and anything of someone else's booking, are corrected by Team Admins and the booking's Leads; a person corrects only the `level` of their own bookings that fall into a budget in the model `category` (`field` names the first other field) |
+| `bank_admin_only` | 403 forbidden | since 0.40.0: bank records (`bank/…`), `POST /bank/entries` and the payment of an expense report from the bank are for Team Admins only |
+| `bank_entries_only` | 409 conflict | since 0.40.0: the entries of a bank account and year (`bank/<account>.<year>`) change only through `POST /bank/entries`, never by a record write, delete or restore |
+| `office_costs_schema` | 409 conflict | since 0.40.0: `setting/office_costs` holds bank accounts (schema 2); a write without `accounts` (schema 1) would drop them |
+| `invoice_already_paid` | 409 conflict | since 0.40.0: the invoice is paid already – a payment needs an open rest; only a `reversal` goes on a paid invoice |
+| `payment_from_bank` | 409 conflict | since 0.40.0: a payment from the bank (`source` camt or csv) is on the invoice; `/unpaid` does not delete it – take it back with a `reversal` |
 
 The server app adds codes release by release; every new `ApiException`
 for a rule gets one (a unit test holds the services of receipts, expenses,
@@ -5357,7 +5362,8 @@ and in the history. No new capability. Fields, all optional:
 
 Unknown fields `422 invalid`. The server stores, it does not compute: the
 forecast (fixed costs by rhythm, 13th salary, VAT estimate, liquidity) is
-the Mac app's.
+the Mac app's. Since 0.40.0 the record has a schema 2 with bank accounts
+(«Bank entries, 0.40.0»).
 
 ## The team's customer types, 0.29.0 (2026-10-27) – `customer_types: 1`
 
@@ -6110,6 +6116,128 @@ mismatch search), `QuoteRules` (`texts`, `attachments`, the frozen
 (reserve, close, cancel, expiry; `LedgerAppender::appendReserved`),
 `DocumentService` (filing, serving, `verify?files`), `QuoteIssueService`,
 `QuoteDocumentService` (three kinds), the job `IssueExpiry`.
+
+## Bank entries, 0.40.0 (2026-11-05) – `bank_entries: 1`
+
+PLAN-BANK §3 (B2, model and server). `api: 2` stays; no migration (the
+records live in `ts_records`). Team Admins only: Leads and members get
+`403 bank_admin_only` on every bank record and route and never see one in
+the changes feed; they see the outcome on the invoice (`payments[]`) and
+the receipt (`paid_on`). The server checks and merges; the app reads the
+statements (camt.053/054, CSV), assigns and computes `diff`/`state`.
+
+### The record kind `bank`
+
+| key | content |
+|---|---|
+| `<account>.<year>` | `{ schema: 1, account, year, entries: [entry, …] }` – the entries of a bank account in a year (at most 2000, 768 KB). Written **only** through `POST /bank/entries`; a `PUT`, `DELETE` or restore of such a key is `409 bank_entries_only` |
+| `rules` | `{ schema: 1, salt, rules: [{ fp, direction, category?, cost_line?, ignored?, since, by? }] }` – the **team salt** (32–128 hex, made once at the first import; `iban_fp` and `party_fp` are SHA-256 with it) and at most 500 rules, one per counterparty fingerprint and `direction` (`debit`, `credit`), each with a `category` (optionally a `cost_line`) or `ignored: true` – never an invoice |
+| `plan.<YYYY-MM>` | `{ schema: 1, month, made_on, currencies: { "CHF": { "<category>": amount } } }` – the planned figures of a month; written with `version: 0`, so the first writer wins (a second gets `409 version_conflict`) |
+
+`<account>` is `^[a-z0-9][a-z0-9-]{0,31}$`, not `rules` or `plan`. Any other
+key: `422 invalid`. Categories: `receivables`, `other_in`, `salaries`,
+`social`, `rent`, `insurance`, `licenses`, `vat`, `costs`, `expenses`,
+`bank`, `other_out`, `internal`.
+
+An **entry** (unknown fields `422`, the field named):
+
+| Field | Rule |
+|---|---|
+| `key` | `<account>/<ref>`, ≤ 160, unique in the record: camt `AcctSvcrRef`, csv a SHA-256 of the line, manual `m/<YYYY-MM>/<category>` |
+| `account` | the record's account |
+| `source` | `camt`, `csv` or `manual` (default) |
+| `date` | a day in the record's year |
+| `amount` | number, credit positive, in the account's currency |
+| `currency`, `orig_currency` | null or three capital letters; `orig_amount` and `orig_currency` together or not at all |
+| `charges` | null or a number ≥ 0 (the bank's fees of the entry) |
+| `reversal`, `ignored`, `confirmed` | null or boolean; an ignored entry has no `category` and no `links` |
+| `code` | null or ≤ 40 of `A–Z a–z 0–9 /` (`ICDT/SALA`) |
+| `category` | null (open) or one of the categories |
+| `party` ≤ 120, `text` ≤ 140, `note` ≤ 200, `cost_line`, `rule`, `by`, `at` ≤ 64 | null or text without control characters |
+| `party_fp` | null or 64 lowercase hex |
+| `links[]` | at most 50 `{ kind: invoice \| receipt \| expense_report, id: <record key>, amount > 0 }` |
+| `parts` | null or an integer ≥ 1 (a collective entry) |
+
+Not stored: addresses, the counterparty's IBAN, the parts of a salary run,
+the file.
+
+### `POST /bank/entries`
+
+```json
+{ "account": "main", "entries": [ { "key": "main/2026-10-14-0001", "account": "main", "source": "camt",
+    "date": "2026-10-14", "amount": 12450, "currency": "CHF", "party": "…", "text": "…" } ] }
+```
+
+Every entry of `account`, at most 2000 per call (`413`). Under the team
+lock the server groups them by year and merges each into
+`bank/<account>.<year>` **per entry key**: a new key is added, a known one
+replaced – unless the stored entry is `confirmed` and the incoming one is
+not, then the stored one stays. Entries the call does not name stay as
+they are; nothing is deleted. Answer: `{ revision, records: [the year
+records], saved, unchanged, kept: [keys of confirmed entries left
+untouched] }`. Rate limit 60 per minute.
+
+### `setting/office_costs`, schema 2
+
+| Field | Rule |
+|---|---|
+| `schema` | `2` with `accounts` |
+| `accounts[]` | at most 20 `{ id, name ≤ 120, currency?, iban_fp?, role, credit_limit?, balances[] }`: `id` as `<account>` above, unique; `currency` null or three capital letters (null: the team's); `iban_fp` null or 64 hex; `role` `main`, `savings`, `vat`, `other`; `credit_limit` null or ≥ 0; `balances[]` at most 500 `{ date, amount, source, note? }` with `source` `camt`, `csv`, `manual` |
+| `experience_off[]` | categories without an experience value (from the list above) |
+| `costs[].account` | the account a cost line is paid from (`main` or an `id` of `accounts`) |
+
+Schema 1 (`balances` and `credit_limit` at the top, no `accounts`) stays
+valid as long as the stored record has no `accounts`; once it has, a write
+without `accounts` is `409 office_costs_schema` – an older Mac ghosts the
+editing instead of dropping accounts. The Mac app writes schema 1 to a
+server without `bank_entries` and reads schema 1 as one account `main` in
+the team's currency.
+
+### Invoices: `reference` and `payments[]`
+
+- **`reference`**: set by the server on issue – the QR reference (QRR)
+  with a QR-IBAN in the invoice's currency, otherwise in CHF and EUR the
+  creditor reference **RF** (ISO 11649) of the counter number and the year;
+  null for other currencies. On a draft null or ≤ 35 of `A–Z 0–9`. The app
+  prints it on the QR bill (QRR, SCOR) and in the GiroCode.
+- **`payments[]`** `{ date, amount, note?, source?, key?, kind? }`:
+  `source` `camt`, `csv`, `manual` (default), `key` the bank entry
+  (≤ 160), `kind` `payment` (default), `writeoff` (the rest booked off as
+  discount or fees) or `reversal` (a counter-payment, **negative**; every
+  other kind above 0). A payment is never deleted: unlinking and the
+  bank's reversal add a counter-payment.
+- **`POST /invoices/{key}/paid`** takes `source`, `bank_key` and `payment_kind` beside (`key` and `kind` belong to the path; stored as `key` and `kind`)
+  `paid_on`, `amount` and `note`. On a paid invoice only a `reversal`
+  (the invoice is issued again when the sum falls below the amount);
+  anything else is `409 invoice_already_paid`. The ledger action is
+  `payment` or `paid` as before.
+- **`POST /invoices/{key}/unpaid`** while a payment from the bank
+  (`source` camt or csv) is on the invoice: `409 payment_from_bank` – take
+  it back with a `reversal`.
+
+### Receipts and expense reports
+
+- Receipt: `paid_on` (null or a day) and `bank_key` (null or ≤ 160) – the
+  payment of a company receipt from the bank. Only Team Admins change
+  them, also on approved and billed receipts; a member's or Lead's write
+  keeps the stored values.
+- Expense report: `paid_on` and `bank_key` on the report (not on its
+  receipts), set by **`POST /expense-reports/{key}/payment`**
+  `{ paid_on, bank_key? }` – Team Admins (`403 bank_admin_only`), a fixed
+  report (`409 report_not_fixed`); `paid_on: null` takes the payment back.
+  Answer: the record.
+
+### Error codes
+
+New in the table «Error codes» at the top: `bank_admin_only` (403),
+`bank_entries_only`, `office_costs_schema`, `invoice_already_paid`,
+`payment_from_bank` (409).
+
+### Capability
+
+```json
+"timesister": { …, "bank_entries": 1 }
+```
 
 ## Advances, companions and receipts by customer, 0.39.0 (2026-11-05) – `advance_rules: 1`, `expenses_separate: 1`, `receipts_by_customer: 1`
 

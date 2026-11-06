@@ -95,6 +95,10 @@ final class CostWrites {
 			return null;
 		}
 		$tid = $m->tenantId;
+		if (!$m->manages()) {
+			// 0.40.0: the payment from the bank is the Team Admins'.
+			ReceiptRules::keepPayment($before, $after);
+		}
 		if (!$m->manages() && !ReceiptRules::ofLed($after, $led)) {
 			// Member triage: budget, cost position and invoice effect are the Lead's.
 			ReceiptRules::keepAssigned($before, $after);

@@ -145,6 +145,36 @@ final class ExpenseReportService {
 		});
 	}
 
+	// ------------------------------------------------------------ payment
+
+	/**
+	 * `POST /expense-reports/{key}/payment` `{ paid_on, bank_key? }` (0.40.0):
+	 * the payout of a fixed report from the bank, on the report; `paid_on`
+	 * null takes it back. Team Admins. @return array<string,mixed> the record
+	 */
+	public function payment(Membership $m, string $key, \stdClass $body): array {
+		BankRules::requireAdmin($m);
+		RecordValidator::checkAddress(ExpenseReportRules::KIND, $key);
+		$paid = $body->paid_on ?? null;
+		if ($paid !== null) {
+			$paid = IssueRules::paidOn($paid);
+		}
+		$bk = $body->bank_key ?? null;
+		return $this->tx->run(function () use ($m, $key, $paid, $bk): array {
+			$tid = $m->tenantId;
+			$this->tenants->bumpRevision($tid, 0);
+			[$rec, $d] = $this->report($tid, $key);
+			if (!ExpenseReportRules::is($d, ExpenseReportRules::FIXED)) {
+				throw ApiException::conflict('Only a fixed expense report is paid out.')->code(ErrorCode::REPORT_NOT_FIXED);
+			}
+			$d->paid_on = $paid;
+			$d->bank_key = $paid === null ? null : $bk;
+			$ops = [$this->op($key, $rec->getVersion(), $d)];
+			$top = $this->tenants->bumpRevision($tid, count($ops));
+			return $this->recordService->applyWithin($m, $ops, false, $top, true)['records'][0];
+		});
+	}
+
 	// ---------------------------------------------------------- documents
 
 	/**

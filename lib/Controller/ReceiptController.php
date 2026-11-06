@@ -158,6 +158,15 @@ final class ReceiptController extends BaseController {
 		return $this->run(fn () => $this->reports->reverse($this->tenants->current(), $key, $this->optionalBody()));
 	}
 
+	/** POST /expense-reports/{key}/payment `{ paid_on, bank_key? }` – the payout from the bank (0.40.0); Team Admins. */
+	#[ApiRoute(verb: 'POST', url: '/api/v1/expense-reports/{key}/payment')]
+	#[UserRateLimit(limit: 60, period: 60)]
+	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
+	#[NoAdminRequired]
+	public function payment(string $key): DataResponse {
+		return $this->run(fn () => $this->reports->payment($this->tenants->current(), $key, $this->body(self::MAX_BODY)));
+	}
+
 	/** GET /expense-reports/{key}/document?name= – a stored file; without name the first PDF (old reports: their PDF). */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/expense-reports/{key}/document')]
 	#[NoAdminRequired]

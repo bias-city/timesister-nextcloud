@@ -66,6 +66,38 @@ final class QrReferenceRules {
 		return $body . self::checkDigit($body);
 	}
 
+	/**
+	 * 0.40.0: the creditor reference (ISO 11649) of the counter and the year,
+	 * in CHF and EUR – «RF», two check digits (98 − mod 97), the body. Null for
+	 * other currencies or without a counter.
+	 */
+	public static function creditorReference(?int $counterNo, string $issuedOn, string $currency): ?string {
+		$year = substr($issuedOn, 0, 4);
+		if ($counterNo === null || $counterNo < 0 || !in_array(strtoupper($currency), ['CHF', 'EUR'], true) || !preg_match('/^\d{4}$/', $year)) {
+			return null;
+		}
+		$body = $counterNo . $year;
+		return 'RF' . sprintf('%02d', 98 - self::mod97($body . 'RF00')) . $body;
+	}
+
+	/** Is this a creditor reference with valid check digits (spaces allowed)? */
+	public static function isCreditorReference(string $reference): bool {
+		$r = strtoupper(str_replace(' ', '', $reference));
+		return preg_match('/^RF\d{2}[A-Z0-9]{1,21}$/', $r) === 1 && self::mod97(substr($r, 4) . substr($r, 0, 4)) === 1;
+	}
+
+	/** The remainder modulo 97 of digits and letters (A = 10 … Z = 35). */
+	private static function mod97(string $text): int {
+		$rest = 0;
+		foreach (str_split($text) as $c) {
+			$digits = ctype_digit($c) ? $c : (string)(ord($c) - ord('A') + 10);
+			foreach (str_split($digits) as $d) {
+				$rest = ($rest * 10 + (int)$d) % 97;
+			}
+		}
+		return $rest;
+	}
+
 	/** `issuer.besr_id`: null or exactly 6 digits. */
 	public static function checkBesrId(mixed $v): ?string {
 		if ($v === null || $v === '') {

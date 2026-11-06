@@ -104,6 +104,12 @@ final class ErrorCode {
 	public const AMOUNT_WITHOUT_RATE = 'amount_without_rate';
 	public const CAP_MODE_INVALID = 'cap_mode_invalid';
 	public const CORRECTION_LEAD_ONLY = 'correction_lead_only';
+	// ---- bank (0.40.0)
+	public const BANK_ADMIN_ONLY = 'bank_admin_only';
+	public const BANK_ENTRIES_ONLY = 'bank_entries_only';
+	public const OFFICE_COSTS_SCHEMA = 'office_costs_schema';
+	public const INVOICE_ALREADY_PAID = 'invoice_already_paid';
+	public const PAYMENT_FROM_BANK = 'payment_from_bank';
 	// ---- records and routes
 	public const EXCHANGE_RATE_SERVER_ONLY = 'exchange_rate_server_only';
 	public const VERSION_CONFLICT = 'version_conflict';

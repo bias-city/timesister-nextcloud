@@ -37,6 +37,8 @@ final class ReceiptRules {
 	public const SERVER = ['status', 'file', 'invoice', 'report', 'created_by', 'created_on', 'approved_by', 'approved_on', 'reject_reason', 'reopened_by', 'reopened_on'];
 	/** What a Lead or Team Admin may still change after approval; after billing only the note. */
 	public const CORRECTABLE = ['project', 'cost_kind', 'budget', 'cost', 'billed', 'invoice_effect', 'note'];
+	/** 0.40.0: the payment from the bank – Team Admins only, at any status; nobody else changes it. */
+	public const PAYMENT = ['paid_on', 'bank_key'];
 	/** Set only by Team Admins and the project's Leads; a member's write keeps the stored values (member triage). */
 	public const ASSIGNED = ['budget', 'cost', 'billed', 'invoice_effect'];
 	public const SUPPLIER_MAX = 120;
@@ -70,6 +72,14 @@ final class ReceiptRules {
 		self::text($d, 'note', self::NOTE_MAX, self::CONTROL_NOTE);
 		self::amounts($d);
 		ReceiptRecognition::validate($d);
+		$paid = $d->paid_on ?? null;
+		if ($paid !== null && (!is_string($paid) || !Time::isDay($paid))) {
+			throw ApiException::invalidField('paid_on');
+		}
+		$bk = $d->bank_key ?? null;
+		if ($bk !== null && (!is_string($bk) || $bk === '' || mb_strlen($bk) > 160 || preg_match(self::CONTROL, $bk))) {
+			throw ApiException::invalidField('bank_key');
+		}
 		$c = $d->currency ?? null;
 		if ($c !== null) {
 			if (!is_string($c) || preg_match(ProjectRules::CURRENCY_PATTERN, $c) !== 1) {
@@ -400,6 +410,13 @@ final class ReceiptRules {
 	 * while project and cost kind stay; otherwise budget and cost are
 	 * cleared and the effect is the default. No error.
 	 */
+	/** 0.40.0: a write by anyone but a Team Admin keeps the stored payment from the bank. */
+	public static function keepPayment(?\stdClass $before, \stdClass $after): void {
+		foreach (self::PAYMENT as $f) {
+			$after->$f = $before?->$f ?? null;
+		}
+	}
+
 	public static function keepAssigned(?\stdClass $before, \stdClass $after): void {
 		$project = $after->project ?? null;
 		$same = $before !== null && $project !== null && ($before->project ?? null) === $project;
@@ -540,7 +557,8 @@ final class ReceiptRules {
 		$out = [];
 		$keys = array_unique([...array_keys(get_object_vars($before)), ...array_keys(get_object_vars($after))]);
 		foreach ($keys as $k) {
-			if (in_array($k, self::SERVER, true)) {
+			// The payment from the bank is no change of the receipt (0.40.0, Team Admins only: keepPayment).
+			if (in_array($k, self::SERVER, true) || in_array($k, self::PAYMENT, true)) {
 				continue;
 			}
 			if (Json::encode([ReceiptRecognition::value($before, $k)]) !== Json::encode([ReceiptRecognition::value($after, $k)])) {

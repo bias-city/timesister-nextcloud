@@ -13,9 +13,13 @@ namespace OCA\TimeSister\Service;
  * read it (see RecordRights). Pure.
  *
  * `costs[]` {id, name, amount, due_day 1–31, rhythm, from, to?, kind,
- * note?, month13? 1–12, percent? 0–100}, `balances[]` {date, amount,
- * note?}, `reserve` (number ≥ 0 or null), `credit_limit` (number ≥ 0 or
- * null, since 0.35.0: the overdraft the bank grants), `schema` (integer).
+ * note?, month13? 1–12, percent? 0–100, account?}, `balances[]` {date,
+ * amount, note?}, `reserve` (number ≥ 0 or null), `credit_limit` (number
+ * ≥ 0 or null, since 0.35.0: the overdraft the bank grants), `schema`
+ * (integer). Schema 2 (0.40.0, PLAN-BANK §3.1): `accounts[]` {id, name,
+ * currency?, iban_fp?, role, credit_limit?, balances[] {date, amount,
+ * source, note?}} and `experience_off[]`; a stored record with accounts
+ * takes no write without them ({@see checkSchema()}).
  */
 final class OfficeCostRules {
 	public const KEY = 'office_costs';
@@ -25,8 +29,11 @@ final class OfficeCostRules {
 	public const BALANCES_MAX = 500;
 	public const NAME_MAX = 120;
 	public const NOTE_MAX = 500;
-	private const COST_FIELDS = ['id', 'name', 'amount', 'due_day', 'rhythm', 'from', 'to', 'kind', 'note', 'month13', 'percent'];
-	private const BALANCE_FIELDS = ['date', 'amount', 'note'];
+	public const ACCOUNTS_MAX = 20;
+	public const ROLES = ['main', 'savings', 'vat', 'other'];
+	private const COST_FIELDS = ['id', 'name', 'amount', 'due_day', 'rhythm', 'from', 'to', 'kind', 'note', 'month13', 'percent', 'account'];
+	private const BALANCE_FIELDS = ['date', 'amount', 'note', 'source'];
+	private const ACCOUNT_FIELDS = ['id', 'name', 'currency', 'iban_fp', 'role', 'credit_limit', 'balances'];
 
 	/** @throws ApiException 422 */
 	public static function validate(\stdClass $data): void {
@@ -52,7 +59,25 @@ final class OfficeCostRules {
 				case 'balances':
 					self::checkList($key, $value, self::BALANCES_MAX);
 					foreach ($value as $i => $balance) {
-						self::validateBalance($balance, $i);
+						self::validateBalance($balance, "balances[$i]");
+					}
+					break;
+				case 'accounts':
+					self::checkList($key, $value, self::ACCOUNTS_MAX);
+					$ids = [];
+					foreach ($value as $i => $account) {
+						$ids[] = self::validateAccount($account, $i);
+					}
+					if (count(array_unique($ids)) !== count($ids)) {
+						throw ApiException::invalid('Every bank account ID once.')->field('accounts');
+					}
+					break;
+				case 'experience_off':
+					self::checkList($key, $value, count(BankRules::CATEGORIES));
+					foreach ($value as $c) {
+						if (!in_array($c, BankRules::CATEGORIES, true)) {
+							throw ApiException::invalidField('experience_off');
+						}
 					}
 					break;
 				default:
@@ -128,10 +153,67 @@ final class OfficeCostRules {
 		if ($pc !== null && (!self::isNumber($pc) || $pc < 0 || $pc > 100)) {
 			throw ApiException::invalid(Message::of('“{field}” must be null or a number from 0 to 100.', ['field' => "$p.percent"]));
 		}
+		$a = $c->account ?? null;
+		if ($a !== null && (!is_string($a) || preg_match(BankRules::ACCOUNT_PATTERN, $a) !== 1)) {
+			throw ApiException::invalidField("$p.account");
+		}
 	}
 
-	private static function validateBalance(mixed $b, int $i): void {
-		$p = "balances[$i]";
+	/** One bank account of schema 2; returns its ID. */
+	private static function validateAccount(mixed $a, int $i): string {
+		$p = "accounts[$i]";
+		if (!($a instanceof \stdClass)) {
+			throw ApiException::invalid(Message::of('“{field}” must be an object.', ['field' => $p]));
+		}
+		foreach (array_keys(get_object_vars($a)) as $k) {
+			if (!in_array($k, self::ACCOUNT_FIELDS, true)) {
+				throw ApiException::invalid(Message::of('Unknown office costs field “{field}”.', ['field' => "$p.$k"]));
+			}
+		}
+		$id = $a->id ?? null;
+		if (!is_string($id) || preg_match(BankRules::ACCOUNT_PATTERN, $id) !== 1) {
+			throw ApiException::invalidField("$p.id");
+		}
+		self::checkText("$p.name", $a->name ?? null, self::NAME_MAX, false);
+		$cur = $a->currency ?? null;
+		if ($cur !== null && $cur !== '' && (!is_string($cur) || preg_match('/^[A-Z]{3}$/', $cur) !== 1)) {
+			throw ApiException::invalidField("$p.currency");
+		}
+		$fp = $a->iban_fp ?? null;
+		if ($fp !== null && (!is_string($fp) || preg_match('/^[0-9a-f]{64}$/', $fp) !== 1)) {
+			throw ApiException::invalidField("$p.iban_fp");
+		}
+		if (!in_array($a->role ?? 'main', self::ROLES, true)) {
+			throw ApiException::invalid(Message::of('“role” of a bank account is one of {values}.', ['values' => implode(', ', self::ROLES)]))->field("$p.role");
+		}
+		$l = $a->credit_limit ?? null;
+		if ($l !== null && (!self::isNumber($l) || $l < 0)) {
+			throw ApiException::invalid(Message::of('“{field}” must be null or a number from 0.', ['field' => "$p.credit_limit"]));
+		}
+		$balances = $a->balances ?? [];
+		self::checkList("$p.balances", $balances, self::BALANCES_MAX);
+		foreach ($balances as $j => $b) {
+			self::validateBalance($b, "$p.balances[$j]");
+		}
+		return $id;
+	}
+
+	/**
+	 * 0.40.0: once the stored record holds bank accounts (schema 2), a write
+	 * without `accounts` (schema 1, an older Mac) would drop them – 409.
+	 */
+	public static function checkSchema(?\stdClass $stored, ?string $json): void {
+		$accounts = $stored?->accounts ?? null;
+		if (!is_array($accounts) || $accounts === [] || $json === null) {
+			return;
+		}
+		$next = Json::decode($json);
+		if (!($next instanceof \stdClass) || !property_exists($next, 'accounts')) {
+			throw ApiException::conflict('The office costs hold bank accounts (schema 2); this app writes schema 1. Update the TimeSister app on the Mac.')->code(ErrorCode::OFFICE_COSTS_SCHEMA);
+		}
+	}
+
+	private static function validateBalance(mixed $b, string $p): void {
 		if (!($b instanceof \stdClass)) {
 			throw ApiException::invalid(Message::of('“{field}” must be an object.', ['field' => $p]));
 		}
@@ -145,5 +227,8 @@ final class OfficeCostRules {
 			throw ApiException::invalid(Message::of('“{field}” must be a number.', ['field' => "$p.amount"]));
 		}
 		self::checkText("$p.note", $b->note ?? null, self::NOTE_MAX, false);
+		if (!in_array($b->source ?? 'manual', BankRules::SOURCES, true)) {
+			throw ApiException::invalidField("$p.source");
+		}
 	}
 }

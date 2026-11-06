@@ -47,6 +47,15 @@ final class ExpenseReportRules {
 		if ($ready !== null && (!is_string($ready) || !Time::isDay($ready))) {
 			throw ApiException::invalid(Message::of('“{field}” must be a day in the format YYYY-MM-DD.', ['field' => 'ready_on']));
 		}
+		// 0.40.0: the payout from the bank (POST /expense-reports/{key}/payment).
+		$paid = $d->paid_on ?? null;
+		if ($paid !== null && (!is_string($paid) || !Time::isDay($paid))) {
+			throw ApiException::invalidField('paid_on');
+		}
+		$bk = $d->bank_key ?? null;
+		if ($bk !== null && (!is_string($bk) || $bk === '' || mb_strlen($bk) > 160 || preg_match('/[\x00-\x1F\x7F]/', $bk))) {
+			throw ApiException::invalidField('bank_key');
+		}
 	}
 
 	// ------------------------------------------------------------- status

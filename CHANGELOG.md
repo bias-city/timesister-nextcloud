@@ -1,5 +1,35 @@
 # Changes
 
+## 0.40.0 – 2026-11-05
+
+`api: 2` unchanged; capability `bank_entries: 1`; no migration. Additive for
+every client of 0.39.0, except that a schema-1 write of `office_costs` is
+refused once the record holds bank accounts.
+
+- **Bank entries.** The record kind `bank`, Team Admins only (`403
+  bank_admin_only` for Leads and members, also on reading): `<account>.<year>`
+  holds the entries of a bank account in a year, written only through
+  `POST /bank/entries` – an upsert per entry key under the team lock, a
+  confirmed entry wins against an unconfirmed one, nothing is deleted
+  (`409 bank_entries_only` for a record write); `rules` the team salt and
+  the rules per counterparty; `plan.<YYYY-MM>` a month's planned figures
+  (first writer wins).
+- **Bank accounts in the office costs.** `setting/office_costs` schema 2:
+  `accounts[]` (role, currency, IBAN fingerprint, credit limit, balances
+  with `source`), `experience_off[]`, `costs[].account`. Once accounts are
+  stored, a write without them is `409 office_costs_schema`.
+- **Payments with their source.** `payments[]` take `source` (camt, csv,
+  manual), `key` (the bank entry) and `kind` (payment, writeoff, reversal –
+  negative); `POST /invoices/{key}/paid` takes them, a reversal also on a
+  paid invoice; any other payment on a paid invoice is `409
+  invoice_already_paid`; `/unpaid` keeps a payment from the bank (`409
+  payment_from_bank`).
+- **Payment reference.** Issuing sets `reference` on the invoice: the QRR
+  with a QR-IBAN, else the RF creditor reference (ISO 11649) in CHF and EUR.
+- **Paid from the bank.** `paid_on` and `bank_key` on receipts (Team Admins,
+  at any status) and on expense reports through `POST
+  /expense-reports/{key}/payment`.
+
 ## 0.39.0 – 2026-11-05
 
 `api: 2` unchanged; capabilities `advance_rules: 1`, `expenses_separate: 1`,

@@ -134,6 +134,12 @@ use OCP\Capabilities\ICapability;
  * settings record. `receipts_by_customer: 1`: a receipt fits an invoice of
  * its project's customer; project, budget and cost position only with a
  * budget on the invoice and a cost position on the receipt.
+ * `bank_entries: 1` since 0.40.0: the record kind `bank` (entries per
+ * account and year as an upsert through POST /bank/entries, `rules` with
+ * the team salt, `plan.<month>`), Team Admins only; bank accounts in
+ * `setting/office_costs` (schema 2); payments with `source`, `key`, `kind`;
+ * the invoice's `reference`; `paid_on`/`bank_key` on receipts and expense
+ * reports (POST /expense-reports/{key}/payment).
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -141,7 +147,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, quote_template: int, credit_limit: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, quote_documents: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int, fee_models: int, planning_rate: int, rule_receipts: int, invoices_free: int, invoice_plan_records: int, entry_invoice: int, advance_rules: int, expenses_separate: int, receipts_by_customer: int}} */
+	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, quote_template: int, credit_limit: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, quote_documents: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int, fee_models: int, planning_rate: int, rule_receipts: int, invoices_free: int, invoice_plan_records: int, entry_invoice: int, advance_rules: int, expenses_separate: int, receipts_by_customer: int, bank_entries: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -190,6 +196,7 @@ final class Capabilities implements ICapability {
 				'advance_rules' => 1,
 				'expenses_separate' => 1,
 				'receipts_by_customer' => 1,
+				'bank_entries' => 1,
 			],
 		];
 	}

@@ -104,8 +104,8 @@ final class RecordRights {
 		if (BookingRules::isKind($kind)) {
 			return BookingRules::canRead($m->role, $m->uid, $kind, $key, $m->manages() ? [] : $this->ledProjects($m));
 		}
-		// 0.27.0: office costs, balances and reserve (cashflow) reach Team Admins only.
-		if ($kind === 'setting' && $key === OfficeCostRules::KEY) {
+		// 0.27.0: office costs, balances and reserve (cashflow) reach Team Admins only; 0.40.0 the bank too.
+		if (($kind === 'setting' && $key === OfficeCostRules::KEY) || $kind === BankRules::KIND) {
 			return $m->manages();
 		}
 		if (!$this->policy->canRead($m, $kind, $key, $accounts)) {
@@ -165,6 +165,10 @@ final class RecordRights {
 	public function requireWrite(Membership $m, string $kind, string $key): void {
 		if ($kind === ExchangeRateRules::KIND) {
 			throw ApiException::forbidden('Exchange rates are written by the server only.')->code(ErrorCode::EXCHANGE_RATE_SERVER_ONLY);
+		}
+		if ($kind === BankRules::KIND) {
+			BankRules::requireAdmin($m);
+			return;
 		}
 		if ($kind === RecordValidator::BILLING) {
 			BillingRules::requirePerson($key);

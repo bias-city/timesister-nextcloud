@@ -129,14 +129,44 @@ final class IssueRules {
 	}
 
 	/** `amount` of a payment: null (the open rest) or a finite number above 0. */
-	public static function paymentAmount(mixed $v): ?float {
-		if ($v === null) {
+	public static function paymentAmount(mixed $v, bool $reversal = false): ?float {
+		if ($v === null && !$reversal) {
 			return null;
 		}
-		if (!(is_int($v) || (is_float($v) && is_finite($v))) || $v <= 0) {
-			throw ApiException::invalid('“amount” must be a number above 0.');
+		if (!(is_int($v) || (is_float($v) && is_finite($v)))) {
+			throw ApiException::invalid('“amount” must be a number above 0.')->field('amount');
+		}
+		if ($reversal && $v >= 0) {
+			throw ApiException::invalid('“amount” of a reversal must be a number below 0.')->field('amount');
+		}
+		if (!$reversal && $v <= 0) {
+			throw ApiException::invalid('“amount” must be a number above 0.')->field('amount');
 		}
 		return round((float)$v, 2);
+	}
+
+	/**
+	 * 0.40.0: where a payment comes from – `source` (camt, csv, manual), `key` of the bank
+	 * entry (≤ 160), `kind` (payment, writeoff, reversal).
+	 *
+	 * @return array{source:string,key:?string,kind:string}
+	 */
+	public static function paymentFrom(\stdClass $body): array {
+		$source = $body->source ?? 'manual';
+		if (!in_array($source, BankRules::SOURCES, true)) {
+			throw ApiException::invalidField('source');
+		}
+		// On the wire the payment carries `payment_kind` and `bank_key`: `kind` and `key` belong to
+		// the path and are refused in any body (BaseController::body). Stored as `kind` and `key`.
+		$kind = $body->payment_kind ?? 'payment';
+		if (!in_array($kind, InvoiceRules::PAYMENT_KINDS, true)) {
+			throw ApiException::invalidField('payment_kind');
+		}
+		$key = $body->bank_key ?? null;
+		if ($key !== null && (!is_string($key) || $key === '' || mb_strlen($key) > 160 || preg_match(self::CONTROL_TEXT, $key))) {
+			throw ApiException::invalidField('bank_key');
+		}
+		return ['source' => $source, 'key' => $key, 'kind' => $kind];
 	}
 
 	/** `level` of a dunning request: an integer 0 to 3. */

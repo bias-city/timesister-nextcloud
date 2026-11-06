@@ -67,10 +67,12 @@ final class RecordService {
 		}
 	}
 
-	private static function noJob(string $kind): void {
+	/** 0.40.0: bank entries change only through POST /bank/entries (BankService). */
+	private static function noJob(string $kind, string $key = ''): void {
 		if ($kind === RecordValidator::JOB) {
 			throw ApiException::badRequest(Message::of('A {job} changes only through the {job} endpoints (/jobs).', ['job' => JobWord::JOB]));
 		}
+		BankRules::requireClientWrite($kind, $key);
 	}
 
 	/** @return array<string,mixed> */
@@ -151,6 +153,9 @@ final class RecordService {
 			}
 			return $this->jobs->presentFor($m, $r, $own, $this->present($r));
 		}
+		if ($kind === BankRules::KIND) {
+			BankRules::requireAdmin($m);
+		}
 		if (!$this->rights->canRead($m, $kind, $key, $r?->accountList() ?? [], $this->ownKeys($m), $r)) {
 			throw ApiException::forbidden('This account may not read this record.');
 		}
@@ -173,7 +178,7 @@ final class RecordService {
 
 	/** @return array<string,mixed> the new record */
 	public function put(Membership $m, string $kind, string $key, \stdClass $body): array {
-		self::noJob($kind);
+		self::noJob($kind, $key);
 		RecordValidator::checkAddress($kind, $key);
 		if ($kind !== 'project') {
 			$this->rights->requireWrite($m, $kind, $key);
@@ -210,7 +215,7 @@ final class RecordService {
 
 	/** @return array<string,mixed> the tombstone */
 	public function delete(Membership $m, string $kind, string $key, mixed $version): array {
-		self::noJob($kind);
+		self::noJob($kind, $key);
 		RecordValidator::checkAddress($kind, $key);
 		$this->rights->requireWrite($m, $kind, $key);
 		if ($version === null || $version === '') {
@@ -248,7 +253,7 @@ final class RecordService {
 					throw ApiException::badRequest('Each write needs “kind” and “key” as text.');
 				}
 				RecordValidator::checkAddress($kind, $key);
-				self::noJob($kind);
+				self::noJob($kind, $key);
 				if (in_array($kind, RecordRights::PER_RECORD, true)) {
 					$this->rights->requireWrite($m, $kind, $key);
 				}
@@ -324,7 +329,7 @@ final class RecordService {
 
 	/** @return array<string,mixed> the new record */
 	public function restore(Membership $m, string $kind, string $key, \stdClass $body): array {
-		self::noJob($kind);
+		self::noJob($kind, $key);
 		RecordValidator::checkAddress($kind, $key);
 		$this->rights->requireWrite($m, $kind, $key);
 		$version = RecordValidator::checkVersion($body->version ?? null, 'version');
@@ -478,6 +483,14 @@ final class RecordService {
 			}
 			if ($op['kind'] === 'person' && $op['json'] === null) {
 				$this->listTombstones[] = $op['key'];
+			}
+			if (!$system && $op['kind'] === 'setting' && $op['key'] === OfficeCostRules::KEY) {
+				// 0.40.0: once the stored record holds bank accounts, a write of schema 1 would drop them.
+				try {
+					OfficeCostRules::checkSchema($cur === null || $cur->isTombstone() ? null : InvoiceRules::decode($cur->getData()), $op['json']);
+				} catch (ApiException $e) {
+					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+				}
 			}
 			if ($op['kind'] === TemplateRules::KIND) {
 				// 0.25.0: a Lead's template against the stored one, under the team lock.

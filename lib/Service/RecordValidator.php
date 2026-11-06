@@ -15,7 +15,7 @@ namespace OCA\TimeSister\Service;
  */
 final class RecordValidator {
 	public const KINDS = ['person', 'region', 'project', 'customer', 'setting', 'job', 'billing', BookingRules::REPORT, BookingRules::MARK, InvoiceRules::KIND, QuoteRules::KIND,
-		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND, TemplateRules::KIND, CorrectionRules::KIND, ExchangeRateRules::KIND];
+		ReceiptRules::KIND, ExpenseRuleRules::KIND, ExpenseReportRules::KIND, TemplateRules::KIND, CorrectionRules::KIND, ExchangeRateRules::KIND, BankRules::KIND];
 	/** Jobs (0.6.0): readable as records, written only through /jobs. */
 	public const JOB = 'job';
 	/** Billing marks (0.7.6): rights per person, see {@see BillingRules}. */
@@ -164,6 +164,9 @@ final class RecordValidator {
 		} elseif ($kind === ExchangeRateRules::KIND) {
 			// 0.30.0: the ECB rates of a day, written by the server only.
 			ExchangeRateRules::validate($key, $data);
+		} elseif ($kind === BankRules::KIND) {
+			// 0.40.0: bank entries per account and year, rules with the team salt, a month's plan.
+			BankRules::validate($key, $data);
 		}
 		$accounts = [];
 		if ($kind === 'person' && property_exists($data, 'accounts') && $data->accounts !== null) {
@@ -180,6 +183,7 @@ final class RecordValidator {
 			QuoteRules::KIND => QuoteRules::MAX_BYTES,
 			TemplateRules::KIND => TemplateRules::MAX_BYTES,
 			ExpenseReportRules::KIND => ExpenseReportRules::MAX_BYTES,
+			BankRules::KIND => BankRules::MAX_BYTES,
 			default => self::MAX_DATA_BYTES,
 		};
 		if (strlen($json) > $max) {
@@ -188,6 +192,7 @@ final class RecordValidator {
 				InvoiceRules::KIND => ApiException::tooLarge('An invoice may be at most 768 KB.'),
 				QuoteRules::KIND => ApiException::tooLarge('A quote may be at most 768 KB.'),
 				ExpenseReportRules::KIND => ApiException::tooLarge('An expense report may be at most 768 KB.'),
+				BankRules::KIND => ApiException::tooLarge('A bank record may be at most 768 KB.'),
 				TemplateRules::KIND => ApiException::tooLarge('A template may be at most 256 KB.'),
 				default => ApiException::tooLarge('A record may be at most 256 KB.'),
 			};

@@ -227,6 +227,8 @@ final class IssueService {
 		$d->vat = $sums->rate;
 		$d->ledger_seq = $row->getIssueSeq();
 		$d->hash = null;
+		// 0.40.0: the payment reference – the QRR, else RF in CHF and EUR (PLAN-BANK §3.4).
+		$d->reference = $qrReference ?? QrReferenceRules::creditorReference($counterNo, $issuedOn, $currency);
 		$ops[] = $this->invoiceOp($key, $cur, $d);
 		$written = $this->recordService->applyWithin($m, $ops, false, $top, true);
 		return $this->reservation($written['records'][count($ops) - 1], $row);
@@ -771,7 +773,7 @@ final class IssueService {
 		$n->ledger_seq = $row->getIssueSeq();
 		$n->hash = null;
 		// The hand-over of the original (0.23.1/0.24.0) and its documents are not the new document's.
-		unset($n->reversed_by, $n->reverses, $n->credits, $n->external, $n->documents, $n->payments, $n->dunning_level, $n->dunned_on);
+		unset($n->reversed_by, $n->reverses, $n->credits, $n->external, $n->documents, $n->payments, $n->dunning_level, $n->dunned_on, $n->reference);
 		if ($kind === IssueRules::REVERSAL) {
 			$n->reverses = $key;
 		} else {
@@ -787,7 +789,9 @@ final class IssueService {
 	 * `POST /invoices/{key}/paid` and `/unpaid`. 0.27.0: `amount` records a
 	 * payment (a part or, missing, the open rest) in `payments`; the invoice
 	 * is paid once the payments reach its amount, `paid_on` is then the day
-	 * of the last payment. `/unpaid` takes all payments back.
+	 * of the last payment. `/unpaid` takes all payments back. 0.40.0: `source`,
+	 * `key` and `kind` of the payment; a `reversal` (negative) also on a paid
+	 * invoice; `/unpaid` keeps a payment from the bank (409 payment_from_bank).
 	 *
 	 * @return array<string,mixed> the record plus `ledger`
 	 */
@@ -798,20 +802,28 @@ final class IssueService {
 		$now = $this->time->getTime();
 		$paidOn = $paid ? IssueRules::paidOn($body->paid_on ?? null) : null;
 		$note = IssueRules::shortText($body->note ?? null, 'note');
-		$amount = $paid ? IssueRules::paymentAmount($body->amount ?? null) : null;
-		return $this->transaction(fn (): array => $this->paidWithin($m, $key, $paidOn, $note, $amount, $now));
+		$bank = $paid ? IssueRules::paymentFrom($body) : ['source' => 'manual', 'key' => null, 'kind' => 'payment'];
+		$amount = $paid ? IssueRules::paymentAmount($body->amount ?? null, $bank['kind'] === InvoiceRules::REVERSAL) : null;
+		return $this->transaction(fn (): array => $this->paidWithin($m, $key, $paidOn, $note, $amount, $now, $bank));
 	}
 
-	/** @return array<string,mixed> */
-	private function paidWithin(Membership $m, string $key, ?string $paidOn, ?string $note, ?float $amount, int $now): array {
+	/** @param array{source:string,key:?string,kind:string} $bank @return array<string,mixed> */
+	private function paidWithin(Membership $m, string $key, ?string $paidOn, ?string $note, ?float $amount, int $now, array $bank): array {
 		$tid = $m->tenantId;
 		[$cur, $d] = $this->invoiceRecord($tid, $key);
 		$row = $this->invoices->findByKey($tid, $key);
-		if ($paidOn !== null && ($row === null || $row->getStatus() !== InvInvoice::ISSUED)) {
+		$reversal = $bank['kind'] === InvoiceRules::REVERSAL;
+		if ($paidOn !== null && $row !== null && $row->getStatus() === InvInvoice::PAID && !$reversal) {
+			throw ApiException::conflict('The invoice is paid already; a payment needs an open rest.')->code(ErrorCode::INVOICE_ALREADY_PAID);
+		}
+		if ($paidOn !== null && ($row === null || !in_array($row->getStatus(), $reversal ? [InvInvoice::ISSUED, InvInvoice::PAID] : [InvInvoice::ISSUED], true))) {
 			throw ApiException::invalid('Only an issued invoice can be marked paid.');
 		}
 		if ($paidOn === null && ($row === null || $row->getStatus() !== InvInvoice::PAID)) {
 			throw ApiException::invalid('This invoice is not marked paid.');
+		}
+		if ($paidOn === null && InvoiceRules::fromBank($d)) {
+			throw ApiException::conflict('A payment from the bank stays; take it back with a reversal.')->code(ErrorCode::PAYMENT_FROM_BANK);
 		}
 		$top = $this->tenants->bumpRevision($tid, 1);
 		$payments = is_array($d->payments ?? null) ? $d->payments : [];
@@ -828,6 +840,16 @@ final class IssueService {
 				$p->date = $paidOn;
 				$p->amount = $sum;
 				$p->note = $note;
+				// 0.40.0: the source and the bank entry; the defaults stay out of the record.
+				if ($bank['source'] !== 'manual') {
+					$p->source = $bank['source'];
+				}
+				if ($bank['key'] !== null) {
+					$p->key = $bank['key'];
+				}
+				if ($bank['kind'] !== 'payment') {
+					$p->kind = $bank['kind'];
+				}
 				$payments[] = $p;
 				usort($payments, static fn (\stdClass $a, \stdClass $b): int => strcmp((string)$a->date, (string)$b->date));
 			}
