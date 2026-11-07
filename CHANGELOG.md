@@ -1,5 +1,36 @@
 # Changes
 
+## 0.41.0 – 2026-11-07
+
+`api: 2` unchanged; capability `corrections: 3`; no migration. Additive for
+every client of 0.40.0.
+
+- **Corrected times.** A correction (`POST /entries/correct` and the record
+  `correction`) also takes `from` and `to` (ISO 8601 with a zone): Team
+  Admins and the booking's Leads move start and end of a booking. One
+  booking or one occurrence moves as sent, date included; a series as a
+  whole keeps every date and takes the time of day and the duration, the
+  exceptions' `RECURRENCE-ID` and `EXDATE`/`RDATE` moving with it. Members
+  get `403 correction_lead_only`; a malformed time or an end before the
+  start is `422 correction_time_invalid`; an all-day booking answers
+  `failed`. Someone else's times move only once the person released them:
+  `times_correctable: true` on their person record (a new field, part of
+  the name card Leads read; a bool or `null`), otherwise the result is
+  `forbidden` with “the person has not released their times for
+  correction”. A list of hours (`source: list`) needs no release – its
+  Team Admin writes it anyway.
+- **A person writes their own fields.** `PUT /records/person/{own key}` by
+  the person themselves (any role) is accepted when the data carries one
+  of `times_correctable` or `vacation_calendar_optout`: those are taken
+  into the stored record (`null` removes one), everything else stays as
+  the Team Admin wrote it; `403` without one of them, for a record that
+  does not exist, for `DELETE` and for a restore. Before, a member's
+  vacation-calendar opt-out never reached the server.
+- **Reports with a level.** A booking in a `booking-report` may carry
+  `level` (a level id or `null`). The Mac client has written it since
+  0.27.0 and 0.40.0 refused every report that held one – after a level
+  correction the person's month no longer reached their Leads.
+
 ## 0.40.0 – 2026-11-05
 
 `api: 2` unchanged; capability `bank_entries: 1`; no migration. Additive for

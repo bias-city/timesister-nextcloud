@@ -298,6 +298,6 @@ class FeeModelRulesTest extends TestCase {
 	public function testCapability(): void {
 		$cap = (new Capabilities($this->createMock(IAppManager::class)))->getCapabilities()['timesister'];
 		$this->assertSame(1, $cap['fee_models']);
-		$this->assertSame([2, 2], [$cap['invoice_layout'], $cap['corrections']], 'the other flags stay');
+		$this->assertSame([2, 3], [$cap['invoice_layout'], $cap['corrections']], 'the other flags stay (corrections 3 since 0.41.0)');
 	}
 }

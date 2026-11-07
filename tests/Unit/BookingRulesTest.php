@@ -65,6 +65,8 @@ class BookingRulesTest extends TestCase {
 		$this->assertSame('ok', self::validReport(self::report([])), 'an empty month clears the report');
 		$this->assertSame('ok', self::validReport(self::report([self::booking(['end' => '24:00', 'minutes' => 0])])));
 		$this->assertSame('ok', self::validReport(self::report([], ['schema' => 1])));
+		// 0.41.0: the level the Mac writes with every booking (before, the whole report was refused).
+		$this->assertSame('ok', self::validReport(self::report([self::booking(['level' => 'fach']), self::booking(['id' => 'b2', 'level' => null])])));
 
 		$bad = [
 			'person not the key' => [self::report([], ['person' => 'noah'])],
@@ -91,6 +93,8 @@ class BookingRulesTest extends TestCase {
 			'code too long' => [self::report([self::booking(['code' => str_repeat('c', BookingRules::CODE_MAX + 1)])])],
 			'billable as text' => [self::report([self::booking(['billable' => 'yes'])])],
 			'billed as number' => [self::report([self::booking(['billed' => 1])])],
+			'level as number' => [self::report([self::booking(['level' => 2])])],
+			'level with a space' => [self::report([self::booking(['level' => 'senior lead'])])],
 			'same id twice' => [self::report([self::booking(), self::booking()])],
 			'too many' => [self::report(array_map(static fn (int $i) => ['id' => "b$i", 'date' => '2026-10-01', 'minutes' => 1], range(0, BookingRules::MAX_BOOKINGS)))],
 		];

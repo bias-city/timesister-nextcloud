@@ -104,6 +104,7 @@ final class ErrorCode {
 	public const AMOUNT_WITHOUT_RATE = 'amount_without_rate';
 	public const CAP_MODE_INVALID = 'cap_mode_invalid';
 	public const CORRECTION_LEAD_ONLY = 'correction_lead_only';
+	public const CORRECTION_TIME_INVALID = 'correction_time_invalid';
 	// ---- bank (0.40.0)
 	public const BANK_ADMIN_ONLY = 'bank_admin_only';
 	public const BANK_ENTRIES_ONLY = 'bank_entries_only';

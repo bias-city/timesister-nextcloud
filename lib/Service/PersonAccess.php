@@ -16,7 +16,7 @@ namespace OCA\TimeSister\Service;
 final class PersonAccess {
 	/** Allowlist: what is missing here only Team Admins and the person read. */
 	/** 0.27.0: `company` too - Leads see whose people booked on their projects. */
-	public const CARD = ['schema', 'login', 'first_name', 'last_name', 'initials', 'accounts', 'company'];
+	public const CARD = ['schema', 'login', 'first_name', 'last_name', 'initials', 'accounts', 'company', PersonRules::TIMES];
 
 	/** The name card: only the fields from CARD that exist; a Lead also gets the person's `levels` (0.27.0). */
 	public static function card(\stdClass $data, bool $lead = false): \stdClass {
@@ -30,6 +30,33 @@ final class PersonAccess {
 	}
 
 	/** The own person for whoever does not manage the team: everything but the admin-only fields – and, unless a Lead, the lead-only ones. */
+	/**
+	 * 0.41.0: a person's write of their own record keeps the stored record and takes only
+	 * {@see PersonRules::SELF_FIELDS} from what was sent (`null` removes a field). Nothing of
+	 * those sent: 403 – the person writes nothing else.
+	 *
+	 * @throws ApiException 403
+	 */
+	public static function selfWrite(\stdClass $stored, \stdClass $sent): \stdClass {
+		$out = clone $stored;
+		$any = false;
+		foreach (PersonRules::SELF_FIELDS as $f) {
+			if (!property_exists($sent, $f)) {
+				continue;
+			}
+			$any = true;
+			if ($sent->{$f} === null) {
+				unset($out->{$f});
+			} else {
+				$out->{$f} = $sent->{$f};
+			}
+		}
+		if (!$any) {
+			throw ApiException::forbidden(Message::of('A person writes only their own fields of their person record: {fields}.', ['fields' => implode(', ', PersonRules::SELF_FIELDS)]));
+		}
+		return $out;
+	}
+
 	public static function own(\stdClass $data, bool $lead = false): \stdClass {
 		$out = clone $data;
 		foreach ($lead ? PersonRules::ADMIN_ONLY : [...PersonRules::ADMIN_ONLY, ...PersonRules::LEAD_ONLY] as $field) {

@@ -73,8 +73,8 @@ class LevelBookingTest extends TestCase {
 		// A correction with `category` is refused as an unknown field.
 		$this->assertSame('“category” is not a field of a correction.', self::message(fn () => CorrectionRules::parseBody(self::obj('{"entries":[{"uid":"anna","event_uid":"e1"}],"category":"B"}'))));
 		$this->assertSame('“category” is not a field of a correction.', self::message(fn () => RecordValidator::validate('correction', CorrectionRules::key('anna', 'e1', null), self::obj('{"person":"anna","event_uid":"e1","category":"C"}'))));
-		$this->assertSame(['title', 'code', 'billable', 'level'], CorrectionRules::CHANGE_FIELDS);
-		$this->assertSame(['title', 'code', 'billable'], CorrectionRules::LEAD_FIELDS);
+		$this->assertSame(['title', 'code', 'billable', 'level', 'from', 'to'], CorrectionRules::CHANGE_FIELDS, '0.41.0: the times');
+		$this->assertSame(['title', 'code', 'billable', 'from', 'to'], CorrectionRules::LEAD_FIELDS);
 		$this->assertTrue(CorrectionRules::levelOnly(['level' => 'b']));
 		$this->assertTrue(CorrectionRules::levelOnly(['level' => null]));
 		$this->assertFalse(CorrectionRules::levelOnly(['level' => 'b', 'title' => 'x']));

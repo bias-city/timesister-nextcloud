@@ -21,7 +21,7 @@ final class CorrectionMessages {
 			'user' => is_string($p['user'] ?? null) ? $p['user'] : '',
 		];
 		return match ($subject) {
-			self::REAPPLIED => Message::of('The correction by {user} of “{title}” was restored – title, code, billable and level are changed by the lead of the project.', $v),
+			self::REAPPLIED => Message::of('The correction by {user} of “{title}” was restored – title, code, billable, level and times are changed by the lead of the project.', $v),
 			default => null,
 		};
 	}

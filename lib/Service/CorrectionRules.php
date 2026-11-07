@@ -13,7 +13,8 @@ namespace OCA\TimeSister\Service;
  * bookings that fall into a budget in the model `category` –; the app
  * writes that into the event of the person's time calendar. Pure: the
  * body, the record, the rights, the lock, and the rewriting of the iCal
- * text. Date, start and duration are never touched; the level is stored
+ * text. 0.41.0: `from` and `to` move start and end ({@see CorrectionTimes}),
+ * Team Admins and Leads only; the level is stored
  * as `X-TIMESISTER-LEVEL:<id>` (never a rate); billable
  * as the category `non-billable`, exactly as the clients write it.
  *
@@ -47,19 +48,19 @@ final class CorrectionRules {
 	private const RECURRENCE_PATTERN = '/^\d{8}(T\d{6})?$/';
 	/** A `#code` with an optional share (`:60%`, `:1.5h`), not glued to a word. */
 	private const TOKEN = '/(?<![\p{L}\p{N}])#[\p{L}\p{N}.\-_\/]+(?::[0-9][0-9.,]*[%hH]?)?/u';
-	private const FIELDS = ['entries', 'title', 'code', 'billable', 'level'];
-	private const RECORD_FIELDS = ['person', 'event_uid', 'recurrence', 'title', 'code', 'billable', 'level'];
-	public const CHANGE_FIELDS = ['title', 'code', 'billable', 'level'];
-	/** 0.33.0: the fields that stay with Team Admins and Leads; `level` is also the person's in the model `category`. */
-	public const LEAD_FIELDS = ['title', 'code', 'billable'];
+	private const FIELDS = ['entries', 'title', 'code', 'billable', 'level', 'from', 'to'];
+	private const RECORD_FIELDS = ['person', 'event_uid', 'recurrence', 'title', 'code', 'billable', 'level', 'from', 'to'];
+	public const CHANGE_FIELDS = ['title', 'code', 'billable', 'level', 'from', 'to'];
+	/** 0.33.0: the fields that stay with Team Admins and Leads; `level` is also the person's in the model `category`. 0.41.0: `from`, `to`. */
+	public const LEAD_FIELDS = ['title', 'code', 'billable', 'from', 'to'];
 	/** Invoice statuses that lock a booking (a draft does not). */
 	private const LOCKING = ['issued', 'paid', HandoverRules::STATUS];
 
 	// ---------------------------------------------------------------- body
 
 	/**
-	 * `{ entries: [{uid, event_uid}], title?, code?, billable?, level? }` –
-	 * at least one of the four fields; `level: null` removes the level.
+	 * `{ entries: [{uid, event_uid}], title?, code?, billable?, level?, from?, to? }` –
+	 * at least one of the fields; `level: null` removes the level.
 	 *
 	 * @return array{entries:list<array{uid:string,event_uid:string}>,change:array<string,mixed>}
 	 * @throws ApiException 422
@@ -88,7 +89,7 @@ final class CorrectionRules {
 	}
 
 	/**
-	 * The four fields of a change, checked and cleaned; at least one.
+	 * The fields of a change, checked and cleaned; at least one.
 	 *
 	 * @return array<string,mixed>
 	 * @throws ApiException 422
@@ -122,8 +123,9 @@ final class CorrectionRules {
 			}
 			$change['level'] = $l;
 		}
+		CorrectionTimes::parse($body, $change);
 		if ($change === []) {
-			throw ApiException::invalid('A correction changes at least one of title, code, billable, level.');
+			throw ApiException::invalid('A correction changes at least one of title, code, billable, level, from, to.');
 		}
 		return $change;
 	}
@@ -246,6 +248,11 @@ final class CorrectionRules {
 		return $newCode === null || self::led(mb_strtolower($newCode), $ledCodes);
 	}
 
+	/** Does the change move start or end (0.41.0)? @param array<string,mixed> $change */
+	public static function movesTimes(array $change): bool {
+		return array_key_exists('from', $change) || array_key_exists('to', $change);
+	}
+
 	/** Does the change touch the level only (the person's own right, 0.33.0)? @param array<string,mixed> $change */
 	public static function levelOnly(array $change): bool {
 		return array_keys($change) === ['level'];
@@ -334,7 +341,7 @@ final class CorrectionRules {
 
 	/** 403 `correction_lead_only`: only Team Admins and the booking's Leads change this field. */
 	public static function leadOnly(string $field): ApiException {
-		return ApiException::forbidden('Title, code and billable of a booking, its level outside a budget by category, and anything of someone else’s booking, are corrected by Team Admins and the booking’s Leads; you correct the level of your own bookings in a budget by category.')->code(ErrorCode::CORRECTION_LEAD_ONLY)->field($field);
+		return ApiException::forbidden('Title, code, billable and times of a booking, its level outside a budget by category, and anything of someone else’s booking, are corrected by Team Admins and the booking’s Leads; you correct the level of your own bookings in a budget by category.')->code(ErrorCode::CORRECTION_LEAD_ONLY)->field($field);
 	}
 
 	/**
@@ -393,21 +400,16 @@ final class CorrectionRules {
 	 */
 	public static function apply(string $ics, array $change, string $nowUtc, ?string $recurrence = null): string {
 		[$head, $blocks, $tail] = self::split($ics);
-		if ($recurrence !== null) {
-			$hit = self::exceptionIndex($blocks, $recurrence);
-			if ($hit === null) {
-				$master = self::masterIndex($blocks);
-				if ($master === null) {
-					return $ics;
-				}
-				array_splice($blocks, $master + 1, 0, [self::exceptionLines($blocks[$master], $recurrence)]);
-				$hit = $master + 1;
+		$targets = self::targetsOf($blocks, $recurrence, true);
+		if ($targets === null) {
+			return $ics;
+		}
+		$times = self::timesFor($blocks, $targets, $change, $recurrence);
+		foreach ($targets as $i) {
+			if (is_array($times)) {
+				$blocks[$i] = CorrectionTimes::write($blocks[$i], $times['times'][$i] ?? null, $times['shift']);
 			}
-			$blocks[$hit] = self::rewrite($blocks[$hit], $change, $nowUtc);
-		} else {
-			foreach ($blocks as $i => $b) {
-				$blocks[$i] = self::rewrite($b, $change, $nowUtc);
-			}
+			$blocks[$i] = self::rewrite($blocks[$i], $change, $nowUtc);
 		}
 		$out = $head;
 		foreach ($blocks as $b) {
@@ -426,19 +428,88 @@ final class CorrectionRules {
 	 */
 	public static function met(string $ics, array $change, ?string $recurrence = null): bool {
 		[, $blocks] = self::split($ics);
-		if ($blocks === []) {
+		$targets = self::targetsOf($blocks, $recurrence, false);
+		if ($targets === null || $targets === []) {
 			return false;
 		}
-		if ($recurrence !== null) {
-			$hit = self::exceptionIndex($blocks, $recurrence);
-			return $hit !== null && self::metBy($blocks[$hit], $change);
+		// Times that cannot change (all day, end before start) count as met: nothing to write for them.
+		$times = self::timesFor($blocks, $targets, $change, $recurrence);
+		if (is_array($times) && $times['shift'] !== 0) {
+			return false;
 		}
-		foreach ($blocks as $b) {
-			if (!self::metBy($b, $change)) {
+		foreach ($targets as $i) {
+			if (!self::metBy($blocks[$i], $change)) {
+				return false;
+			}
+			if (is_array($times) && isset($times['times'][$i]) && !CorrectionTimes::metBy($blocks[$i], $times['times'][$i])) {
 				return false;
 			}
 		}
 		return true;
+	}
+
+	/**
+	 * Why the times of the change cannot go into this object (an all-day
+	 * booking, the end before the start); null when they can or none change.
+	 *
+	 * @param array<string,mixed> $change
+	 */
+	public static function timeProblem(string $ics, array $change, ?string $recurrence = null): ?string {
+		if (!CorrectionTimes::touches($change)) {
+			return null;
+		}
+		[, $blocks] = self::split($ics);
+		$targets = self::targetsOf($blocks, $recurrence, true);
+		$times = $targets === null ? null : self::timesFor($blocks, $targets, $change, $recurrence);
+		return is_string($times) ? $times : null;
+	}
+
+	/**
+	 * The blocks a change goes into: every VEVENT, or the exception of the
+	 * recurrence (with `$create` made from the master when there is none).
+	 *
+	 * @param list<list<string>> $blocks
+	 * @return ?list<int>
+	 */
+	private static function targetsOf(array &$blocks, ?string $recurrence, bool $create): ?array {
+		if ($blocks === []) {
+			return null;
+		}
+		if ($recurrence === null) {
+			return array_keys($blocks);
+		}
+		$hit = self::exceptionIndex($blocks, $recurrence);
+		if ($hit !== null) {
+			return [$hit];
+		}
+		if (!$create) {
+			return [];
+		}
+		$master = self::masterIndex($blocks);
+		if ($master === null) {
+			return null;
+		}
+		array_splice($blocks, $master + 1, 0, [self::exceptionLines($blocks[$master], $recurrence)]);
+		return [$master + 1];
+	}
+
+	/**
+	 * The planned times of the targets ({@see CorrectionTimes::plan()}); a
+	 * series as a whole when the object recurs and no occurrence is named.
+	 *
+	 * @param list<list<string>> $blocks
+	 * @param list<int> $targets
+	 * @param array<string,mixed> $change
+	 * @return array{times:array<int,array{0:string,1:string}>,shift:int}|string|null
+	 */
+	private static function timesFor(array $blocks, array $targets, array $change, ?string $recurrence): array|string|null {
+		if (!CorrectionTimes::touches($change) || $targets === []) {
+			return null;
+		}
+		$master = self::masterIndex($blocks) ?? 0;
+		$mp = self::propsOf($blocks[$master]);
+		$whole = $recurrence === null && (count($blocks) > 1 || isset($mp['RRULE']) || isset($mp['RDATE']));
+		return CorrectionTimes::plan($blocks, $whole ? $targets : [$targets[0]], $change, $whole, $master);
 	}
 
 	/**
@@ -493,7 +564,7 @@ final class CorrectionRules {
 	 * @param list<string> $lines
 	 * @return array<string,list<array{i:int,value:string,params:array<string,string>}>>
 	 */
-	private static function propsOf(array $lines): array {
+	public static function propsOf(array $lines): array {
 		$props = [];
 		$nested = 0;
 		foreach ($lines as $i => $line) {
@@ -590,7 +661,7 @@ final class CorrectionRules {
 	}
 
 	/** @param array<string,string> $params */
-	private static function paramText(array $params): string {
+	public static function paramText(array $params): string {
 		$s = '';
 		foreach ($params as $k => $v) {
 			$s .= ';' . $k . '=' . (preg_match('/[;:,]/', $v) === 1 ? '"' . $v . '"' : $v);

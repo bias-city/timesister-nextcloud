@@ -37,9 +37,11 @@ final class BookingRules {
 	/** One month in minutes: a booking never runs longer. */
 	public const MAX_MINUTES = 44640;
 	public const HASH_LENGTH = 32;
+	/** 0.41.0: the booking's level as the client wrote it (`X-TIMESISTER-LEVEL`), a level id. */
+	private const LEVEL_PATTERN = '/^[a-z0-9][a-z0-9-]{0,39}$/';
 
 	private const REPORT_FIELDS = ['schema', 'person', 'project', 'month', 'bookings', 'at'];
-	private const BOOKING_FIELDS = ['id', 'date', 'start', 'end', 'minutes', 'code', 'title', 'notes', 'billable', 'billed'];
+	private const BOOKING_FIELDS = ['id', 'date', 'start', 'end', 'minutes', 'code', 'title', 'notes', 'billable', 'billed', 'level'];
 	private const MARK_FIELDS = ['schema', 'person', 'project', 'uid', 'billable'];
 	/** Control characters; notes keep tab and line breaks. */
 	private const CONTROL = '/[\x00-\x1F\x7F]/';
@@ -209,6 +211,10 @@ final class BookingRules {
 			if ($v !== null && !is_bool($v)) {
 				throw ApiException::notBool($f);
 			}
+		}
+		$level = $b->level ?? null;
+		if ($level !== null && (!is_string($level) || !preg_match(self::LEVEL_PATTERN, $level))) {
+			throw ApiException::invalidField('level');
 		}
 		return $id;
 	}

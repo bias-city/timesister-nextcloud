@@ -20,8 +20,12 @@ final class PersonRules {
 	public const COMPANY = 'company';
 	public const COMPANY_MAX = 80;
 	public const CREDITOR = 'creditor_account';
+	/** 0.41.0: the person lets Team Admins and Leads correct start and end of their bookings (`from`/`to`). */
+	public const TIMES = 'times_correctable';
 	/** What only Team Admins read, even on the own person. */
 	public const ADMIN_ONLY = [self::COST_RATES];
+	/** 0.41.0: the fields a person writes on their own record (merged into the stored one, {@see PersonAccess::selfWrite()}). */
+	public const SELF_FIELDS = [self::TIMES, 'vacation_calendar_optout'];
 	/** What Team Admins and Leads read, never a member - not on the own person either. */
 	public const LEAD_ONLY = [self::LEVELS];
 
@@ -41,6 +45,11 @@ final class PersonRules {
 		$company = $data->{self::COMPANY} ?? null;
 		if ($company !== null && (!is_string($company) || mb_strlen($company) > self::COMPANY_MAX || !mb_check_encoding($company, 'UTF-8') || preg_match('/[\x00-\x1F\x7F]/', $company))) {
 			throw ApiException::invalid(Message::of('“{field}” must be null or text of at most {max} characters.', ['field' => self::COMPANY, 'max' => self::COMPANY_MAX]));
+		}
+		// 0.41.0: the person's release of their times for correction, true, false or null.
+		$times = $data->{self::TIMES} ?? null;
+		if ($times !== null && !is_bool($times)) {
+			throw ApiException::notBool(self::TIMES);
 		}
 		self::rates($data, self::COST_RATES);
 		LevelRules::validatePerson($data->{self::LEVELS} ?? null);

@@ -76,6 +76,13 @@ class CorrectionRulesTest extends TestCase {
 		$this->assertFalse(CorrectionRules::allowed(Role::LEAD, $led, ['d2001'], null), 'd2001 is not under d200');
 	}
 
+	/** 0.41.0: from or to move the times - the person's release is asked for someone else's booking. */
+	public function testMovesTimes(): void {
+		self::assertTrue(CorrectionRules::movesTimes(['from' => '2026-10-05T08:00:00Z']));
+		self::assertTrue(CorrectionRules::movesTimes(['title' => 'x', 'to' => '2026-10-05T09:00:00Z']));
+		self::assertFalse(CorrectionRules::movesTimes(['title' => 'x', 'level' => 'a']));
+	}
+
 	public function testLock(): void {
 		$row = static fn (string $status, string $number): array => ['invoice_id' => 1, 'start' => '2026-10-01T08:00:00', 'number' => $number, 'status' => $status, 'rkey' => 'inv-1'];
 		$this->assertNull(CorrectionRules::lockedBy([], false));

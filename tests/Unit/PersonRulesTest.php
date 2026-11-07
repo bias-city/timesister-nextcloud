@@ -45,6 +45,28 @@ class PersonRulesTest extends TestCase {
 		self::assertStringContainsString('company', self::outcome(fn () => PersonRules::validate(self::obj('{"login":"a","company":5}'))));
 	}
 
+	/** 0.41.0: the person's release of their times for correction - a bool or null, part of the name card. */
+	public function testTimesCorrectable(): void {
+		self::assertSame('', self::outcome(fn () => PersonRules::validate(self::obj('{"login":"a","times_correctable":true}'))));
+		self::assertSame('', self::outcome(fn () => PersonRules::validate(self::obj('{"login":"a","times_correctable":null}'))));
+		self::assertStringContainsString('times_correctable', self::outcome(fn () => PersonRules::validate(self::obj('{"login":"a","times_correctable":"yes"}'))));
+		$card = PersonAccess::card(self::obj('{"login":"a","first_name":"Ann","times_correctable":true}'));
+		self::assertTrue($card->times_correctable);
+	}
+
+	/** 0.41.0: the person's own write keeps the stored record and takes only the self fields. */
+	public function testSelfWrite(): void {
+		$stored = self::obj('{"login":"a","first_name":"Ann","cost_rates":[{"from":"2026-01-01","rate":100}],"levels":[]}');
+		$out = PersonAccess::selfWrite($stored, self::obj('{"login":"a","times_correctable":true,"company":"X"}'));
+		self::assertTrue($out->times_correctable);
+		self::assertSame('Ann', $out->first_name);
+		self::assertObjectNotHasProperty('company', $out, 'company is not a self field');
+		self::assertCount(1, $out->cost_rates, 'the admin-only fields stay');
+		$off = PersonAccess::selfWrite($out, self::obj('{"login":"a","times_correctable":null}'));
+		self::assertObjectNotHasProperty('times_correctable', $off);
+		self::assertStringContainsString('own fields', self::outcome(fn () => PersonAccess::selfWrite($stored, self::obj('{"login":"a","first_name":"Bob"}'))));
+	}
+
 	public function testAdminOnlyAndCard(): void {
 		$own = PersonAccess::own(self::obj('{"login":"a","company":"S2L","cost_rates":[],"levels":[]}'));
 		self::assertObjectNotHasProperty('levels', $own);

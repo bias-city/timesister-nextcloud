@@ -217,6 +217,9 @@ final class RecordService {
 	public function delete(Membership $m, string $kind, string $key, mixed $version): array {
 		self::noJob($kind, $key);
 		RecordValidator::checkAddress($kind, $key);
+		if ($kind === 'person') {
+			$this->policy->requireWrite($m);
+		}
 		$this->rights->requireWrite($m, $kind, $key);
 		if ($version === null || $version === '') {
 			throw ApiException::missing('version', true);
@@ -254,7 +257,7 @@ final class RecordService {
 				}
 				RecordValidator::checkAddress($kind, $key);
 				self::noJob($kind, $key);
-				if (in_array($kind, RecordRights::PER_RECORD, true)) {
+				if (in_array($kind, RecordRights::PER_RECORD, true) || $kind === 'person') {
 					$this->rights->requireWrite($m, $kind, $key);
 				}
 				$version = RecordValidator::checkVersion($w->version ?? null);
@@ -331,6 +334,9 @@ final class RecordService {
 	public function restore(Membership $m, string $kind, string $key, \stdClass $body): array {
 		self::noJob($kind, $key);
 		RecordValidator::checkAddress($kind, $key);
+		if ($kind === 'person') {
+			$this->policy->requireWrite($m);
+		}
 		$this->rights->requireWrite($m, $kind, $key);
 		$version = RecordValidator::checkVersion($body->version ?? null, 'version');
 		$current = RecordValidator::checkVersion($body->current ?? null, 'current');
@@ -480,6 +486,20 @@ final class RecordService {
 			if ($outcome !== VersionCheck::OK) {
 				$problems[] = ['op' => $op, 'outcome' => $outcome, 'current' => $cur === null ? null : $this->present($cur)];
 				continue;
+			}
+			if (!$system && $op['kind'] === 'person' && !$m->manages()) {
+				// 0.41.0: the person's own write - their fields only, into the stored record; never a new record or a tombstone.
+				$stored = $cur === null || $cur->isTombstone() ? null : InvoiceRules::decode($cur->getData());
+				if ($op['json'] === null || $stored === null || $cur === null) {
+					$e = ApiException::forbidden('Only Team Admins create and delete person records.');
+					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+				}
+				try {
+					$op['json'] = Json::encode(PersonAccess::selfWrite($stored, Json::decode($op['json']) ?? new \stdClass()));
+				} catch (ApiException $e) {
+					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+				}
+				$op['accounts'] = $cur->accountList();
 			}
 			if ($op['kind'] === 'person' && $op['json'] === null) {
 				$this->listTombstones[] = $op['key'];

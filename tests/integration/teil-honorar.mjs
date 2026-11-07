@@ -104,7 +104,7 @@ export async function honorar() {
 		head('Fee models: capability and the team’s levels')
 		{
 			const cap = (await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')).data?.capabilities?.timesister
-			check(`capability fee_models: 1, version ${APP_VERSION}, invoice_layout 2, corrections 2`, cap?.fee_models === 1 && cap?.version === APP_VERSION && cap?.invoice_layout === 2 && cap?.corrections === 2, cap)
+			check(`capability fee_models: 1, version ${APP_VERSION}, invoice_layout 2, corrections 3`, cap?.fee_models === 1 && cap?.version === APP_VERSION && cap?.invoice_layout === 2 && cap?.corrections === 3, cap)
 			const bad = await ocs(A, 'PUT', rpath('setting', 'settings'), { version: settingsVersion, data: { ...base, fee_model: 'hoai' } })
 			expect('settings with an unknown fee_model', bad, 422, 'invalid')
 			check('… fee_model_invalid, field fee_model', coded(bad, 'fee_model_invalid', 'fee_model'), bad.data)
@@ -221,6 +221,18 @@ export async function honorar() {
 			check('the Lead sets the level of their own booking beyond their projects (category budget)', leadOwn.status === 200 && leadOwn.data?.results?.[0]?.status === 'ok' && leadOwn.data?.results?.[0]?.level === 'kat-d', leadOwn.data)
 			const leadOwnTitle = await ocs(L, 'POST', '/entries/correct', { entries: [{ uid: 'zblead', event_uid: EV3 }], title: 'Anders' })
 			check('… but not its title: status forbidden', leadOwnTitle.status === 200 && leadOwnTitle.data?.results?.[0]?.status === 'forbidden', leadOwnTitle.data)
+
+			// 0.41.0: start and end of someone else's booking only once the person released their times (person record).
+			const cur = await ocs(A, 'GET', '/records/person/zbuser1')
+			const pd = cur.status === 200 ? cur.data.data : { login: 'zbuser1', first_name: 'Mila', accounts: ['zbuser1'] }
+			expect('zbuser1 has not released their times', await ocs(A, 'PUT', '/records/person/zbuser1', { version: cur.status === 200 ? cur.data.version : 0, data: { ...pd, times_correctable: false } }), 200)
+			const held = await ocs(L, 'POST', '/entries/correct', { entries: [{ uid: 'zbuser1', event_uid: EV2 }], from: '2026-10-13T09:00:00Z', to: '2026-10-13T10:00:00Z' })
+			check('the Lead moves the times of a booking whose person has not released them: status forbidden', held.status === 200 && held.data?.results?.[0]?.status === 'forbidden' && /released/.test(held.data?.results?.[0]?.message ?? ''), held.data)
+			const rel = await ocs(A, 'GET', '/records/person/zbuser1')
+			expect('zbuser1 releases their times (times_correctable)', await ocs(A, 'PUT', '/records/person/zbuser1', { version: rel.data.version, data: { ...rel.data.data, times_correctable: true } }), 200)
+			check('… the name card for the Lead shows it', (await ocs(L, 'GET', '/records/person/zbuser1')).data?.data?.times_correctable === true)
+			const movedOwn = await ocs(L, 'POST', '/entries/correct', { entries: [{ uid: 'zbuser1', event_uid: EV2 }], from: '2026-10-13T09:00:00Z', to: '2026-10-13T10:00:00Z' })
+			check('… now the Lead moves start and end', movedOwn.status === 200 && movedOwn.data?.results?.[0]?.status === 'ok' && (movedOwn.data?.results?.[0]?.ics ?? '').includes('DTSTART:20261013T090000Z'), movedOwn.data)
 
 			// The record: the person's write keeps the Lead's fields.
 			const led = await ocs(L, 'PUT', rpath('correction', CK), { version: 0, data: { person: 'zbuser1', event_uid: EV1, title: 'Vorprojekt Lead' } })

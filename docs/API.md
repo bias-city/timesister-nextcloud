@@ -125,7 +125,8 @@ as *retired*. Message wording may change at any time.
 | `no_levels` | 422 invalid | since 0.33.0: the team has no levels, and a budget in the model `role` or `category` needs at least one (`field: levels`, with `budget`, the id); raised when issuing an invoice that bills hours of such a budget and a quote with such a budget |
 | `amount_without_rate` | 422 invalid | since 0.33.0: an amount needs its rate – an `hours` position with a `level` and without `rate` (`field: rate`); when issuing a quote, a work package with an amount but no rate in its model: no `mean_rate` (`field: mean_rate`) or no `level` in the category model (`field: level`) |
 | `cap_mode_invalid` | 422 invalid | since 0.33.0: `cap_mode` is none of `cap`, `flat` (`field: cap_mode`), or is set while `cap` is null (`field: cap`) |
-| `correction_lead_only` | 403 forbidden | since 0.33.0: title, code and billable of a booking, its level outside a budget in the model `category`, and anything of someone else's booking, are corrected by Team Admins and the booking's Leads; a person corrects only the `level` of their own bookings that fall into a budget in the model `category` (`field` names the first other field) |
+| `correction_lead_only` | 403 forbidden | since 0.33.0: title, code and billable of a booking (0.41.0: also `from` and `to`), its level outside a budget in the model `category`, and anything of someone else's booking, are corrected by Team Admins and the booking's Leads; a person corrects only the `level` of their own bookings that fall into a budget in the model `category` (`field` names the first other field) |
+| `correction_time_invalid` | 422 invalid | since 0.41.0: `from` or `to` of a correction is no ISO 8601 time with a zone (`field` names it), or `to` does not lie after `from` (`field: to`) |
 | `bank_admin_only` | 403 forbidden | since 0.40.0: bank records (`bank/…`), `POST /bank/entries` and the payment of an expense report from the bank are for Team Admins only |
 | `bank_entries_only` | 409 conflict | since 0.40.0: the entries of a bank account and year (`bank/<account>.<year>`) change only through `POST /bank/entries`, never by a record write, delete or restore |
 | `office_costs_schema` | 409 conflict | since 0.40.0: `setting/office_costs` holds bank accounts (schema 2); a write without `accounts` (schema 1) would drop them |
@@ -1676,7 +1677,7 @@ read it instead of a time calendar.
     { "id": "7f3a-1@example.test", "date": "2026-10-07",
       "start": "08:15", "end": "10:00", "minutes": 105, "code": "JB1",
       "title": "Site visit", "notes": "First line\nSecond line",
-      "billable": true, "billed": false } ] }
+      "billable": true, "billed": false, "level": "senior" } ] }
 ```
 
 | Field | Rule |
@@ -1693,6 +1694,7 @@ read it instead of a time calendar.
 | `title` | `null` or text up to 500 characters, no control characters |
 | `notes` | `null` or text up to 4000 characters; tab and line breaks allowed, other control characters not |
 | `billable`, `billed` | `true`, `false` or `null` (as the person's event says) |
+| `level` | since 0.41.0: `null` or the booking's level id (`X-TIMESISTER-LEVEL`, 1–40 characters `a–z 0–9 -`), as the person's event says; the Mac client has sent it since 0.27.0 and 0.40.0 refused such reports |
 
   A report may be at most **768 KB** (other kinds 256 KB); larger:
   `413 too_large`. An error inside a booking names it: “Booking 2: “minutes”
@@ -1968,6 +1970,7 @@ every person record.
 | `cost_rates` | Optional list of `{ "from": "YYYY-MM-DD", "rate": number ≥ 0 }`: the rate valid from that day on, like `workload`. Each day once. `null` or `[]` mean nothing; any order, stored as sent. A non-list, an entry without a real day `from` or a number `rate` ≥ 0, or a day twice: `422`. Other fields of an entry pass. |
 | `levels` | 0.27.0: the person's level as a series `[{ "from": "YYYY-MM-DD", "level": "<id>" }]` – see Levels (0.27.0). Team Admins and Leads read it, never a member. (`billing_rates`, a rate per person, was dropped before 0.27.0 shipped; it passes unchecked like any unknown field.) |
 | `company` | 0.27.0: `null` or up to 80 characters – the person's company (a subcontractor's people). Part of the name card Leads read. |
+| `times_correctable` | 0.41.0: `true`, `false` or `null` – the person lets Team Admins and the Leads of their projects correct start and end of their bookings (`from`/`to` of a correction). Default (missing, `null`, `false`): nobody else moves their times. The person's own client writes it (⚙ › My calendar); part of the name card Leads read. |
 
 ```json
 { "kind": "person", "key": "pbuser1", "data": {
@@ -2621,7 +2624,7 @@ no account, no calendar – straight into the book, source `list`.
   `{ "event_uid", "status": "ok" | "locked" | "failed", "etag", "revision", "message" }`.
 - Entries of source `list` are delivered by `GET /entries` like any other
   and are corrected with `POST /entries/correct` – the change goes into the
-  entry itself. A list sent again keeps the corrections: every applied
+  entry itself (0.41.0: also `from`/`to`). A list sent again keeps the corrections: every applied
   correction of the person and event is laid onto the incoming object
   before the book stores it. `delete` of a UID that belongs to a calendar
   or feed entry is refused (`failed`), like `put`.
@@ -5101,9 +5104,9 @@ Team Admins and Leads (members: `403 forbidden`). Body:
 - `entries`: 1 to 500 bookings as the book keys them (`uid` = the account,
   `event_uid` = the object's UID).
 - At least one of `title` (1–500 characters), `code` (a project code,
-  with or without `#`), `billable` (bool), `level` (a level id or `null`).
-  Anything else is `422 invalid` – there is no field for date, start or
-  duration, by design.
+  with or without `#`), `billable` (bool), `level` (a level id or `null`);
+  since 0.41.0 `from` and `to` (see «Corrected times, 0.41.0»).
+  Anything else is `422 invalid`.
 - One change for the whole list; every booking answers for itself:
 
 ```json
@@ -6116,6 +6119,74 @@ mismatch search), `QuoteRules` (`texts`, `attachments`, the frozen
 (reserve, close, cancel, expiry; `LedgerAppender::appendReserved`),
 `DocumentService` (filing, serving, `verify?files`), `QuoteIssueService`,
 `QuoteDocumentService` (three kinds), the job `IssueExpiry`.
+
+## Corrected times, 0.41.0 (2026-11-07) – `corrections: 3`
+
+Decided 2026-11-07 (`PLAN-LISTEN.md` §12 S6, E7): Team Admins and the Lead
+of the project also correct **start and end** of a booking – date, start,
+end and duration in both hour lists of the Mac app. The rule of 0.27.0
+(«date, start and duration are never changed here») is lifted for them;
+everything else of a correction stays as it is: the same rights
+(`allowed`, the lock, the reapplying), the same two ways in, the same
+event in the person's time calendar. The person keeps changing their own
+events in their calendar; a corrected time is the lead's from then on.
+
+### The fields
+
+- `from`, `to`: ISO 8601 with a zone (`2026-11-07T09:00:00+01:00`, or
+  `Z`), in the body of `POST /entries/correct` and in the record
+  `correction`, beside `title`, `code`, `billable` and `level`. One of both
+  is enough – the other end stays; when both are sent, `to` lies after
+  `from`. Otherwise `422 invalid`, code `correction_time_invalid` (`field`
+  names `from` or `to`).
+- The server does not round. The Mac app rounds to the quarter hour before
+  it sends (start down, end up).
+- `from` and `to` are fields of the Lead (`LEAD_FIELDS`): a member's write
+  with either is `403 correction_lead_only` (`field: from` or `to`), also
+  for their own booking.
+- **The person's release** (decided 2026-11-07): someone else's `from`/`to`
+  go through only when the booking's person has `times_correctable: true`
+  on their person record; otherwise the result is `status: forbidden`,
+  “Booking n: the person has not released their times for correction.” –
+  title, code, billable and level are not affected. Entries of a list of
+  hours (`source: list`) need no release: their Team Admin writes them
+  anyway. The Mac app shows the fields greyed out with this reason and
+  offers the release in ⚙ › My calendar.
+
+### In the event
+
+- **One booking, or one occurrence** (`recurrence` in the record):
+  `DTSTART` and `DTEND` take the times as they are, date included –
+  written in the form of the event's `DTSTART` (its `TZID`, the time
+  converted into that zone; `Z` stays UTC; a floating time or a zone the
+  server does not know takes the wall time as sent). A `DURATION` becomes
+  `DTEND`. With `recurrence` the exception of the occurrence is made as
+  in 0.27.0 and then moved – also to another day.
+- **A series as a whole** (no `recurrence`, the object recurs): only the
+  time of day of `from` and the duration (`to − from`) count; every
+  VEVENT keeps its date. Exceptions get the same time of day, and their
+  `RECURRENCE-ID` as well as the master's `EXDATE`/`RDATE` times move by
+  the shift of the master's start, so every exception still names its
+  occurrence. With `to` alone the duration runs from the start's time of
+  day (past midnight when needed).
+- **Refused per booking:** an all-day booking (`DTSTART;VALUE=DATE`), or
+  an end that would not lie after the start (when one end stays) –
+  `status: failed` with the reason in `message` (in the record:
+  `status: failed`). Nothing is written.
+- `met`: the event already starts and ends at the planned times – the
+  correction writes nothing and notes nothing.
+- The book stores the written object at once (`first_start`, `last_end`
+  follow); `GET /entries/corrections` shows `from`/`to` in `changes`.
+
+### Capability
+
+```json
+"timesister": { … , "corrections": 3 }
+```
+
+Clients without `corrections: 3` do not send `from`/`to` (the Mac app
+says «The server app does not correct times yet – update it»). Unit test
+`CorrectionTimesTest`.
 
 ## Bank entries, 0.40.0 (2026-11-05) – `bank_entries: 1`
 

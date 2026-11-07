@@ -77,7 +77,17 @@ export async function datensaetze() {
 		expect('customer directly', await ocs(U1, 'GET', `/records/customer/${C}`), 403, 'forbidden')
 		expect('project directly', await ocs(U1, 'GET', `/records/project/${P}`), 200)
 		expect('project that does not exist', await ocs(U1, 'GET', `/records/project/nie-${RUN}`), 404, 'not_found')
-		expect('PUT', await ocs(U1, 'PUT', '/records/person/zbuser1', { version: 1, data: { login: 'zbuser1' } }), 403, 'forbidden')
+		// 0.41.0: a person writes their own fields (times_correctable, vacation_calendar_optout) into their own record - nothing else.
+		{
+			const own = await ocs(U1, 'GET', '/records/person/zbuser1')
+			expect('PUT', await ocs(U1, 'PUT', '/records/person/zbuser1', { version: own.data.version, data: { login: 'zbuser1' } }), 403, 'forbidden')
+			const w = await ocs(U1, 'PUT', '/records/person/zbuser1', { version: own.data.version, data: { login: 'zbuser1', first_name: 'Anders', times_correctable: true } })
+			expect('PUT own fields', w, 200)
+			check('… the field is stored, the rest kept as it was', w.data?.data?.times_correctable === true && w.data?.data?.first_name === own.data.data.first_name, w.data)
+			expect('… stale version', await ocs(U1, 'PUT', '/records/person/zbuser1', { version: own.data.version, data: { login: 'zbuser1', times_correctable: false } }), 409, 'conflict')
+			expect('… never deletes', await ocs(U1, 'DELETE', `/records/person/zbuser1?version=${w.data.version}`), 403, 'forbidden')
+			expect('… back off', await ocs(U1, 'PUT', '/records/person/zbuser1', { version: w.data.version, data: { login: 'zbuser1', times_correctable: false } }), 200)
+		}
 		expect('DELETE', await ocs(U1, 'DELETE', `/records/project/${P}?version=2`), 403, 'forbidden')
 		expect('Batch', await ocs(U1, 'POST', '/records/batch', { writes: [] }), 403, 'forbidden')
 		expect('Restore', await ocs(U1, 'POST', `/records/project/${P}/restore`, { version: 1, current: 2 }), 403, 'forbidden')
@@ -116,7 +126,7 @@ export async function datensaetze() {
 		expect('a customer that does not exist', await ocs(L, 'GET', `/records/customer/nie-${RUN}`), 403, 'forbidden')
 		const card = await ocs(L, 'GET', '/records/person/zbuser1')
 		// The name card (PersonAccess::CARD); 0.27.0: company, and levels for a Lead.
-		const fields = ['accounts', 'company', 'first_name', 'initials', 'last_name', 'levels', 'login', 'schema']
+		const fields = ['accounts', 'company', 'first_name', 'initials', 'last_name', 'levels', 'login', 'schema', 'times_correctable']
 		check('another person directly: only the name card', card.status === 200 && card.data?.data?.login === 'zbuser1'
 			&& Object.keys(card.data?.data || {}).every((f) => fields.includes(f)), card.data?.data)
 		const inList = ((await ocs(L, 'GET', '/records')).data?.records || []).find((x) => x.kind === 'person' && x.key === NOAH)
@@ -257,6 +267,9 @@ export async function datensaetze() {
 			check('… no led without a Lead', !('led' in ((await ocs(U1, 'GET', `/records/project/${P}`)).data?.data || {})))
 			check('/me.lead_of of zblead names the project', ((await me(L)).lead_of || []).some((x) => x.key === PL))
 			expect('the person reports their bookings', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(rk)}`, { version: 0, data: report(PL, '2026-10') }), 200)
+			// 0.41.0: the level the Mac writes with every booking; 0.40.0 refused the whole report.
+			expect('… with a level', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(rk)}`, { version: 1, data: report(PL, '2026-10', [{ ...booking, level: 'senior' }]) }), 200)
+			expect('a level outside the pattern', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(rk)}`, { version: 2, data: report(PL, '2026-10', [{ ...booking, level: 'Senior Lead' }]) }), 422, 'invalid')
 			expect('… on a project without Lead too', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(rp)}`, { version: 0, data: report(P, '2026-10', []) }), 200)
 			expect('unknown field', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(`zbuser1+${PL}+2026-11`)}`, { version: 0, data: { ...report(PL, '2026-11', []), x: 1 } }), 422, 'invalid')
 			expect('a day outside the month', await ocs(U1, 'PUT', `/records/booking-report/${encodeURIComponent(`zbuser1+${PL}+2026-11`)}`, { version: 0, data: report(PL, '2026-11') }), 422, 'invalid')

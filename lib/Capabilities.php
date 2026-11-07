@@ -140,6 +140,10 @@ use OCP\Capabilities\ICapability;
  * `setting/office_costs` (schema 2); payments with `source`, `key`, `kind`;
  * the invoice's `reference`; `paid_on`/`bank_key` on receipts and expense
  * reports (POST /expense-reports/{key}/payment).
+ * `corrections: 3` since 0.41.0: a correction (record and POST
+ * /entries/correct) also moves start and end – `from`/`to`, Team Admins and
+ * Leads only (`correction_time_invalid`); 2 since 0.27.0 the record
+ * `correction` per occurrence, 1 the endpoint.
  */
 final class Capabilities implements ICapability {
 	public function __construct(
@@ -183,7 +187,7 @@ final class Capabilities implements ICapability {
 				'templates' => 2,
 				'advances' => 1,
 				'invoice_layout' => 2,
-				'corrections' => 2,
+				'corrections' => 3,
 				'entry_lists' => 1,
 				'customer_types' => 1,
 				'expense_table' => 2,

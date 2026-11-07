@@ -214,7 +214,24 @@ final class RecordRights {
 			}
 			return;
 		}
+		if ($kind === 'person' && $this->isOwnPerson($m, $key)) {
+			// 0.41.0: a person writes their own record - their own fields only, merged into the stored one (RecordService).
+			return;
+		}
 		$this->policy->requireWrite($m);
+	}
+
+	/** The keys of the caller's live person records, once per request (tenant:uid). @var array<string,list<string>> */
+	private array $ownPersons = [];
+
+	/** Is the record the caller's own person (its key or one of its accounts)? */
+	public function isOwnPerson(Membership $m, string $key): bool {
+		if ($key === $m->uid) {
+			return true;
+		}
+		$k = $m->tenantId . ':' . $m->uid;
+		$this->ownPersons[$k] ??= array_map(static fn (Record $r): string => (string)$r->getRkey(), $this->records->findPersonsOf($m->uid, $m->tenantId, true));
+		return in_array($key, $this->ownPersons[$k], true);
 	}
 
 	/**
@@ -259,7 +276,8 @@ final class RecordRights {
 			return false;
 		}
 		foreach ($writes as $w) {
-			if (!($w instanceof \stdClass) || !in_array($w->kind ?? null, self::PER_RECORD, true)) {
+			// 0.41.0: a person's own record counts as per-record in a batch (own fields only, checked per write).
+			if (!($w instanceof \stdClass) || !in_array($w->kind ?? null, [...self::PER_RECORD, 'person'], true)) {
 				return false;
 			}
 		}

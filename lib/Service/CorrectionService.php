@@ -25,8 +25,8 @@ use Psr\Log\LoggerInterface;
 /**
  * Corrections of bookings (0.27.0): the one exception to «the server never
  * writes into a named calendar». A Team Admin or the project's Lead sends
- * title, code, billable and/or level for a booking – the person the level
- * of their own in a budget by category (0.33.0) –; the app rewrites the
+ * title, code, billable, level and/or start and end (0.41.0) for a booking –
+ * the person the level of their own in a budget by category (0.33.0) –; the app rewrites the
  * calendar object through the dav backend (the same for own and foreign
  * bookings), stores it in the book at once and notes who did it when.
  *
@@ -187,6 +187,17 @@ final class CorrectionService {
 	 *
 	 * @return array{0:string,1:?Entry}
 	 */
+	/** Has the account's person released start and end for correction (`times_correctable`, 0.41.0)? */
+	private function timesReleased(int $tenantId, string $uid): bool {
+		foreach ($this->records->findPersonsOf($uid, $tenantId, true) as $p) {
+			$d = Json::decode($p->getData() ?? 'null');
+			if ($d instanceof \stdClass && ($d->{PersonRules::TIMES} ?? null) === true) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	private function entryOf(int $tenantId, string $person, string $eventUid): array {
 		$uids = [$person];
 		$p = $this->records->findOne($tenantId, 'person', $person);
@@ -225,6 +236,11 @@ final class CorrectionService {
 			&& !($personal && $uid === $m->uid && $this->levelFree($m->tenantId, $e, $recurrence))) {
 			return $r + ['status' => 'forbidden', 'message' => Message::of('Only Team Admins and the project’s Leads correct bookings.')->text()];
 		}
+		// 0.41.0: start and end of someone else's booking only when the person released their times
+		// (`times_correctable` on their person record); a list of hours has no one to ask - its Team Admin writes it anyway.
+		if (CorrectionRules::movesTimes($change) && $uid !== $m->uid && $e->getSource() !== 'list' && !$this->timesReleased($m->tenantId, $uid)) {
+			return $r + ['status' => 'forbidden', 'message' => Message::of('Booking {n}: the person has not released their times for correction.', ['n' => $eventUid])->text()];
+		}
 		$lock = CorrectionRules::lockedBy($this->hours->billingsOf($m->tenantId, $uid, $eventUid), $this->service->billed($e));
 		if ($lock !== null) {
 			$msg = $lock === '' ? Message::of('Booking {n} is billed.', ['n' => $eventUid]) : Message::of('Booking {n} is billed by invoice {number}.', ['n' => $eventUid, 'number' => $lock]);
@@ -252,6 +268,10 @@ final class CorrectionService {
 			$ics = is_array($obj) ? ($obj['calendardata'] ?? null) : null;
 			if (!is_string($ics) || $ics === '') {
 				return $r + ['status' => 'not_found', 'message' => Message::of('The event is no longer in the calendar.')->text()];
+			}
+			$problem = CorrectionRules::timeProblem($ics, $change, $recurrence);
+			if ($problem !== null) {
+				return $r + ['status' => 'failed', 'message' => $problem];
 			}
 			// Idempotent: the target state is already there – nothing to write, nothing to note.
 			if (CorrectionRules::met($ics, $change, $recurrence)) {
@@ -287,6 +307,10 @@ final class CorrectionService {
 		$ics = $full?->getIcs() ?? '';
 		if ($ics === '') {
 			return $r + ['status' => 'not_found', 'message' => Message::of('Booking {n} is not in the book.', ['n' => $eventUid])->text()];
+		}
+		$problem = CorrectionRules::timeProblem($ics, $change, $recurrence);
+		if ($problem !== null) {
+			return $r + ['status' => 'failed', 'message' => $problem];
 		}
 		if (!CorrectionRules::met($ics, $change, $recurrence)) {
 			$now = $this->time->getTime();

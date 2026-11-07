@@ -119,6 +119,12 @@ export async function listen() {
 		const log = await ocs(A, 'GET', `/entries/corrections?uid=${EXT}&event_uid=${encodeURIComponent(e1)}`)
 		check('the protocol notes the correction as applied', log.status === 200 && (log.data?.corrections || log.data || []).length >= 1, log.data)
 
+		// 0.41.0: start and end, Team Admins and Leads only.
+		const moved = await ocs(L, 'POST', '/entries/correct', { entries: [{ uid: EXT, event_uid: e1 }], from: '2026-10-05T10:15:00+02:00', to: '2026-10-05T12:45:00+02:00' })
+		check('the Lead moves start and end (corrections 3)', result(moved, e1)?.status === 'ok' && result(moved, e1)?.ics?.includes('DTSTART:20261005T081500Z') && result(moved, e1)?.ics?.includes('DTEND:20261005T104500Z'), moved.data)
+		expect('… the end before the start is refused', await ocs(L, 'POST', '/entries/correct', { entries: [{ uid: EXT, event_uid: e1 }], from: '2026-10-05T12:00:00+02:00', to: '2026-10-05T11:00:00+02:00' }), 422, 'invalid')
+		expect('… a member never moves times', await ocs(U1, 'POST', '/entries/correct', { entries: [{ uid: EXT, event_uid: e1 }], to: '2026-10-05T13:00:00+02:00' }), 403, 'forbidden')
+
 		head('Lists of hours: delete and the lock of a billing mark')
 		const mark = (await entries(A)).revision
 		const del = await ocs(A, 'POST', '/entries/list', { uid: EXT, delete: [e2] })

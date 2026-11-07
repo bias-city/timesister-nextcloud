@@ -63,7 +63,7 @@ class CorrectionRecordTest extends TestCase {
 		self::assertSame(['title' => 'Werkstatt', 'level' => null], CorrectionRules::changeOf($ok));
 		self::assertNull(CorrectionRules::recurrenceOf($ok));
 		$cases = [
-			['{"person":"anna","event_uid":"s1"}', '422 A correction changes at least one of title, code, billable, level.'],
+			['{"person":"anna","event_uid":"s1"}', '422 A correction changes at least one of title, code, billable, level, from, to.'],
 			['{"person":"anna","event_uid":"s1","title":"x","recurrence":"2026-10-12"}', '422 “recurrence” must be YYYYMMDDTHHMMSS or YYYYMMDD, or be left out.'],
 			['{"person":"anna","event_uid":"s2","title":"x"}', '422 The key of a correction is the person’s key, “+” and 32 hex digits of the SHA-256 of the event UID (and recurrence).'],
 			['{"person":"anna","event_uid":"s1","title":"x","date":"2026-10-12"}', '422 “date” is not a field of a correction.'],

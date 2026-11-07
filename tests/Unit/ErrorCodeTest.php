@@ -29,6 +29,8 @@ class ErrorCodeTest extends TestCase {
 		'InvoiceAssignService',
 		// 0.40.0: the bank and the schema of the office costs.
 		'BankRules', 'BankService', 'OfficeCostRules',
+		// 0.41.0: the times of a correction.
+		'CorrectionTimes',
 	];
 
 	public function testBodyCarriesCodeAndField(): void {

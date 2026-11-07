@@ -75,6 +75,8 @@ class RoleScopeTest extends TestCase {
 			$cache['1:' . $uid] = array_fill_keys($keys, true);
 		}
 		(new \ReflectionProperty(RecordRights::class, 'customers'))->setValue($rights, $cache);
+		// No database here: nobody owns a person record under another key.
+		(new \ReflectionProperty(RecordRights::class, 'ownPersons'))->setValue($rights, ['1:lea' => [], '1:mia' => [], '1:noah' => []]);
 		return $rights;
 	}
 
@@ -90,8 +92,8 @@ class RoleScopeTest extends TestCase {
 		$data = Json::decode(self::PERSON);
 		$lead = new Membership('lea', 1, 'lead');
 		$shaped = $rights->shape($lead, $mia, $data, ['lea']);
-		// `company` (0.27.0) is on the card only when the record has it.
-		$this->assertSame(array_values(array_diff(PersonAccess::CARD, ['company'])), array_keys(get_object_vars($shaped)), 'a Lead reads the name card of others');
+		// `company` (0.27.0) and `times_correctable` (0.41.0) are on the card only when the record has them.
+		$this->assertSame(array_values(array_diff(PersonAccess::CARD, ['company', 'times_correctable'])), array_keys(get_object_vars($shaped)), 'a Lead reads the name card of others');
 		$this->assertObjectNotHasProperty('feed', $shaped);
 		// The own person: everything but the cost rates (0.16.0: personnel cost, Team Admins only).
 		$own = clone $data;
