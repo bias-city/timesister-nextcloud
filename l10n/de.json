@@ -834,6 +834,7 @@
 		"“{field}” must be null or a key of 1 to 40 lower-case letters, digits or dashes.": "„{field}“ muss null oder eine Kennung aus 1 bis 40 Kleinbuchstaben, Ziffern oder Bindestrichen sein.",
 		"“{field}” must be null or a number above 0 and at most {max}.": "„{field}“ muss null oder eine Zahl über 0 und höchstens {max} sein.",
 		"“rate” must be null or { “value” above 0 and below 1000000, “date” as YYYY-MM-DD, “source” “ecb” or “manual” }.": "„rate“ muss null oder { „value“ über 0 und unter 1000000, „date“ als JJJJ-MM-TT, „source“ „ecb“ oder „manual“ } sein.",
+		"Only the person and Team Admins delete the receipt of an expense rule.": "Den Beleg einer Spesenregel löschen nur die Person und Team Admins.",
 		"Only the person and Team Admins set category, factor and rate of an expense.": "Kategorie, Faktor und Kurs einer Spese setzen nur die Person und Team Admins.",
 		"This expense is settled; reverse the expense report first.": "Diese Spese ist abgerechnet; erst die Abrechnung stornieren.",
 		"Only Team Admins and the project’s Leads change a settled expense.": "Eine abgerechnete Spese ändern nur Team Admins und die Leads des Projekts.",

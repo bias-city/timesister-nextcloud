@@ -119,7 +119,8 @@ use OCP\Capabilities\ICapability;
  * `by_level` and the issue checks of quotes and invoices (`no_levels`,
  * `level_rate_missing`, `amount_without_rate`).
  * `planning_rate: 1` since 0.37.0: `mean_rate` in every fee model;
- * `rule_receipts: 1`: the writer of an expense rule deletes its receipts.
+ * `rule_receipts: 2`: the writer of an expense rule deletes its receipts (1 promised it, but the
+ *   general rule for approved receipts won until 0.41.1).
  * `invoices_free: 1` since 0.38.0: an invoice's `project` and `budget` are
  * optional, `customer`, `payment_days`, `kind`, `companion` on the record,
  * the customer is required when issuing, the ledger payload of an issue
@@ -193,7 +194,7 @@ final class Capabilities implements ICapability {
 				'expense_table' => 2,
 				'fee_models' => 1,
 				'planning_rate' => 1,
-				'rule_receipts' => 1,
+				'rule_receipts' => 2,
 				'invoices_free' => 1,
 				'invoice_plan_records' => 1,
 				'entry_invoice' => 1,

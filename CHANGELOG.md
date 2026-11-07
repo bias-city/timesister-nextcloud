@@ -1,5 +1,20 @@
 # Changes
 
+## 0.41.1 – 2026-11-07
+
+`api: 2` unchanged; capability `rule_receipts: 2`; no migration. Additive for
+every client of 0.41.0.
+
+- **Receipts of an expense rule are deleted after all.** 0.37.0 promised that
+  the rule's writer deletes a `recurring` receipt without a reopen
+  (`rule_receipts: 1`), but the general rule for approved receipts was checked
+  first and answered `409 receipt_approved_not_deleted` – the client's deletion
+  bounced, the receipt stayed on the server, and deleting the rule failed with
+  “An expense rule with receipts is not deleted”. Now the rule's receipt is
+  checked first: the person and Team Admins delete it while it is not settled,
+  not billed and on no invoice; anyone else gets `403`. Clients read
+  `rule_receipts: 2` for the working behaviour.
+
 ## 0.41.0 – 2026-11-07
 
 `api: 2` unchanged; capability `corrections: 3`; no migration. Additive for

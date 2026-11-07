@@ -6578,13 +6578,15 @@ budget), `EntryInvoices` (the index and what a reader sees). Services:
 budget optional), `RecordService` (the transition; the server's own invoice
 writes check their rights themselves), `EntryService::page`.
 
-## Rule receipts, 0.37.0 (2026-11-04) – a recurring receipt is deleted by the writer of its rule (`rule_receipts: 1`)
+## Rule receipts, 0.37.0 (2026-11-04) – a recurring receipt is deleted by the writer of its rule (`rule_receipts: 2` since 0.41.1)
 
 A `recurring` receipt is approved by its expense rule, not by a person. Its
 writer (the person, a Team Admin) deletes it while it is not on a fixed or paid
 expense report, not billed and on no invoice – the client does that when the
-rule ends earlier, moves its start or is deleted. Other approved receipts still
-need a reopen first (`409 receipt_approved_not_deleted`).
+rule ends earlier, moves its start or is deleted; anyone else gets `403`. Other
+approved receipts still need a reopen first (`409 receipt_approved_not_deleted`).
+Servers 0.37.0–0.41.0 announced `rule_receipts: 1` but answered the deletion with
+that 409 all the same; clients rely on `rule_receipts: 2` (0.41.1).
 
 ## Planning rate, 0.37.0 (2026-11-04) – `mean_rate` in every fee model (`planning_rate: 1`)
 

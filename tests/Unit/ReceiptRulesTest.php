@@ -179,6 +179,14 @@ class ReceiptRulesTest extends TestCase {
 		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireWrite(false, 'lea', $led, $ok, $note)));
 		$this->assertSame('409 An approved receipt changes only in project, cost kind, budget, cost, amount for the budget, invoice effect and note; “net” stays.', self::outcome(fn () => ReceiptRules::requireWrite(true, 'admin', [], $ok, $net)));
 		$this->assertSame('409 An approved receipt is not deleted.', self::outcome(fn () => ReceiptRules::requireWrite(true, 'admin', [], $ok, null)));
+		// 0.41.1 (`rule_receipts: 2`): the receipt of a rule is the rule's – its person and Team Admins delete it, nobody else.
+		$ofRule = self::receipt(['created_by' => 'alice', 'person' => 'alice', 'status' => 'internal', 'kind' => 'recurring', 'rule' => 'er-1', 'period' => '2026-05']);
+		$this->assertTrue(ReceiptRules::ofRule($ofRule, false));
+		$this->assertFalse(ReceiptRules::ofRule($ofRule, true), 'settled: no longer the rule\'s');
+		$this->assertFalse(ReceiptRules::ofRule($ok, false), 'not recurring');
+		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireRuleDelete(false, 'alice', $ofRule)));
+		$this->assertSame('ok', self::outcome(fn () => ReceiptRules::requireRuleDelete(true, 'admin', $ofRule)));
+		$this->assertSame('403 Only the person and Team Admins delete the receipt of an expense rule.', self::outcome(fn () => ReceiptRules::requireRuleDelete(false, 'bob', $ofRule)));
 		$billed = self::receipt(['created_by' => 'alice', 'status' => 'billed']);
 		$cost = clone $billed;
 		$cost->cost = 3;

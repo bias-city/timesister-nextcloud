@@ -340,6 +340,19 @@ final class ReceiptRules {
 	}
 
 	/** Approved in any form: approved, internal, billed. */
+	/** A receipt of an expense rule that is still the rule's: not settled, not billed, on no invoice (`rule_receipts`). */
+	public static function ofRule(\stdClass $d, bool $settled): bool {
+		return ($d->kind ?? null) === self::RECURRING && is_string($d->rule ?? null) && !$settled
+			&& ($d->status ?? null) !== self::BILLED && ($d->invoice ?? null) === null;
+	}
+
+	/** The rule's writer deletes its receipt: the person or a Team Admin (0.41.1, `rule_receipts: 2`). */
+	public static function requireRuleDelete(bool $manages, string $uid, \stdClass $d): void {
+		if (!$manages && ($d->person ?? null) !== $uid) {
+			throw ApiException::forbidden('Only the person and Team Admins delete the receipt of an expense rule.')->code(ErrorCode::RECEIPT_APPROVED_LEAD_ONLY);
+		}
+	}
+
 	public static function isApproved(?\stdClass $d): bool {
 		return in_array($d?->status ?? null, [self::APPROVED, self::INTERNAL, self::BILLED], true);
 	}

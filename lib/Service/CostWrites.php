@@ -79,13 +79,17 @@ final class CostWrites {
 			if ($before === null) {
 				return null;
 			}
-			ReceiptRules::requireWrite($m->manages(), $m->uid, $led, $before, null, $settled);
 			// 0.37.0 (`rule_receipts`): the receipt of an expense rule is approved by the rule, not by a person –
-			// its writer deletes it while nothing is settled or billed (the rule ended, moved or went).
-			$ofRule = ($before->kind ?? null) === 'recurring' && is_string($before->rule ?? null) && !$settled
-				&& ($before->status ?? null) !== 'billed' && ($before->invoice ?? null) === null;
-			if (!$ofRule && ($before->status ?? null) !== ReceiptRules::OPEN && ($before->status ?? null) !== ReceiptRules::REJECTED) {
-				throw ApiException::conflict('A receipt is deleted only while open or rejected.')->code(ErrorCode::RECEIPT_APPROVED_NOT_DELETED);
+			// its writer deletes it while nothing is settled or billed (the rule ended, moved or went). Checked
+			// before the general rule, which refuses every approved receipt (0.41.1: until then the general
+			// rule won, the client's deletion bounced and the receipt stayed on the server).
+			if (ReceiptRules::ofRule($before, $settled)) {
+				ReceiptRules::requireRuleDelete($m->manages(), $m->uid, $before);
+			} else {
+				ReceiptRules::requireWrite($m->manages(), $m->uid, $led, $before, null, $settled);
+				if (($before->status ?? null) !== ReceiptRules::OPEN && ($before->status ?? null) !== ReceiptRules::REJECTED) {
+					throw ApiException::conflict('A receipt is deleted only while open or rejected.')->code(ErrorCode::RECEIPT_APPROVED_NOT_DELETED);
+				}
 			}
 			$path = $before->file->path ?? null;
 			$owner = $this->team->backupOwner($this->team->tenant($m->tenantId));

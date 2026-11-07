@@ -271,6 +271,11 @@ export async function spesen() {
 			R[5] = receipt({ kind: 'recurring', rule: RULE, period: `${Y}-05`, date: `${Y}-05-01`, supplier: '', text: 'Phone', net: 30, vat_rate: null, vat: 0, gross: 30, category: 'phone', factor: 0.5 })
 			const s5 = await newReceipt(U2, 5, R[5])
 			check('its receipt for May: internal at once', s5.status === 200 && s5.data?.data?.status === 'internal' && s5.data?.data?.approved_by === 'zbuser2', s5.data)
+			// 0.41.1 (`rule_receipts: 2`): the rule's receipt is deleted by its person without a reopen – nobody else.
+			expect('S10, the rule\'s receipt for July', await newReceipt(U2, 10, { ...R[5], period: `${Y}-07`, date: `${Y}-07-01` }), 200)
+			expect('another member does not delete it', await ocs(U1, 'DELETE', `${rec('receipt', K(10))}?version=${(await get('receipt', K(10))).version}`), 403, 'forbidden')
+			const s10 = await ocs(U2, 'DELETE', `${rec('receipt', K(10))}?version=${(await get('receipt', K(10))).version}`)
+			check('the person deletes the rule\'s internal receipt (no reopen)', s10.status === 200, s10.data)
 			// Not settled: a later month, a rejected one, one the company paid.
 			expect('S7 in June', await newReceipt(U2, 7, receipt({ date: `${Y}-06-01`, category: 'travel' })), 200)
 			expect('S8, to be rejected', await newReceipt(U2, 8, receipt({ date: `${Y}-05-08`, category: 'travel' })), 200)
