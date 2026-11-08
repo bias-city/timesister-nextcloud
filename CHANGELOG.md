@@ -1,5 +1,18 @@
 # Changes
 
+## 0.41.2 – 2026-11-07
+
+`api: 2` unchanged; capability `bank_entries: 2`; no migration. Additive for
+every client of 0.41.1.
+
+- **Bank entries keep their reference and the parts of a collective entry.**
+  An entry takes `reference` (`{type: QRR | RF | SCOR, value}`, ≤ 64) and
+  `details[]` (at most 200 of `{party ≤ 120, amount, text ≤ 140, reference?}`)
+  – the payers and references of a collective credit, read from camt.053 or
+  camt.054. A salary run's parts are still not stored (the client never sends
+  them). A confirmed entry without them takes both from a new import; the rest
+  of the confirmed entry stays. Clients read `bank_entries: 2`.
+
 ## 0.41.1 – 2026-11-07
 
 `api: 2` unchanged; capability `rule_receipts: 2`; no migration. Additive for

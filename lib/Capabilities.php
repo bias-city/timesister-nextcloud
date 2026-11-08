@@ -135,7 +135,7 @@ use OCP\Capabilities\ICapability;
  * settings record. `receipts_by_customer: 1`: a receipt fits an invoice of
  * its project's customer; project, budget and cost position only with a
  * budget on the invoice and a cost position on the receipt.
- * `bank_entries: 1` since 0.40.0: the record kind `bank` (entries per
+ * `bank_entries: 2` since 0.41.2 (entries carry `reference` and `details[]`); 1 since 0.40.0: the record kind `bank` (entries per
  * account and year as an upsert through POST /bank/entries, `rules` with
  * the team salt, `plan.<month>`), Team Admins only; bank accounts in
  * `setting/office_costs` (schema 2); payments with `source`, `key`, `kind`;
@@ -201,7 +201,7 @@ final class Capabilities implements ICapability {
 				'advance_rules' => 1,
 				'expenses_separate' => 1,
 				'receipts_by_customer' => 1,
-				'bank_entries' => 1,
+				'bank_entries' => 2,
 			],
 		];
 	}

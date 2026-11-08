@@ -15,7 +15,7 @@ namespace OCA\TimeSister\Service;
  *
  * An entry is `{key, account, source, date, amount, currency?, orig_amount?,
  * orig_currency?, charges?, reversal?, code?, category?, ignored?, party?,
- * party_fp?, text?, links[]?, cost_line?, rule?, parts?, note?, confirmed?,
+ * party_fp?, text?, links[]?, cost_line?, rule?, parts?, reference?, details[]?, note?, confirmed?,
  * by?, at?}` – no addresses, no IBAN of the counterparty, no file.
  * `diff` and `state` are computed by the app, never stored.
  */
@@ -33,7 +33,9 @@ final class BankRules {
 	public const LINKS_MAX = 50;
 	public const MAX_BYTES = 786432;
 	private const FIELDS = ['key', 'account', 'source', 'date', 'amount', 'currency', 'orig_amount', 'orig_currency', 'charges', 'reversal',
-		'code', 'category', 'ignored', 'party', 'party_fp', 'text', 'links', 'cost_line', 'rule', 'parts', 'note', 'confirmed', 'by', 'at'];
+		'code', 'category', 'ignored', 'party', 'party_fp', 'text', 'links', 'cost_line', 'rule', 'parts', 'reference', 'details', 'note', 'confirmed', 'by', 'at'];
+	public const REFERENCE_TYPES = ['QRR', 'RF', 'SCOR'];
+	public const DETAILS_MAX = 200;
 	private const TEXTS = ['party' => 120, 'text' => 140, 'note' => 200, 'cost_line' => 64, 'rule' => 64, 'by' => 64, 'at' => 64];
 	private const CONTROL = '/[\x00-\x1F\x7F]/';
 
@@ -168,6 +170,21 @@ final class BankRules {
 		if ($parts !== null && (!is_int($parts) || $parts < 1)) {
 			throw ApiException::invalidField('parts');
 		}
+		// 0.41.2 (`bank_entries: 2`): the structured reference and the parts of a collective entry (never a salary run's).
+		if (($e->reference ?? null) !== null && !self::isReference($e->reference)) {
+			throw ApiException::invalidField('reference');
+		}
+		$details = $e->details ?? [];
+		if (!is_array($details) || !array_is_list($details) || count($details) > self::DETAILS_MAX) {
+			throw ApiException::invalidField('details');
+		}
+		foreach ($details as $d) {
+			if (!($d instanceof \stdClass) || !self::isNumber($d->amount ?? null) || abs((float)$d->amount) >= 1e12
+				|| !self::isText($d->party ?? '', 120) || !self::isText($d->text ?? '', 140)
+				|| (($d->reference ?? null) !== null && !self::isReference($d->reference))) {
+				throw ApiException::invalidField('details');
+			}
+		}
 		if (!is_array($links) || !array_is_list($links) || count($links) > self::LINKS_MAX) {
 			throw ApiException::invalidField('links');
 		}
@@ -235,10 +252,22 @@ final class BankRules {
 		}
 	}
 
+	/** `{type: QRR | RF | SCOR, value}` with a value of 1–64 characters. */
+	private static function isReference(mixed $r): bool {
+		return $r instanceof \stdClass && in_array($r->type ?? null, self::REFERENCE_TYPES, true)
+			&& is_string($r->value ?? null) && trim($r->value) !== '' && self::isText($r->value, 64);
+	}
+
+	private static function isText(mixed $v, int $max): bool {
+		return is_string($v) && mb_strlen($v) <= $max && !preg_match(self::CONTROL, $v) && mb_check_encoding($v, 'UTF-8');
+	}
+
 	/**
 	 * **Upsert per key**: the incoming entry replaces the stored one – unless
 	 * the stored one is confirmed and the incoming not. Returns the entry to
-	 * keep and what happened: `new`, `changed`, `same`, `kept`.
+	 * keep and what happened: `new`, `changed`, `same`, `kept`. Reference and
+	 * parts are facts of the file, not a decision: a confirmed entry without
+	 * them takes them from the incoming one (0.41.2).
 	 *
 	 * @return array{0:\stdClass,1:string}
 	 */
@@ -247,7 +276,17 @@ final class BankRules {
 			return [$incoming, 'new'];
 		}
 		if (($stored->confirmed ?? false) === true && ($incoming->confirmed ?? false) !== true) {
-			return [$stored, 'kept'];
+			$kept = clone $stored;
+			$added = false;
+			if (($kept->reference ?? null) === null && ($incoming->reference ?? null) !== null) {
+				$kept->reference = $incoming->reference;
+				$added = true;
+			}
+			if (($kept->details ?? []) === [] && ($incoming->details ?? []) !== []) {
+				$kept->details = $incoming->details;
+				$added = true;
+			}
+			return [$kept, $added ? 'changed' : 'kept'];
 		}
 		return [$incoming, Json::encode($stored) === Json::encode($incoming) ? 'same' : 'changed'];
 	}

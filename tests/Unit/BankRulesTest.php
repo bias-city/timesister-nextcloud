@@ -68,6 +68,21 @@ class BankRulesTest extends TestCase {
 		$this->assertSame('422 invalid links', $bad(['links' => [(object)['kind' => 'invoice', 'id' => 'inv-1', 'amount' => 0]]]));
 		$this->assertSame('422 invalid party_fp', $bad(['party_fp' => 'abc']));
 		$this->assertSame('422 invalid iban', $bad(['iban' => 'CH93']));
+		// 0.41.2: the reference and the parts of a collective entry.
+		$ref = (object)['type' => 'QRR', 'value' => '210000000003139471430009017'];
+		$part = (object)['party' => 'Spalen Druck AG', 'amount' => 16026.2, 'text' => 'RN-2026-017', 'reference' => $ref];
+		$this->assertSame('ok', self::code(fn () => BankRules::validateEntry((object)(['reference' => $ref, 'details' => [$part, $part], 'parts' => 2] + (array)self::entry('R3', '2026-10-14', 32052.4)), 'main')));
+		$this->assertSame('422 invalid reference', $bad(['reference' => (object)['type' => 'ESR', 'value' => '1']]));
+		$this->assertSame('422 invalid reference', $bad(['reference' => (object)['type' => 'QRR', 'value' => '']]));
+		$this->assertSame('422 invalid details', $bad(['details' => [(object)['party' => 'X', 'amount' => 'ten']]]));
+		$this->assertSame('422 invalid details', $bad(['details' => array_fill(0, 201, $part)]));
+		// A confirmed entry takes reference and parts from a new import, nothing else.
+		$stored = (object)(['confirmed' => true, 'category' => 'receivables'] + (array)self::entry('R4', '2026-10-14', 5));
+		$incoming = (object)(['reference' => $ref, 'details' => [$part], 'category' => 'rent'] + (array)self::entry('R4', '2026-10-14', 5));
+		[$kept, $what] = BankRules::merge($stored, $incoming);
+		$this->assertSame('changed', $what);
+		$this->assertSame(['receivables', 'QRR', 1], [$kept->category, $kept->reference->type, count($kept->details)]);
+		$this->assertSame('kept', BankRules::merge($kept, $incoming)[1]);
 		// The year of the key, each key once.
 		$this->assertSame('422 invalid date', self::code(fn () => RecordValidator::validate('bank', 'main.2026', self::year([self::entry('A', '2025-12-31', 1)]))));
 		$this->assertSame('422 invalid key', self::code(fn () => RecordValidator::validate('bank', 'main.2026', self::year([self::entry('A', '2026-01-01', 1), self::entry('A', '2026-01-02', 2)]))));

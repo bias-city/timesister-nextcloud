@@ -6228,9 +6228,12 @@ An **entry** (unknown fields `422`, the field named):
 | `party_fp` | null or 64 lowercase hex |
 | `links[]` | at most 50 `{ kind: invoice \| receipt \| expense_report, id: <record key>, amount > 0 }` |
 | `parts` | null or an integer ≥ 1 (a collective entry) |
+| `reference` | null or `{ type: QRR \| RF \| SCOR, value }`, value 1–64 characters (0.41.2, `bank_entries: 2`) |
+| `details[]` | at most 200 `{ party ≤ 120, amount, text ≤ 140, reference? }` – the parts of a collective entry: payer, amount, message, reference (0.41.2) |
 
 Not stored: addresses, the counterparty's IBAN, the parts of a salary run,
-the file.
+the file. A confirmed entry keeps everything against a new import except
+`reference` and `details`, which it takes when it has none yet.
 
 ### `POST /bank/entries`
 
