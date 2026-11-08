@@ -1,5 +1,18 @@
 # Changes
 
+## 0.42.0 – 2026-11-08
+
+`api: 2` unchanged; capability `bank_entries: 3`; no migration. Additive for
+every client of 0.41.2.
+
+- **Bank entries can be removed.** `POST /bank/entries` takes `year` and
+  `remove[]` (entry keys of that year, at most 2000): after the upsert the
+  server drops them from `bank/<account>.<year>`; the answer counts
+  `removed` and names the `missing`. The record stays, also with no entry
+  left. A later import of the same statement brings an entry back – the
+  Mac app offers this as plain delete with undo. Clients read
+  `bank_entries: 3`.
+
 ## 0.41.2 – 2026-11-07
 
 `api: 2` unchanged; capability `bank_entries: 2`; no migration. Additive for

@@ -297,7 +297,31 @@ final class BankRules {
 	 * @param list<\stdClass> $incoming
 	 * @return array{record:\stdClass,saved:int,unchanged:int,kept:list<string>}
 	 */
-	public static function mergeYear(?\stdClass $stored, string $account, int $year, array $incoming): array {
+	/** The keys to remove from a year (`remove[]` of `POST /bank/entries`, `bank_entries: 3`): a list of at most
+	 *  ENTRIES_MAX entry keys of `account`.
+	 *  @return list<string>
+	 *  @throws ApiException 422 */
+	public static function validateRemove(mixed $list, string $account): array {
+		if ($list === null) {
+			return [];
+		}
+		if (!is_array($list) || !array_is_list($list) || count($list) > self::ENTRIES_MAX) {
+			throw ApiException::invalidField('remove');
+		}
+		$out = [];
+		foreach ($list as $key) {
+			if (!is_string($key) || !str_starts_with($key, $account . '/') || strlen($key) <= strlen($account) + 1 || mb_strlen($key) > 160 || preg_match(self::CONTROL, $key) === 1) {
+				throw ApiException::invalidField('remove');
+			}
+			$out[] = $key;
+		}
+		return $out;
+	}
+
+	/** Upsert per key, then drop the keys of `$remove` (`removed` counts them, `missing` names the unknown).
+	 *  @param list<string> $remove
+	 *  @return array{record: \stdClass, saved: int, unchanged: int, kept: list<string>, removed: int, missing: list<string>} */
+	public static function mergeYear(?\stdClass $stored, string $account, int $year, array $incoming, array $remove = []): array {
 		$byKey = [];
 		$list = $stored?->entries ?? null;
 		foreach (is_array($list) ? $list : [] as $e) {
@@ -320,6 +344,16 @@ final class BankRules {
 				$saved++;
 			}
 		}
+		$removed = 0;
+		$missing = [];
+		foreach ($remove as $k) {
+			if (isset($byKey[$k])) {
+				unset($byKey[$k]);
+				$removed++;
+			} else {
+				$missing[] = $k;
+			}
+		}
 		$entries = array_values($byKey);
 		usort($entries, static fn (\stdClass $a, \stdClass $b): int => [(string)$a->date, (string)$a->key] <=> [(string)$b->date, (string)$b->key]);
 		$out = new \stdClass();
@@ -327,7 +361,7 @@ final class BankRules {
 		$out->account = $account;
 		$out->year = $year;
 		$out->entries = $entries;
-		return ['record' => $out, 'saved' => $saved, 'unchanged' => $unchanged, 'kept' => $kept];
+		return ['record' => $out, 'saved' => $saved, 'unchanged' => $unchanged, 'kept' => $kept, 'removed' => $removed, 'missing' => $missing];
 	}
 
 	public static function isNumber(mixed $v): bool {

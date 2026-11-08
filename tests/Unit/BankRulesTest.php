@@ -99,6 +99,24 @@ class BankRulesTest extends TestCase {
 		$this->assertSame('costs', $again['record']->entries[2]->category);
 	}
 
+	public function testRemoveKeysOfAYear(): void {
+		$stored = self::year([self::entry('A', '2026-03-01', 100, ['confirmed' => true]), self::entry('B', '2026-01-01', 5), self::entry('C', '2026-02-01', 7)]);
+		// Upsert first, then drop: a confirmed entry goes too; an unknown key is named, not an error.
+		$out = BankRules::mergeYear($stored, 'main', 2026, [self::entry('D', '2026-04-01', 9)], ['main/A', 'main/C', 'main/X']);
+		$this->assertSame([1, 2, ['main/X']], [$out['saved'], $out['removed'], $out['missing']]);
+		$this->assertSame(['main/B', 'main/D'], array_map(static fn ($e) => $e->key, $out['record']->entries));
+		// Without `remove` nothing changes.
+		$same = BankRules::mergeYear($out['record'], 'main', 2026, []);
+		$this->assertSame([0, []], [$same['removed'], $same['missing']]);
+		$this->assertCount(2, $same['record']->entries);
+		// The list is checked: keys of another account, too many, no list.
+		$this->assertSame('ok', self::code(static fn () => BankRules::validateRemove(['main/A'], 'main')));
+		$this->assertSame([], BankRules::validateRemove(null, 'main'));
+		$this->assertSame('422 invalid remove', self::code(static fn () => BankRules::validateRemove(['other/A'], 'main')));
+		$this->assertSame('422 invalid remove', self::code(static fn () => BankRules::validateRemove('main/A', 'main')));
+		$this->assertSame('422 invalid remove', self::code(static fn () => BankRules::validateRemove([1], 'main')));
+	}
+
 	public function testRulesAndPlan(): void {
 		$rules = self::obj('{"schema":1,"salt":"' . str_repeat('ab', 32) . '","rules":[{"fp":"' . str_repeat('c', 64) . '","direction":"debit","category":"rent","cost_line":"c-1","since":"2026-11-05"},
 			{"fp":"' . str_repeat('c', 64) . '","direction":"credit","ignored":true,"since":"2026-11-05"}]}');

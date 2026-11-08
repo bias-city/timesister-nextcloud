@@ -6247,9 +6247,13 @@ lock the server groups them by year and merges each into
 `bank/<account>.<year>` **per entry key**: a new key is added, a known one
 replaced – unless the stored entry is `confirmed` and the incoming one is
 not, then the stored one stays. Entries the call does not name stay as
-they are; nothing is deleted. Answer: `{ revision, records: [the year
-records], saved, unchanged, kept: [keys of confirmed entries left
-untouched] }`. Rate limit 60 per minute.
+they are. **Removing** (0.42.0, `bank_entries: 3`): `year` and `remove:
+[entry keys of that year]` (at most 2000) drop the keys from
+`bank/<account>.<year>` after the upsert; `entries` may be empty then. The
+record stays, also with no entry left; a key the year does not hold is
+named in `missing`. Answer: `{ revision, records: [the year records],
+saved, unchanged, kept: [keys of confirmed entries left untouched],
+removed, missing }`. Rate limit 60 per minute.
 
 ### `setting/office_costs`, schema 2
 
