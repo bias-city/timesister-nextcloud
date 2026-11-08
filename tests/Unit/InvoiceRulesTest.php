@@ -201,6 +201,11 @@ class InvoiceRulesTest extends TestCase {
 		$pos = static fn (array $over = []): array => array_merge(['kind' => 'hours', 'text' => 'Planning', 'work_package' => 2, 'person' => 'alice', 'hours' => 12.5, 'rate' => 150, 'amount' => 1875], $over);
 		$this->assertSame('ok', self::check(['greeting' => "Dear Sir or Madam\n\nFor the work in September:", 'body' => "Payable within 30 days.\tThank you.", 'footer' => 'Muster · Basel', 'due_on' => '2026-11-14']));
 		$this->assertSame('ok', self::check(['greeting' => null, 'body' => null, 'footer' => null, 'positions' => null]));
+		// 0.44.0: the cost center, free text up to 120 characters.
+		$this->assertSame('ok', self::check(['cost_center' => 'KST 4711 · P-2026-07']));
+		$this->assertSame('ok', self::check(['cost_center' => null]));
+		$this->assertSame('422 “cost_center” must be text of at most 120 characters.', self::check(['cost_center' => str_repeat('x', 121)]));
+		$this->assertSame('422 “cost_center” must be text of at most 120 characters.', self::check(['cost_center' => 12]));
 		$this->assertSame('ok', self::check(['positions' => [$pos(), $pos(['kind' => 'flat', 'amount' => 500.5]), $pos(['kind' => 'discount', 'amount' => -50]), $pos(['kind' => 'text', 'amount' => 0, 'hours' => null, 'rate' => null, 'person' => null, 'work_package' => null])]]));
 		$this->assertSame('ok', self::check(['positions' => []]));
 		$r = RecordValidator::validate('invoice', 'inv-1a2b3c4d', self::data(['positions' => [$pos()]]));

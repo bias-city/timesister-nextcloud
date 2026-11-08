@@ -189,6 +189,7 @@ final class IssueService {
 		$row->setGreeting(IssueRules::textOf($d, 'greeting'));
 		$row->setBody(IssueRules::textOf($d, 'body'));
 		$row->setFooter(IssueRules::textOf($d, 'footer'));
+		$row->setCostCenter(IssueRules::textOf($d, 'cost_center'));
 		self::setSums($row, $sums);
 		$row->setHours(IssueRules::decimal(IssueRules::totalHours($hours)));
 		$row->setIssuedOn($issuedOn);
@@ -484,7 +485,7 @@ final class IssueService {
 		return IssueRules::payload($row->getRkey(), $row->getNumber(), $row->getIssuedOn(), $row->getIssuedBy(), $row->getDueOn(), $row->getProject(), $row->getCustomer(),
 			$row->getPeriodFrom(), $row->getPeriodTo(), $row->getCurrency(), InvoiceFixed::sumsOf($row), InvoiceRules::decode($row->getIssuerJson()) ?? new \stdClass(),
 			InvoiceRules::decode($row->getCustomerJson()) ?? new \stdClass(), $positions, $hours, $row->getGreeting(), $row->getBody(), $row->getFooter(),
-			$row->getReverses(), $row->getCredits(), $row->getQrReference(), $layout, $row->getCompanion());
+			$row->getReverses(), $row->getCredits(), $row->getQrReference(), $layout, $row->getCompanion(), $row->getCostCenter());
 	}
 
 	/**
@@ -739,6 +740,7 @@ final class IssueService {
 		$row->setGreeting($orig->getGreeting());
 		$row->setBody($reason ?? $orig->getBody());
 		$row->setFooter($orig->getFooter());
+		$row->setCostCenter($orig->getCostCenter());
 		self::setSums($row, $sums);
 		$row->setIssuedOn($issuedOn);
 		$row->setIssuedBy($m->uid);

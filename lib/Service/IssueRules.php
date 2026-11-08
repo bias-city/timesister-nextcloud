@@ -424,9 +424,11 @@ final class IssueRules {
 	 * @param list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string,level?:?string}> $hours
 	 * @return array<string,mixed>
 	 */
-	public static function payload(string $key, string $number, string $issuedOn, string $issuedBy, string $dueOn, ?string $project, ?string $customerKey, string $from, string $to, string $currency, VatLines $sums, \stdClass $issuer, \stdClass $customer, array $positions, array $hours, ?string $greeting, ?string $body, ?string $footer, ?string $reverses, ?string $credits, ?string $qrReference = null, ?\stdClass $layout = null, ?string $companion = null): array {
+	public static function payload(string $key, string $number, string $issuedOn, string $issuedBy, string $dueOn, ?string $project, ?string $customerKey, string $from, string $to, string $currency, VatLines $sums, \stdClass $issuer, \stdClass $customer, array $positions, array $hours, ?string $greeting, ?string $body, ?string $footer, ?string $reverses, ?string $credits, ?string $qrReference = null, ?\stdClass $layout = null, ?string $companion = null, ?string $costCenter = null): array {
 		// 0.26.0: the layout only when set - older entries keep their exact payload; 0.39.0 likewise the companion invoice.
-		return ($layout === null ? [] : ['layout' => $layout]) + ($companion === null ? [] : ['companion' => $companion]) + [
+		// 0.44.0 likewise the cost center: only when set, so older entries keep their exact payload.
+		return ($layout === null ? [] : ['layout' => $layout]) + ($companion === null ? [] : ['companion' => $companion])
+			+ ($costCenter === null ? [] : ['cost_center' => $costCenter]) + [
 			'key' => $key,
 			'number' => $number,
 			'issued_on' => $issuedOn,

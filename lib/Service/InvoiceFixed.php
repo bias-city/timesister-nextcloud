@@ -65,6 +65,8 @@ final class InvoiceFixed {
 			'greeting' => $row->getGreeting(),
 			'body' => $row->getBody(),
 			'footer' => $row->getFooter(),
+			// 0.44.0: the customer's cost center as frozen.
+			'cost_center' => $row->getCostCenter(),
 			'chain' => ['seq' => $seq, 'prev_hash' => $prev, 'hash' => $issuing ? null : $row->getHash()],
 			// 0.32.0: the footer sentence the app prints, and the filed documents.
 			'chain_line' => $seq === null ? null : IssueRules::chainLine($lang, $row->getNumber(), $seq, (string)$prev),

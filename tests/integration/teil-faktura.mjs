@@ -70,6 +70,7 @@ export async function faktura() {
 			{ kind: 'text', text: 'Thank you', amount: 0 },
 		],
 		greeting: 'Dear team', body: 'Payable within 30 days.', footer: 'Muster · Basel', vat: 8.1, contact: 'c1',
+		cost_center: 'KST 4711', // 0.44.0
 		note: null, created_by: 'zbadmin', created_on: '2026-10-15', issued_on: null, paid_on: null, ...more,
 	})
 	try {
@@ -153,6 +154,7 @@ export async function faktura() {
 			check('fixed: number, status, sums, currency, vat', x?.number === number && x?.status === 'issued' && x?.net === 200 && x?.vat_amount === 16.2 && x?.gross === 216.2 && x?.currency === 'CHF' && x?.vat === 8.1, x)
 			check('fixed: issuer and customer frozen, contact resolved, note left out', x?.issuer?.name === 'Muster sàrl' && x?.customer?.name === `Kunde ${RUN}` && x?.customer?.vat_id === 'CHE-999' && x?.customer?.contact?.name === 'Lea Kontakt' && x?.customer?.note === undefined, x?.customer)
 			check('fixed: positions as sent, hours with amount = hours × rate and code', x?.positions?.length === 4 && x?.positions?.[2]?.amount === -50 && x?.hours?.length === 1 && x?.hours?.[0]?.amount === 150 && x?.hours?.[0]?.code === CODE && x?.hours?.[0]?.start === '2026-10-12T08:00:00', [x?.positions, x?.hours])
+			check('fixed: cost center frozen (0.44.0)', x?.cost_center === 'KST 4711', x?.cost_center)
 			check('fixed: texts, chain, period, issued_by', x?.greeting === 'Dear team' && x?.footer === 'Muster · Basel' && x?.chain?.seq === seq && x?.chain?.hash === hash && x?.period?.from === '2026-10-01' && x?.issued_by === 'zbadmin' && x?.reverses === null && x?.reversed_by === null, x)
 			expect('Lead of the project reads fixed', await ocs(L, 'GET', `${ipath(K1)}/fixed`), 200)
 			expect('Member reads fixed', await ocs(U1, 'GET', `${ipath(K1)}/fixed`), 403, 'forbidden')
@@ -161,7 +163,7 @@ export async function faktura() {
 			expect('Team Admin reads the ledger from the issue on', lg, 200)
 			const e = lg.data?.entries?.[0]
 			check('entry: seq, at, actor, action issued, number, hashes', e?.seq === seq && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(e?.at ?? '') && e?.actor === 'zbadmin' && e?.action === 'issued' && e?.number === number && e?.hash === hash && HEX64.test(e?.payload_hash ?? ''), e)
-			check('entry: payload is the canonical JSON and hashes to payload_hash', typeof e?.payload === 'string' && sha256(e.payload) === e?.payload_hash && e.payload.startsWith('{"body":"Payable within 30 days.","budget":"b1"'), e?.payload?.slice(0, 120))
+			check('entry: payload is the canonical JSON and hashes to payload_hash', typeof e?.payload === 'string' && sha256(e.payload) === e?.payload_hash && e.payload.startsWith('{"body":"Payable within 30 days."') && e.payload.includes('"cost_center":"KST 4711"') && (() => { const k = Object.keys(JSON.parse(e.payload)); return k.join() === [...k].sort().join() })(), e?.payload?.slice(0, 160))
 			check('entry: the payload carries the document { kind pdf, name, size, sha256 } (0.32.0)', (() => { try { const d = JSON.parse(e?.payload ?? '{}').document; return d?.kind === 'pdf' && /\.pdf$/.test(d?.name ?? '') && HEX64.test(d?.sha256 ?? '') && Number.isInteger(d?.size) } catch { return false } })(), e?.payload?.slice(-200))
 			check('entry: the client recomputes the hash', e !== undefined && entryHash(e) === e.hash)
 			expect('limit out of range', await ocs(A, 'GET', '/invoices/ledger?limit=0'), 422, 'invalid')
@@ -197,7 +199,8 @@ export async function faktura() {
 			expect('Team Admin marks it paid', p, 200)
 			check('… record paid with the day, ledger entry', p.data?.data?.status === 'paid' && p.data?.data?.paid_on === `${Y}-04-01` && p.data?.ledger?.seq > seq && HEX64.test(p.data?.ledger?.hash ?? ''), p.data)
 			check('… fixed shows paid_on and paid_by', (await ocs(A, 'GET', `${ipath(K1)}/fixed`)).data?.paid_by === 'zbadmin')
-			expect('paid again', await ocs(A, 'POST', `${ipath(K1)}/paid`, { paid_on: `${Y}-04-02` }), 422, 'invalid')
+			// Since 0.40.0 (payments) a second payment on a paid invoice is a conflict with its own code.
+			expect('paid again', await ocs(A, 'POST', `${ipath(K1)}/paid`, { paid_on: `${Y}-04-02` }), 409, 'conflict')
 			const u = await ocs(A, 'POST', `${ipath(K1)}/unpaid`, {})
 			expect('… unpaid again', u, 200)
 			unpaidSeq = u.data?.ledger?.seq ?? seq

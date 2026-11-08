@@ -42,6 +42,8 @@ final class InvoiceRules {
 	public const BY_MAX = 64;
 	/** 0.18.0: the free texts of the document, the positions, the hours per booking. */
 	public const TEXT_MAX = 4000;
+	/** 0.44.0: the cost center of an invoice. */
+	public const COST_CENTER_MAX = 120;
 	public const MAX_POSITIONS = 500;
 	/** 0.21.0: expense positions (a percentage of the hours, a flat amount) and cost lines. */
 	/** 0.26.0: an advance from the invoice plan and its deduction in a later invoice (`invoice` = the advance's key). */
@@ -174,6 +176,8 @@ final class InvoiceRules {
 		foreach (['greeting', 'body', 'footer'] as $f) {
 			self::text($d->{$f} ?? null, $f, self::TEXT_MAX, self::CONTROL_NOTE);
 		}
+		// 0.44.0: the customer's cost center or reference, free text, printed in the head.
+		self::text($d->cost_center ?? null, 'cost_center', self::COST_CENTER_MAX, self::CONTROL_NOTE);
 		if (($d->positions ?? null) !== null) {
 			// A reversal or credit note carries the negated lines (0.27.0): the advance signs mirror.
 			self::checkPositions($d->positions, ($d->reverses ?? null) !== null || ($d->credits ?? null) !== null);

@@ -1,5 +1,18 @@
 # Changes
 
+## 0.44.0 – 2026-11-08
+
+`api: 2` unchanged; one additive migration (`ts_inv_invoices.cost_center`).
+Additive for every client of 0.43.0.
+
+- **Cost center on the invoice.** A draft may carry `cost_center` (free text,
+  at most 120 characters): the customer's cost center or reference, entered
+  by hand when invoicing. Issuing freezes it with the invoice (`cost_center`
+  in `/fixed`); a reversal or credit note copies it. The Mac app prints it in
+  the head of the document, fills the Word placeholder `invoice.cost_center`
+  and writes it as BT-19 into the e-invoice. Nothing is required – it is the
+  first step towards the reference block (PLAN-REFERENZEN).
+
 ## 0.43.0 – 2026-11-08
 
 `api: 2` unchanged; no migration; one uninstall repair step. Additive for

@@ -53,6 +53,8 @@ use OCP\DB\Types;
  * @method string|null getBody()
  * @method void setBody(?string $body)
  * @method string|null getFooter()
+ * @method string|null getCostCenter()
+ * @method void setCostCenter(?string $costCenter)
  * @method void setFooter(?string $footer)
  * @method string getNet()
  * @method void setNet(string $net)
@@ -161,6 +163,8 @@ final class InvInvoice extends Entity {
 	protected ?string $greeting = null;
 	protected ?string $body = null;
 	protected ?string $footer = null;
+	/** 0.44.0: the customer's cost center, printed in the head. */
+	protected ?string $costCenter = null;
 	protected string $net = '0';
 	protected string $vatAmount = '0';
 	protected string $gross = '0';
@@ -225,6 +229,7 @@ final class InvInvoice extends Entity {
 		$this->addType('greeting', Types::STRING);
 		$this->addType('body', Types::STRING);
 		$this->addType('footer', Types::STRING);
+		$this->addType('costCenter', Types::STRING);
 		$this->addType('net', Types::DECIMAL);
 		$this->addType('vatAmount', Types::DECIMAL);
 		$this->addType('gross', Types::DECIMAL);

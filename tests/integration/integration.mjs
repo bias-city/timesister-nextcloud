@@ -36,6 +36,7 @@ import { wochen } from './teil-wochen.mjs'
 import { eintraege } from './teil-eintraege.mjs'
 import { listen } from './teil-listen.mjs'
 import { faktura } from './teil-faktura.mjs'
+import { ledgerRace } from './teil-ledger-race.mjs'
 import { dokumente } from './teil-dokumente.mjs'
 import { erechnung } from './teil-erechnung.mjs'
 import { kosten } from './teil-kosten.mjs'
@@ -60,6 +61,7 @@ await wochen()
 await eintraege()
 await listen()
 await faktura()
+await ledgerRace()
 await dokumente()
 await erechnung()
 await kosten()

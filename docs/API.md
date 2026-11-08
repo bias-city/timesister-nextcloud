@@ -7139,3 +7139,13 @@ routes carry `#[BruteForceProtection]` and `#[PasswordConfirmationRequired]`
 history, calendars) for a reader without the app; `vacation.ics` is the
 team's vacation calendar when one is configured. Both are listed in the
 manifest like every other file; an import ignores them.
+
+## Cost center on the invoice, 0.44.0 (2026-11-08)
+
+Still `api: 2`; migration adds `ts_inv_invoices.cost_center` (string 120,
+nullable). The invoice record may carry `cost_center` (text ≤ 120, no control
+characters; `422 invalid` otherwise) – the customer's cost center or reference,
+entered by hand. Issuing freezes it: `GET …/fixed` answers `cost_center`
+(string or null); reversals and credit notes copy it. Optional everywhere; the
+first step towards the reference block.
+
