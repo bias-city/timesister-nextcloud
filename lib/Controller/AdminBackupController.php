@@ -9,6 +9,7 @@ namespace OCA\TimeSister\Controller;
 use OCA\TimeSister\Service\ApiException;
 use OCA\TimeSister\Service\TeamAdminService;
 use OCA\TimeSister\Service\TeamExportService;
+use OCA\TimeSister\Service\PurgeService;
 use OCA\TimeSister\Service\TeamFromZipService;
 use OCA\TimeSister\Service\TeamImportService;
 use OCA\TimeSister\Service\TenantService;
@@ -37,6 +38,7 @@ final class AdminBackupController extends BaseController {
 		private TeamExportService $export,
 		private TeamImportService $import,
 		private TeamFromZipService $fromZip,
+		private PurgeService $purge,
 		private IGroupManager $groupManager,
 		private IUserSession $userSession,
 	) {
@@ -49,9 +51,12 @@ final class AdminBackupController extends BaseController {
 	public function export(int $id): Response {
 		return $this->respond(function () use ($id): Response {
 			$this->requireAdmin();
-			$built = $this->export->build($this->admin->find($id));
+			$t = $this->admin->find($id);
+			$built = $this->export->build($t);
 			$content = (string)file_get_contents($built['path']);
 			@unlink($built['path']);
+			// 0.43.0: the download is the backup a deletion requires - remembered with the team's counters.
+			$this->purge->noteExport($t, $content, $built);
 			return new DataDownloadResponse($content, $built['name'], 'application/zip');
 		});
 	}

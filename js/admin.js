@@ -586,7 +586,60 @@
 		$('ts-delete-error').textContent = ''
 		$('ts-delete-go').disabled = true
 		$('ts-delete').hidden = false
+		renderDeleteExport()
+		loadPurge().then(renderDeleteExport)
 		$('ts-delete-name').focus()
+	}
+
+	/** The backup state of the team the delete form is open for (0.43.0). */
+	function noteOf(t) {
+		const row = (purge.teams || []).find((x) => x.id === t.id)
+		return row ? row.export : null
+	}
+
+	function exportText(e, calendarsWanted) {
+		if (!e || !e.at) {
+			return { text: tr('purge_export_none'), ok: false }
+		}
+		if (!e.fresh) {
+			return { text: tr('purge_export_stale', { date: formatTime(e.at) }), ok: false }
+		}
+		if (calendarsWanted && !e.complete) {
+			return { text: tr('purge_export_incomplete'), ok: false }
+		}
+		return { text: tr('purge_export_fresh', { date: formatTime(e.at) }), ok: true }
+	}
+
+	function renderDeleteExport() {
+		const el = $('ts-delete-export-state')
+		if (!deleting) {
+			el.textContent = ''
+			return
+		}
+		const st = exportText(noteOf(deleting), $('ts-delete-calendars').checked)
+		el.textContent = st.text
+		el.className = st.ok ? 'ts-ok' : 'ts-warn'
+		checkDeleteName()
+	}
+
+	async function exportForDelete() {
+		if (!deleting) {
+			return
+		}
+		await download('/admin/teams/' + deleting.id + '/export', 'timesister-' + deleting.slug + '.zip', 'export_failed')
+		await loadPurge()
+		renderDeleteExport()
+	}
+
+	/** Nextcloud's password confirmation, when the page offers it; the server insists either way. */
+	function withPassword(run) {
+		const pc = window.OC && window.OC.PasswordConfirmation
+		if (pc && typeof pc.requirePasswordConfirmation === 'function') {
+			return new Promise((resolve, reject) => {
+				pc.requirePasswordConfirmation(() => run().then(resolve, reject), {}, () => reject(new Error(tr('password_cancelled'))))
+			})
+		}
+		return run()
 	}
 
 	function closeDelete() {
@@ -600,7 +653,8 @@
 	}
 
 	function checkDeleteName() {
-		$('ts-delete-go').disabled = !deleting || !sameName($('ts-delete-name').value, deleting.name)
+		const st = deleting ? exportText(noteOf(deleting), $('ts-delete-calendars').checked) : { ok: false }
+		$('ts-delete-go').disabled = !deleting || !st.ok || !sameName($('ts-delete-name').value, deleting.name)
 	}
 
 	async function runDelete(ev) {
@@ -614,10 +668,14 @@
 		$('ts-delete-name').disabled = true
 		$('ts-delete-result').textContent = tr('deleting')
 		try {
-			const r = await api('DELETE', '/admin/teams/' + t.id, { confirm: $('ts-delete-name').value })
+			const e = noteOf(t) || {}
+			const body = { confirm: $('ts-delete-name').value, token: e.token || '',
+				folders: $('ts-delete-folders').checked, vacation: $('ts-delete-vacation').checked, time_calendars: $('ts-delete-calendars').checked }
+			const r = await withPassword(() => api('DELETE', '/admin/teams/' + t.id, body))
 			renderDeleted(t, r)
 			deleting = null
 			await load()
+			await loadPurge()
 		} catch (e) {
 			$('ts-delete-result').textContent = ''
 			$('ts-delete-error').textContent = e.message
@@ -636,8 +694,109 @@
 				: b.visible ? h('li', { text: tr('delete_backup', { path: b.visible }) })
 					: h('li', { text: tr('delete_backup_protected_only', { path: b.protected }) }),
 			h('li', { text: tr('delete_counts', { records: c.records || 0, versions: c.versions || 0, members: c.members || 0, backups: c.backups || 0, absences: c.absences || 0 }) }),
+			removedText(r.removed),
 			h('li', { class: 'ts-muted', text: tr('delete_stays') }))
 		box.append(h('p', { class: 'ts-ok', text: tr('delete_ok', { name: t.name }) }), list)
+	}
+
+	/** What went outside the tables (0.43.0): files, folders, documents, calendars. */
+	function removedText(x) {
+		if (!x) {
+			return ''
+		}
+		const parts = [tr('purge_removed', { files: x.files || 0, folders: x.folders || 0, files_left: x.files_left || 0,
+			documents: x.documents || 0, documents_left: x.documents_left || 0, calendars: x.calendars || 0, calendars_left: x.calendars_left || 0 })]
+		if (x.vacation) {
+			parts.push(tr('purge_removed_vacation'))
+		}
+		return h('li', { text: parts.join(' · ') })
+	}
+
+	// --- Removing the app and its data (0.43.0) ---
+
+	let purge = { teams: [], sentence: '' }
+
+	async function loadPurge() {
+		if (!$('ts-purge-teams')) {
+			return
+		}
+		try {
+			purge = await api('GET', '/admin/purge')
+		} catch (e) {
+			$('ts-purge-error').textContent = e.message
+			return
+		}
+		renderPurge()
+	}
+
+	function renderPurge() {
+		const box = $('ts-purge-teams')
+		box.textContent = ''
+		const wantCalendars = $('ts-purge-calendars').checked
+		if (!purge.teams.length) {
+			box.append(h('p', { class: 'ts-muted', text: tr('purge_no_teams') }))
+		}
+		for (const t of purge.teams) {
+			const st = exportText(t.export, wantCalendars)
+			const extra = [tr('purge_team_counts', { members: t.members, records: t.records, files: t.files, documents: t.documents, calendars: t.calendars })]
+			if (t.vacation) {
+				extra.push(tr('purge_vacation_yes'))
+			}
+			if (t.documents_root) {
+				extra.push(tr('purge_documents_root', { path: t.documents_root }))
+			}
+			box.append(h('div', { class: 'ts-purge-team' },
+				h('span', { class: 'ts-purge-name', text: t.name }),
+				h('span', { class: 'ts-muted', text: extra.join(' · ') }),
+				h('button', { type: 'button', class: 'button', onclick: async () => {
+					await download('/admin/teams/' + t.id + '/export', 'timesister-' + t.slug + '.zip', 'export_failed')
+					await loadPurge()
+				} }, tr('purge_download')),
+				h('span', { class: st.ok ? 'ts-ok' : 'ts-warn', text: st.text })))
+		}
+		$('ts-purge-ask').textContent = tr('purge_ask', { sentence: purge.sentence || '' })
+		checkPurge()
+	}
+
+	function purgeReady() {
+		const wantCalendars = $('ts-purge-calendars').checked
+		const typed = $('ts-purge-confirm').value.trim()
+		const sentenceOk = typed !== '' && (typed === String(purge.sentence || '').trim() || typed === String(purge.sentence_en || '').trim())
+		return sentenceOk && purge.teams.every((t) => exportText(t.export, wantCalendars).ok)
+	}
+
+	function checkPurge() {
+		$('ts-purge-go').disabled = !purgeReady()
+	}
+
+	async function runPurge() {
+		if (!purgeReady()) {
+			return
+		}
+		$('ts-purge-error').textContent = ''
+		$('ts-purge-go').disabled = true
+		$('ts-purge-result').textContent = tr('purge_running')
+		const tokens = {}
+		for (const t of purge.teams) {
+			tokens[String(t.id)] = (t.export && t.export.token) || ''
+		}
+		try {
+			const r = await withPassword(() => api('POST', '/admin/purge', {
+				confirm: $('ts-purge-confirm').value, tokens,
+				folders: $('ts-purge-folders').checked, vacation: $('ts-purge-vacation').checked, time_calendars: $('ts-purge-calendars').checked }))
+			const box = $('ts-purge-result')
+			box.textContent = ''
+			const list = h('ul', { class: 'ts-list ts-result' })
+			for (const t of r.teams || []) {
+				list.append(h('li', { text: t.name }), removedText(t.removed) || '')
+			}
+			box.append(h('p', { class: 'ts-ok', text: tr('purge_done') }), list)
+			$('ts-purge-confirm').disabled = true
+		} catch (e) {
+			$('ts-purge-result').textContent = ''
+			$('ts-purge-error').textContent = tr('purge_failed', { message: e.message })
+			checkPurge()
+		}
 	}
 
 	// --- Team backup as ZIP (0.10.0) ---
@@ -645,8 +804,9 @@
 	let importing = null // the team a ZIP goes into
 	let preview = null // the server's preview of the uploaded ZIP
 
-	function exportTeam(t) {
-		download('/admin/teams/' + t.id + '/export', 'timesister-' + t.slug + '.zip', 'export_failed')
+	async function exportTeam(t) {
+		await download('/admin/teams/' + t.id + '/export', 'timesister-' + t.slug + '.zip', 'export_failed')
+		await loadPurge()
 	}
 
 	/** Download through fetch, so the OCS headers and the request token travel along. */
@@ -885,7 +1045,13 @@
 		$('ts-delete-cancel').addEventListener('click', closeDelete)
 		$('ts-delete-name').addEventListener('input', checkDeleteName)
 		$('ts-delete').addEventListener('submit', runDelete)
+		$('ts-delete-export').addEventListener('click', exportForDelete)
+		$('ts-delete-calendars').addEventListener('change', renderDeleteExport)
+		$('ts-purge-confirm').addEventListener('input', checkPurge)
+		$('ts-purge-calendars').addEventListener('change', renderPurge)
+		$('ts-purge-go').addEventListener('click', runPurge)
 		load()
+		loadPurge()
 	}
 
 	if (document.readyState === 'loading') {

@@ -70,7 +70,7 @@ final class TeamExportService {
 	/**
 	 * Writes the ZIP to a temporary file.
 	 *
-	 * @return array{path:string,name:string,size:int}
+	 * @return array{path:string,name:string,size:int,calendars:list<string>,missing:list<string>} 0.43.0: which time calendars are in the ZIP, which exist but are not
 	 */
 	public function build(Tenant $t): array {
 		$now = $this->time->getTime();
@@ -102,14 +102,27 @@ final class TeamExportService {
 				$put($metaFile, Json::encode(self::toObject($template['meta'])));
 			}
 		}
+		// 0.43.0: which calendars are in the ZIP, and which exist but are not (too large, failed) - the note
+		// before a deletion needs both; a member without a time calendar is neither.
+		$calendars = [];
+		$missing = [];
 		foreach (array_map('strval', array_keys($this->tenants->memberRoles($tid))) as $uid) {
 			$p = ZipRules::calendarPath($uid);
 			$ics = $this->calendar($tid, $uid);
 			if ($ics === null) {
 				$files[$p] = ['missing' => true, 'uid' => $uid];
+				if ($this->exporter->has($uid, $this->status->findOne($tid, $uid)?->getCalendarUrl())) {
+					$missing[] = $uid;
+				}
 			} else {
 				$put($p, $ics, ['uid' => $uid]);
+				$calendars[] = $uid;
 			}
+		}
+		// 0.43.0: the team's shared vacation calendar, as the app mirrored it.
+		$vacation = $this->vacation($tid);
+		if ($vacation !== null) {
+			$put(ZipRules::VACATION, $vacation);
 		}
 		// 0.28.0: the hours of external persons from lists live only in the book - one file each.
 		foreach ($this->entries->listUids($tid) as $uid) {
@@ -118,9 +131,24 @@ final class TeamExportService {
 				$put(ZipRules::listPath($uid), IcsJoiner::join($parts, self::LIST_PRODID), ['uid' => $uid, 'list' => true]);
 			}
 		}
+		$appVersion = $this->appManager->getAppVersion(Application::APP_ID);
+		// 0.43.0: README.md explains the archive to a person or an AI without the app.
+		$kinds = [];
+		foreach ($this->records->findAll($tid) as $r) {
+			if (!$r->isTombstone()) {
+				$kinds[$r->getKind()] = ($kinds[$r->getKind()] ?? 0) + 1;
+			}
+		}
+		$templateNames = array_values(array_filter([ZipRules::TEMPLATE, ZipRules::QUOTE_TEMPLATE], static fn (string $f): bool => isset($files[$f])));
+		$put(ZipRules::README, ZipReadme::build([
+			'name' => $t->getName(), 'slug' => $t->getSlug(), 'app_version' => $appVersion, 'api' => Application::API_VERSION,
+			'taken_at' => Time::iso($now) ?? '', 'members' => count($this->tenants->memberRoles($tid)), 'kinds' => $kinds,
+			'calendars' => count($calendars), 'lists' => count($this->entries->listUids($tid)), 'vacation' => $vacation !== null,
+			'templates' => $templateNames, 'ledger' => count($this->ledger->findAll($tid)), 'invoices' => count($this->invoices->findAll($tid)),
+		]));
 		$manifest = ZipRules::manifest(
 			['id' => $tid, 'name' => $t->getName(), 'slug' => $t->getSlug(), 'group' => $this->tenants->teamGroupOf($tid)],
-			$this->appManager->getAppVersion(Application::APP_ID),
+			$appVersion,
 			Application::API_VERSION,
 			$now,
 			$files,
@@ -128,7 +156,8 @@ final class TeamExportService {
 		$zip->add(ZipRules::MANIFEST, Json::encode(self::toObject($manifest)));
 		$zip->close();
 		$size = filesize($path);
-		return ['path' => $path, 'name' => ZipRules::zipName($t->getSlug(), $now), 'size' => $size === false ? 0 : $size];
+		return ['path' => $path, 'name' => ZipRules::zipName($t->getSlug(), $now), 'size' => $size === false ? 0 : $size,
+			'calendars' => $calendars, 'missing' => $missing];
 	}
 
 	/**
@@ -291,6 +320,22 @@ final class TeamExportService {
 			return $ics;
 		} catch (NotFoundException|\Throwable $e) {
 			$this->logger->warning('TimeSister: calendar of {uid} not exported for the team backup', ['app' => 'timesister', 'uid' => $uid, 'exception' => $e]);
+			return null;
+		}
+	}
+
+	/** The team's vacation calendar as .ics (0.43.0), or null when none is configured or found. */
+	private function vacation(int $tid): ?string {
+		try {
+			$r = $this->records->findOne($tid, 'setting', 'settings');
+			$raw = $r?->getData();
+			if ($r === null || $r->isTombstone() || $raw === null) {
+				return null;
+			}
+			$vc = AbsenceRules::vacationCalendar(Json::decode($raw));
+			return $vc === null ? null : $this->exporter->exportUri($vc['owner'], $vc['uri']);
+		} catch (\Throwable $e) {
+			$this->logger->warning('TimeSister: vacation calendar not exported for the team backup', ['app' => 'timesister', 'team' => $tid, 'exception' => $e]);
 			return null;
 		}
 	}

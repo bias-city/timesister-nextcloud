@@ -4,7 +4,7 @@
 // writes, the full read by the job, GET /entries by role, kept and
 // tombstones, the cutoff and the sources' status. Needs TS_OCC for the job;
 // without it the job checks are skipped.
-import { ADMIN, API, NC, deleteEvent, ensureTimeCalendar, ocs, putEvent, runJob, seedProjectOf } from './lib.mjs'
+import { ADMIN, API, NC, deleteEvent, ensureTimeCalendar, exportTeam, ocs, putEvent, runJob, seedProjectOf } from './lib.mjs'
 import { RUN, ISO, check, expect, head, isObj, sha256 } from './harness.mjs'
 import { A, L, U1, U2 } from './konten.mjs'
 import { storedZip } from './teil-vorlagen.mjs'
@@ -294,7 +294,7 @@ async function teamZip() {
 		check('… cutoff unchanged', (await ocs(ADMIN, 'GET', '/admin/teams')).data?.find((t) => t.id === id)?.settings?.entries_since === '2021-03-01')
 	} finally {
 		if (id) {
-			await ocs(ADMIN, 'DELETE', `/admin/teams/${id}`, { confirm: name })
+			await ocs(ADMIN, 'DELETE', `/admin/teams/${id}`, { confirm: name, token: (await exportTeam(ADMIN, id)).token })
 		}
 		await ocs(ADMIN, 'DELETE', `/ocs/v2.php/cloud/users/${uid}`)
 		await ocs(ADMIN, 'DELETE', `/ocs/v2.php/cloud/users/${bare}`)

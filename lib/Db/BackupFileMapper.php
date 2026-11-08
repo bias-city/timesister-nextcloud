@@ -61,6 +61,14 @@ final class BackupFileMapper extends QBMapper {
 		return $this->findEntities($qb);
 	}
 
+	/** @return list<BackupFile> every tracked file of a team (0.43.0: the folders before a deletion) */
+	public function findByTenant(int $tenantId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('*')->from($this->getTableName())
+			->where($qb->expr()->eq('tenant_id', $qb->createNamedParameter($tenantId, IQueryBuilder::PARAM_INT)));
+		return $this->findEntities($qb);
+	}
+
 	/** Deleting a team (0.10.1): every row of it. @return int rows */
 	public function deleteByTenant(int $tenantId): int {
 		$qb = $this->db->getQueryBuilder();

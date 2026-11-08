@@ -10,7 +10,7 @@
 // writes their own), the project's `budget_label` and the team ZIP.
 // 0.25.1: the owner `created_by` kept by the server (a Lead keeps their own
 // after a Team Admin's change) and the team setting `catalogs` (put back).
-import { ADMIN, API, NC, ocs, sql } from './lib.mjs'
+import { ADMIN, API, NC, exportTeam, ocs, sql } from './lib.mjs'
 import { RUN, check, expect, head, isObj, ISO, keysOf, sha256 } from './harness.mjs'
 import { A, AA, L, U1, V } from './konten.mjs'
 
@@ -150,7 +150,7 @@ async function teamZip() {
 		const info = await ocs(TA, 'GET', `${BASE}/info`)
 		check('… info: the backup’s file, name and author', info.data?.sha256 === sha256(older) && info.data?.name === 'Backup.docx' && info.data?.modified_by === uid, info.data)
 
-		const del = await ocs(ADMIN, 'DELETE', `/admin/teams/${id}`, { confirm: name })
+		const del = await ocs(ADMIN, 'DELETE', `/admin/teams/${id}`, { confirm: name, token: (await exportTeam(ADMIN, id)).token })
 		expect('deleting the team', del, 200)
 		check('… keeps a ZIP first (only a template is content too)', typeof del.data?.backup?.protected === 'string', del.data)
 		if (del.status === 200) {

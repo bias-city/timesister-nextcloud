@@ -30,6 +30,9 @@ final class ZipRules {
 	public const QUOTE_TEMPLATE_META = 'templates/quote.json';
 	/** 0.18.0: the invoice ledger and the frozen invoices, for reading only – an import never recreates them. */
 	public const LEDGER = 'ledger.json';
+	/** 0.43.0: the explanation of the archive, and the team's vacation calendar. */
+	public const README = 'README.md';
+	public const VACATION = 'vacation.ics';   // not under calendars/: the reader takes everything there for a member
 	public const INVOICES = 'invoices.json';
 	public const MODE_MERGE = 'merge';
 	public const MODE_REPLACE = 'replace';

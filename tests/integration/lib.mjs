@@ -198,3 +198,17 @@ export function runJob(name) {
 	occ('background-job:execute', String(id), '--force-execute')
 	return true
 }
+
+/**
+ * Downloads a team backup as the admin and returns its SHA-256 – the token a
+ * deletion needs since 0.43.0 – and the raw bytes.
+ * @returns {Promise<{status:number, token:string, bytes:Buffer}>}
+ */
+export async function exportTeam(who, id) {
+	const res = await fetch(`${NC}${API}/admin/teams/${id}/export`, {
+		headers: { 'OCS-APIRequest': 'true', Authorization: 'Basic ' + Buffer.from(`${who.user}:${who.pass}`).toString('base64') },
+	})
+	const bytes = Buffer.from(await res.arrayBuffer())
+	const { createHash } = await import('node:crypto')
+	return { status: res.status, token: createHash('sha256').update(bytes).digest('hex'), bytes }
+}

@@ -23,6 +23,7 @@
 import { datensaetze } from './teil-datensaetze.mjs'
 import { rest } from './teil-rest.mjs'
 import { teams } from './teil-teams.mjs'
+import { purge } from './teil-purge.mjs'
 import { konten } from './teil-konten.mjs'
 import { projekte } from './teil-projekte.mjs'
 import { sicherungen } from './teil-sicherungen.mjs'
@@ -46,6 +47,7 @@ import { honorar } from './teil-honorar.mjs'
 import { summary } from './harness.mjs'
 
 await teams()
+await purge()
 await konten()
 await abrechnung()
 await datensaetze()

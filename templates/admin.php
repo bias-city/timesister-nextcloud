@@ -124,6 +124,17 @@
 		<h3 id="ts-delete-title"><?php p($l->t('Delete team')); ?></h3>
 		<p class="ts-hint ts-muted"><?php p($l->t('A ZIP of the team is stored first – protected in the app data and with the backup owner under “TimeSister Backups/_team”. Then records with history, roles, time entries, absences and the server backups are removed. The Nextcloud group, the accounts and their time calendars stay.')); ?></p>
 		<div class="ts-grid">
+			<span class="ts-label"><?php p($l->t('Backup')); ?></span>
+			<div><button type="button" id="ts-delete-export" class="button"><?php p($l->t('Download backup (ZIP)')); ?></button>
+				<span id="ts-delete-export-state" class="ts-muted"></span></div>
+			<p class="ts-hint ts-muted"><?php p($l->t('Since 0.43.0 deleting needs the downloaded backup of the team as it is now, the typed name and your password. The ZIP holds every record with its history, the time calendars and a README that explains the files.')); ?></p>
+		</div>
+		<div class="ts-options">
+			<label><input type="checkbox" id="ts-delete-folders" checked> <?php p($l->t('Delete the folders the app wrote for this team – only files the app wrote itself, and only folders left empty')); ?></label>
+			<label><input type="checkbox" id="ts-delete-vacation" checked> <?php p($l->t('Delete the team’s shared vacation calendar (written by the app from the reported absences)')); ?></label>
+			<label><input type="checkbox" id="ts-delete-calendars"> <?php p($l->t('Delete the people’s time calendars – their hours. Only possible when the backup holds every calendar.')); ?></label>
+		</div>
+		<div class="ts-grid">
 			<label for="ts-delete-name"><?php p($l->t('Team name')); ?></label>
 			<input id="ts-delete-name" type="text" autocomplete="off" spellcheck="false">
 			<p id="ts-delete-ask" class="ts-hint ts-muted"></p>
@@ -138,4 +149,25 @@
 
 	<h3><?php p($l->t('Status')); ?></h3>
 	<div id="ts-state"></div>
+
+	<h3><?php p($l->t('Remove the app and its data')); ?></h3>
+	<div id="ts-purge" class="ts-form">
+		<p class="ts-hint ts-muted"><?php p($l->t('Deletes what the app itself created: its database tables, its app data and – by option – the files it wrote with the backup owners and the people, the teams’ vacation calendars and the people’s time calendars. Never: accounts, Nextcloud groups, any other calendar, any file the app did not write. Three steps: download a backup of every team, type the sentence, confirm your password. Afterwards the app disables itself; remove it under Apps.')); ?></p>
+		<div id="ts-purge-teams" aria-live="polite"></div>
+		<div class="ts-options">
+			<label><input type="checkbox" id="ts-purge-folders" checked> <?php p($l->t('Delete the folders the app wrote: “TimeSister Backups” and the filed invoice documents – only files the app wrote itself, and only folders left empty')); ?></label>
+			<label><input type="checkbox" id="ts-purge-vacation" checked> <?php p($l->t('Delete the teams’ shared vacation calendars (written by the app from the reported absences)')); ?></label>
+			<label><input type="checkbox" id="ts-purge-calendars"> <?php p($l->t('Delete the people’s time calendars – their hours. Only possible when every backup holds every calendar.')); ?></label>
+		</div>
+		<div class="ts-grid">
+			<label for="ts-purge-confirm"><?php p($l->t('Confirmation')); ?></label>
+			<input id="ts-purge-confirm" type="text" autocomplete="off" spellcheck="false">
+			<p id="ts-purge-ask" class="ts-hint ts-muted"></p>
+		</div>
+		<div id="ts-purge-result" aria-live="polite"></div>
+		<p id="ts-purge-error" class="ts-error" role="alert"></p>
+		<div class="ts-actions">
+			<button type="button" id="ts-purge-go" class="button primary" disabled><?php p($l->t('Delete all data of the app')); ?></button>
+		</div>
+	</div>
 </div>

@@ -1,5 +1,40 @@
 # Changes
 
+## 0.43.0 – 2026-11-08
+
+`api: 2` unchanged; no migration; one uninstall repair step. Additive for
+every client of 0.42.0 – the Mac app needs nothing new.
+
+- **Remove the app and its data without a shell.** The admin page gets a
+  section “Remove the app and its data”: it shows per team what a deletion
+  would touch, lets the admin download the team backup (ZIP), takes the
+  typed sentence “I want to uninstall all data of the app.” and Nextcloud’s
+  password confirmation, then `POST /admin/purge` deletes every team’s rows,
+  the protected backups and templates in the app data and – by option – the
+  files the app wrote (only tracked files, only folders left empty), the
+  teams’ vacation calendars and the people’s time calendars (off by default,
+  only when every backup holds every calendar). Afterwards the app disables
+  itself. Never touched: accounts, Nextcloud groups, any other calendar, any
+  file the app did not write.
+- **Uninstall step.** `<repair-steps><uninstall>`: removing the app (Apps
+  page or `occ app:remove`) drops the 19 `ts_*` tables, the app config, the
+  background jobs, the migration rows and the app data. Files and calendars
+  stay.
+- **Deleting a team** (`DELETE /admin/teams/{id}`) stands behind the same
+  three hurdles: the downloaded backup as it is now (`token` = SHA-256 of
+  the ZIP; stale after a record or entry change or after a day), the typed
+  name, the password. Body `{ confirm, token, folders, vacation,
+  time_calendars }`; the answer adds `removed` with counts. Without a fresh
+  download: `409 conflict` with `reason` `export_required`, `export_stale`,
+  `export_token` or `export_incomplete`.
+- **The team ZIP explains itself.** `README.md` describes every file and the
+  record structure for a person or an AI without the app; `vacation.ics`
+  holds the team’s vacation calendar. The download is noted with the team’s
+  counters (`purge_export_<id>` in the app config).
+- `GET /admin/purge` – the preview: per team members, records, tracked
+  files, filed documents, time calendars, vacation calendar, documents root,
+  and the state of the downloaded backup.
+
 ## 0.42.0 – 2026-11-08
 
 `api: 2` unchanged; capability `bank_entries: 3`; no migration. Additive for

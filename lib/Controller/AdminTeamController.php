@@ -9,12 +9,14 @@ namespace OCA\TimeSister\Controller;
 use OCA\TimeSister\Service\ApiException;
 use OCA\TimeSister\Service\MemberService;
 use OCA\TimeSister\Service\Role;
+use OCA\TimeSister\Service\PurgeRules;
+use OCA\TimeSister\Service\PurgeService;
 use OCA\TimeSister\Service\TeamAdminService;
-use OCA\TimeSister\Service\TeamDeleteService;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\UserRateLimit;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\Attribute\BruteForceProtection;
+use OCP\AppFramework\Http\Attribute\PasswordConfirmationRequired;
 use OCP\AppFramework\Http\DataResponse;
 use OCP\IGroupManager;
 use OCP\IL10N;
@@ -34,7 +36,7 @@ final class AdminTeamController extends BaseController {
 		IL10N $l,
 		private TeamAdminService $admin,
 		private MemberService $members,
-		private TeamDeleteService $deleter,
+		private PurgeService $purge,
 		private IGroupManager $groupManager,
 		private IUserSession $userSession,
 	) {
@@ -74,13 +76,19 @@ final class AdminTeamController extends BaseController {
 	}
 
 	/** DELETE /admin/teams/{id} with `{ "confirm": "<team name>" }`; a team with content is stored as a ZIP first (0.10.1). */
+	/**
+	 * DELETE /admin/teams/{id} – `{ confirm, token, folders, vacation, time_calendars }`. Since 0.43.0 behind
+	 * the same three hurdles as removing the app: the downloaded backup (`token`), the typed name, the password.
+	 */
 	#[ApiRoute(verb: 'DELETE', url: '/api/v1/admin/teams/{id}', requirements: ['id' => '\d+'])]
+	#[PasswordConfirmationRequired]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[UserRateLimit(limit: 300, period: 60)]
 	public function destroy(int $id): DataResponse {
 		return $this->run(function () use ($id) {
 			$this->requireAdmin();
-			return $this->deleter->delete($this->admin->find($id), $this->request->getParam('confirm'));
+			$in = $this->request->getParams();
+			return $this->purge->deleteTeam($this->admin->find($id), PurgeRules::options($in), $in['token'] ?? null, $in['confirm'] ?? null);
 		});
 	}
 

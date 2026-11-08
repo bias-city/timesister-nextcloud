@@ -37,6 +37,26 @@ final class CalendarExporter {
 		return IcsJoiner::join($parts, self::PRODID);
 	}
 
+	/** Does the account have a time calendar (0.43.0: for the backup note before a deletion)? */
+	public function has(string $uid, ?string $calendarUrl): bool {
+		return $this->find($uid, $calendarUrl) !== null;
+	}
+
+	/** Any calendar of the account by its URI as .ics, or null (0.43.0: the team's vacation calendar). */
+	public function exportUri(string $uid, string $uri): ?string {
+		foreach ($this->calendars->getCalendarsForPrincipal('principals/users/' . $uid, [$uri]) as $cal) {
+			if ($cal instanceof ICalendarExport && $cal->getUri() === $uri && !$cal->isDeleted()) {
+				$parts = (static function () use ($cal): \Generator {
+					foreach ($cal->export(new CalendarExportOptions()) as $vcal) {
+						yield (string)$vcal->serialize();
+					}
+				})();
+				return IcsJoiner::join($parts, self::PRODID);
+			}
+		}
+		return null;
+	}
+
 	/**
 	 * `calendar_url` from the status report, otherwise `zeit-<uid>`;
 	 * always in the account's own home, so only calendars it can see.

@@ -79,3 +79,11 @@
 	#timesister-admin .ts-grid { grid-template-columns: 1fr; }
 	#timesister-admin .ts-grid .ts-hint { grid-column: 1; }
 }
+
+/* Removing data (0.43.0): the options as a list, the per-team backup state inline. */
+#timesister-admin .ts-options label { display: block; margin: 6px 0; }
+#timesister-admin .ts-options input { margin-right: 6px; }
+#timesister-admin .ts-purge-team { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 0; border-bottom: 1px solid var(--color-border); }
+#timesister-admin .ts-purge-team .ts-purge-name { font-weight: bold; }
+#timesister-admin .ts-purge-team .ts-ok { color: var(--color-success-text, var(--color-success)); }
+#timesister-admin .ts-purge-team .ts-warn { color: var(--color-warning-text, var(--color-warning)); }

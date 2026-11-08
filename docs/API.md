@@ -7087,3 +7087,55 @@ stored project), `CorrectionService`, `IssueService` (`no_levels`,
 `ts_inv_hours.level` (string of 40, nullable). `Version1024Date20261029180000`
 stays as it is – Nextcloud has run it in test installs –; its `category`
 columns in `ts_entries` and `ts_inv_hours` stay unused (nothing dropped).
+
+## Remove the app and its data, 0.43.0 (2026-11-08)
+
+Still `api: 2`. Nextcloud admins only, under the admin prefix; the write
+routes carry `#[BruteForceProtection]` and `#[PasswordConfirmationRequired]`
+(Nextcloud asks for the password when the last confirmation is older than
+30 minutes; Basic auth with the account password counts as confirmed).
+
+| Method | Path | Body / answer |
+|---|---|---|
+| GET | `/admin/purge` | `{ teams: [ { id, name, slug, members, records, files, documents, documents_root, calendars, vacation, export: { at, fresh, complete, token } } ], sentence, sentence_en }` |
+| POST | `/admin/purge` | `{ confirm, tokens: { "<team id>": "<sha256>" }, folders, vacation, time_calendars }` → `{ teams: [ { id, name, counts, removed } ], disabled: true }` |
+| DELETE | `/admin/teams/{id}` | since 0.43.0 `{ confirm, token, folders, vacation, time_calendars }` → the answer of 0.10.1 plus `removed` |
+
+- **The downloaded backup is the token.** `GET /admin/teams/{id}/export`
+  notes SHA-256, time, `revision` and `entries_revision` of the team and
+  which members' time calendars are in the ZIP (`calendars`) or exist but
+  are not (`missing`: too large or failed). A deletion needs `token` equal
+  to that SHA-256; the note is **stale** after a day or when `revision` or
+  `entries_revision` changed. `409 conflict` with `reason`: `export_required`
+  (no download), `export_stale`, `export_token` (wrong token),
+  `export_incomplete` (time calendars wanted, but not every one in the ZIP).
+  Nothing is deleted on any of them – for `POST /admin/purge` every team is
+  checked before the first one goes.
+- **The sentence.** `confirm` must equal `I want to uninstall all data of
+  the app.` or its translation in the admin's language (`sentence` in the
+  preview), trimmed, case and punctuation exact; otherwise `422 confirm`.
+  For a team the typed team name stays (0.10.1).
+- **Options**, all optional: `folders` (default true) – tracked backup
+  copies (`ts_backup_files`), the team's own ZIPs in `TimeSister
+  Backups/_team` (only the app's naming), the filed invoice PDFs and XMLs
+  (by file ID and path), then folders left empty up to `TimeSister Backups`
+  (included) or the documents root (excluded); anything else stays and is
+  counted as `*_left`. `vacation` (default true) – the team's vacation
+  calendar from `setting/settings`. `time_calendars` (default false) – the
+  members' time calendars (`ts_time_calendars`, the status report's
+  `calendar_url`, or `zeit-<uid>`), permanently, only in the member's own
+  account.
+- **Never**: accounts, Nextcloud groups (the role-group rows go, the groups
+  stay), any other calendar, any file not written by the app.
+- **Afterwards** `POST /admin/purge` empties the app data, deletes the app
+  config and disables the app (`IAppManager::disableApp`); the admin removes
+  it under Apps, which runs the uninstall step (tables, jobs, migration rows).
+- `removed`: `{ files, files_left, folders, documents, documents_left,
+  vacation, calendars, calendars_left }`.
+
+### The ZIP since 0.43.0
+
+`README.md` explains the files and the record structure (kinds, versions,
+history, calendars) for a reader without the app; `vacation.ics` is the
+team's vacation calendar when one is configured. Both are listed in the
+manifest like every other file; an import ignores them.

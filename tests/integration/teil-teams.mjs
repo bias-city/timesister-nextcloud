@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { ADMIN, as, groupsOf, ocs, sql } from './lib.mjs'
+import { ADMIN, as, exportTeam, groupsOf, ocs, sql } from './lib.mjs'
 import { C, NOAH, P, R, RUN, ISO, b64, check, expect, head, isObj, keysOf, me, sha256, ensure } from './harness.mjs'
 import { A, AA, AL, AU, L, U1, U2, V } from './konten.mjs'
 
@@ -70,7 +70,11 @@ export async function teams() {
 		check('rename team', upd.status === 200 && upd.data?.name === 'Temporary 2', upd.text)
 		// Since 0.10.1 deleting needs the team name as confirmation.
 		expect('delete team without confirm', await ocs(ADMIN, 'DELETE', `/admin/teams/${made.data?.id}`), 422, 'confirm')
-		expect('delete team without records', await ocs(ADMIN, 'DELETE', `/admin/teams/${made.data?.id}`, { confirm: 'Temporary 2' }), 200)
+		// Since 0.43.0 deleting also needs the downloaded backup (its SHA-256 as token).
+		expect('delete team without a downloaded backup', await ocs(ADMIN, 'DELETE', `/admin/teams/${made.data?.id}`, { confirm: 'Temporary 2' }), 409, 'conflict')
+		const tok = await exportTeam(ADMIN, made.data?.id)
+		check('export of the temporary team', tok.status === 200 && tok.token.length === 64, tok.status)
+		expect('delete team without records', await ocs(ADMIN, 'DELETE', `/admin/teams/${made.data?.id}`, { confirm: 'Temporary 2', token: tok.token }), 200)
 		const after = await ocs(ADMIN, 'GET', '/admin/teams')
 		check('deleted team is missing from the list', !after.data?.some?.((t) => t.slug === `t-${RUN}`))
 		expect('change an unknown team', await ocs(ADMIN, 'PUT', '/admin/teams/999999', { name: 'T', slug: `t-${RUN}`, groups: tmp }), 404, 'not_found')
@@ -84,7 +88,8 @@ export async function teams() {
 		} else {
 			check('GroupDeletedEvent: team marked as “mapping broken”', broken === '1', broken)
 		}
-		expect('delete team with a deleted group', await ocs(ADMIN, 'DELETE', `/admin/teams/${again.data?.id}`, { confirm: 'Broken' }), 200)
+		const tok2 = await exportTeam(ADMIN, again.data?.id)
+		expect('delete team with a deleted group', await ocs(ADMIN, 'DELETE', `/admin/teams/${again.data?.id}`, { confirm: 'Broken', token: tok2.token }), 200)
 		for (const gid of Object.values(tmp)) {
 			await ocs(ADMIN, 'DELETE', `/ocs/v2.php/cloud/groups/${gid}`)
 		}

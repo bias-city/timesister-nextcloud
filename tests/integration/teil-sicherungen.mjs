@@ -3,7 +3,7 @@
 // Backups, version 1.1: consent, server backup only on change,
 // copy at the backup account and in the person's own folder, permissions,
 // weekly job and thinning (both with TS_OCC), backup account per team.
-import { ADMIN, NC, dav, occ, ocs, sql } from './lib.mjs'
+import { ADMIN, NC, dav, exportTeam, occ, ocs, sql } from './lib.mjs'
 import { RUN, ISO, check, expect, head, isObj, sha256 } from './harness.mjs'
 import { A, AA, L, TEAM, U1, U2, V, nameOf } from './konten.mjs'
 
@@ -336,7 +336,7 @@ async function testteam() {
 	} finally {
 		if (id) {
 			// Deleting needs the typed team name since the backup before deleting; without it the team stayed.
-			const weg = await ocs(ADMIN, 'DELETE', `/admin/teams/${id}`, { confirm: 'Backup Test' })
+			const weg = await ocs(ADMIN, 'DELETE', `/admin/teams/${id}`, { confirm: 'Backup Test', token: (await exportTeam(ADMIN, id)).token })
 			check('own test team deleted', weg.status === 200, weg.text)
 		}
 		for (const uid of [first, second]) {
