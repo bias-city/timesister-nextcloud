@@ -285,6 +285,68 @@ final class RecordService {
 	}
 
 	/** An error of the batch's write number `$i + 1`. */
+	/**
+	 * The project's code must not be the code of another live project of the
+	 * team (0.45.0). Compared trimmed and without regard to case; the answer
+	 * names the project that has it (`current`). Only a new or changed code is
+	 * checked, so records that held a duplicate before 0.45.0 stay writable.
+	 *
+	 * @throws ApiException 409 `project_code_taken`
+	 */
+	private function requireFreeProjectCode(int $tenantId, string $key, string $json, ?string $storedJson): void {
+		$d = InvoiceRules::decode($json);
+		if (!$d instanceof \stdClass) {
+			return;
+		}
+		$mine = [];
+		foreach (self::codesOf($d) as $c) {
+			if (trim($c) !== '') {
+				$mine[mb_strtolower(trim($c))] = trim($c);
+			}
+		}
+		// A code the stored record already had stays writable - older teams may hold duplicates from before 0.45.0.
+		$stored = $storedJson === null ? null : InvoiceRules::decode($storedJson);
+		if ($stored instanceof \stdClass) {
+			foreach (self::codesOf($stored) as $c) {
+				unset($mine[mb_strtolower(trim($c))]);
+			}
+		}
+		if ($mine === []) {
+			return;
+		}
+		foreach ($this->records->findLiveByKind($tenantId, 'project') as $other) {
+			if ($other->getRkey() === $key) {
+				continue;
+			}
+			$od = InvoiceRules::decode($other->getData());
+			if (!$od instanceof \stdClass) {
+				continue;
+			}
+			foreach (self::codesOf($od) as $c) {
+				if (isset($mine[mb_strtolower(trim($c))])) {
+					$name = is_string($od->name ?? null) ? $od->name : $other->getRkey();
+					throw ApiException::conflict(Message::of('The project code “{code}” is already used by “{name}”.', ['code' => $mine[mb_strtolower(trim($c))], 'name' => $name]),
+						['current' => ['key' => $other->getRkey(), 'name' => $name]])->code(ErrorCode::PROJECT_CODE_TAKEN)->field('codes');
+				}
+			}
+		}
+	}
+
+	/** The string codes of a project record. @return list<string> */
+	private static function codesOf(\stdClass $d): array {
+		$codes = $d->codes ?? null;
+		if (!is_array($codes)) {
+			return [];
+		}
+		$out = [];
+		foreach ($codes as $c) {
+			if (is_string($c)) {
+				$out[] = $c;
+			}
+		}
+		return $out;
+	}
+
 	private static function inWrite(ApiException $e, int $i): ApiException {
 		return (new ApiException($e->getStatus(), $e->getErrorCode(), Message::of('Write {n}: {message}', ['n' => $i + 1, 'message' => $e->getText()]), ['index' => $i] + $e->getExtra()))->like($e);
 	}
@@ -486,6 +548,14 @@ final class RecordService {
 			if ($outcome !== VersionCheck::OK) {
 				$problems[] = ['op' => $op, 'outcome' => $outcome, 'current' => $cur === null ? null : $this->present($cur)];
 				continue;
+			}
+			if ($op['kind'] === 'project' && $op['json'] !== null) {
+				// 0.45.0: one code per team - checked here, under the team lock, so two admins at once cannot both win.
+				try {
+					$this->requireFreeProjectCode($m->tenantId, $op['key'], $op['json'], $cur === null || $cur->isTombstone() ? null : $cur->getData());
+				} catch (ApiException $e) {
+					throw isset($op['index']) ? self::inWrite($e, $op['index']) : $e;
+				}
 			}
 			if (!$system && $op['kind'] === 'person' && !$m->manages()) {
 				// 0.41.0: the person's own write - their fields only, into the stored record; never a new record or a tombstone.

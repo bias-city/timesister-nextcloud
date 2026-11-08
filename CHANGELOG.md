@@ -1,5 +1,22 @@
 # Changes
 
+## 0.45.0 – 2026-11-09
+
+`api: 2` unchanged; one additive migration (`ts_client_status.editing`,
+`.editing_at`). Additive for every client of 0.44.0.
+
+- **One project code per team, checked under the team lock.** A record
+  write of kind `project` whose code is the code of another live project
+  answers `409 project_code_taken` with `current { key, name }` – also when
+  two Team Admins write at the same moment (the check runs after the team
+  row is locked). Compared trimmed, case does not matter.
+- **Presence instead of locks.** The status report takes `editing:
+  [ { kind, key } ]` (at most 20) – what the person holds open for editing.
+  `GET /status` answers `editing` and `editing_at` per member while the
+  report is younger than three minutes. The Mac app shows “… is editing this
+  right now” in the sheet; nothing is locked, the record version stays the
+  guard.
+
 ## 0.44.0 – 2026-11-08
 
 `api: 2` unchanged; one additive migration (`ts_inv_invoices.cost_center`).

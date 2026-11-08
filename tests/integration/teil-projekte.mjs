@@ -11,7 +11,8 @@ import { A, L, U1, U2 } from './konten.mjs'
 const CATALOG = ['codes', 'end', 'id', 'led', 'mapping', 'name', 'schema', 'start', 'status', 'subprojects']
 const isCatalog = (d) => JSON.stringify(Object.keys(d || {}).sort()) === JSON.stringify(CATALOG)
 const full = (id, leads) => ({
-	schema: 1, id, name: `Project ${id}`, codes: ['LP'], subprojects: [{ id: 'a', name: 'A' }],
+	// One code per team since 0.45.0: the code follows the key.
+	schema: 1, id, name: `Project ${id}`, codes: [`L${id}`.toUpperCase().slice(0, 24)], subprojects: [{ id: 'a', name: 'A' }],
 	start: '2026-01-01', end: null, status: 'active', mapping: { rules: [] },
 	description: 'internal', cost_center: 'KS-9', customer: 'stadt', quote: 'O-1',
 	leads, budget: [], milestones: [{ date: '2026-06-30', name: 'M1' }],
@@ -43,12 +44,28 @@ export async function projekte() {
 		const own = (await ocs(L, 'GET', path(PL))).data?.data
 		check('zblead, own project: full', own?.budgets?.[0]?.hours === 10 && JSON.stringify(own?.leads) === '["zblead"]' && own?.description === 'internal', own)
 		const foreign = (await ocs(L, 'GET', path(PF))).data?.data
-		check('zblead, another project: catalog only', isCatalog(foreign) && foreign.codes?.[0] === 'LP' && foreign.end === null, foreign)
+		check('zblead, another project: catalog only', isCatalog(foreign) && typeof foreign.codes?.[0] === 'string' && foreign.end === null, foreign)
 		const u1 = (await ocs(U1, 'GET', path(PL))).data?.data
 		check('zbuser1: catalog only (allow list, new fields missing)', isCatalog(u1), u1)
 		check('zbuser1 in the delta: catalog only', isCatalog((await inDelta(U1, rev0, PL))?.data))
 		check('second lead, not in PL: catalog only', isCatalog((await ocs(as(pl), 'GET', path(PL))).data?.data))
 		check('zblead in the delta: own full, other catalog', (await inDelta(L, rev0, PL))?.data?.budgets?.length === 1 && isCatalog((await inDelta(L, rev0, PF))?.data))
+
+		head('Projects: one code per team (0.45.0)')
+		{
+			const X1 = `PX1-${RUN}`, X2 = `PX2-${RUN}`, X3 = `PX3-${RUN}`, CODE = `X${RUN}`.toUpperCase()
+			expect('first project with the code', await ocs(A, 'PUT', path(X1), { version: 0, data: { ...full(X1, ['zblead']), codes: [CODE] } }), 200)
+			const dup = await ocs(A, 'PUT', path(X2), { version: 0, data: { ...full(X2, ['zblead']), codes: [CODE.toLowerCase()] } })
+			check('second project with the same code (other case) → 409 project_code_taken with current', dup.status === 409 && dup.data?.code === 'project_code_taken' && dup.data?.current?.key === X1, dup.text.slice(0, 200))
+			expect('the same project may keep its code', await ocs(A, 'PUT', path(X1), { version: 1, data: { ...full(X1, ['zblead']), codes: [CODE], name: 'renamed' } }), 200)
+			// Two admins at once: both PUTs with the same code race for the team lock – exactly one wins.
+			const race = await Promise.all([ocs(A, 'PUT', path(X2), { version: 0, data: { ...full(X2, ['zblead']), codes: [`${CODE}R`] } }), ocs(A, 'PUT', path(X3), { version: 0, data: { ...full(X3, ['zblead']), codes: [`${CODE}R`] } })])
+			check('race for one code: exactly one 200, the other 409 project_code_taken', race.filter((r) => r.status === 200).length === 1 && race.filter((r) => r.status === 409 && r.data?.code === 'project_code_taken').length === 1, race.map((r) => `${r.status} ${r.data?.code || ''}`).join(' | '))
+			for (const k of [X1, X2, X3]) {
+				const cur = await ocs(A, 'GET', path(k))
+				if (cur.status === 200) await ocs(A, 'DELETE', `${path(k)}?version=${cur.data.version}`)
+			}
+		}
 
 		head('Projects: history only for Team Admins and the lead')
 		expect('zbuser1, history of a project', await ocs(U1, 'GET', `${path(PL)}/history`), 403, 'forbidden')

@@ -111,6 +111,8 @@ final class ErrorCode {
 	public const OFFICE_COSTS_SCHEMA = 'office_costs_schema';
 	public const INVOICE_ALREADY_PAID = 'invoice_already_paid';
 	public const PAYMENT_FROM_BANK = 'payment_from_bank';
+	// ---- multi-admin (0.45.0)
+	public const PROJECT_CODE_TAKEN = 'project_code_taken';
 	// ---- records and routes
 	public const EXCHANGE_RATE_SERVER_ONLY = 'exchange_rate_server_only';
 	public const VERSION_CONFLICT = 'version_conflict';

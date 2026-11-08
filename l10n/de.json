@@ -983,7 +983,10 @@
 		"{files} files and {folders} folders removed, {files_left} left · {documents} documents removed, {documents_left} left · {calendars} time calendars removed, {calendars_left} left": "{files} Dateien und {folders} Ordner entfernt, {files_left} geblieben · {documents} Dokumente entfernt, {documents_left} geblieben · {calendars} Zeitkalender entfernt, {calendars_left} geblieben",
 		"vacation calendar removed": "Ferienkalender entfernt",
 		"Download the backup first.": "Zuerst die Sicherung herunterladen.",
-		"Password confirmation cancelled; nothing deleted.": "Passwortbestätigung abgebrochen; nichts gelöscht."
+		"Password confirmation cancelled; nothing deleted.": "Passwortbestätigung abgebrochen; nichts gelöscht.",
+		"The project code “{code}” is already used by “{name}”.": "Der Projektcode „{code}“ gehört schon „{name}“.",
+		"“{field}” must be a list of at most {max} records.": "„{field}“ muss eine Liste von höchstens {max} Datensätzen sein.",
+		"“editing” holds { kind, key } of records.": "„editing“ enthält { kind, key } von Datensätzen."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

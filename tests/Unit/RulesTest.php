@@ -71,7 +71,18 @@ class RulesTest extends TestCase {
 		]);
 		$this->assertSame(gmmktime(8, 15, 0, 9, 26, 2026), $v['last_sync']);
 		$this->assertSame('0.2.0', $v['app_version']);
-		$this->assertSame(['app_version' => null, 'last_sync' => null, 'last_backup' => null, 'calendar_url' => null, 'projects' => null], StatusRules::validate([]));
+		$this->assertSame(['app_version' => null, 'last_sync' => null, 'last_backup' => null, 'calendar_url' => null, 'projects' => null, 'editing' => null], StatusRules::validate([]));
+		// 0.45.0: `editing` - records as { kind, key }, at most 20, known kinds and valid keys.
+		$this->assertSame([['kind' => 'project', 'key' => 'p1']], StatusRules::validate(['editing' => [['kind' => 'project', 'key' => 'p1']]])['editing']);
+		$this->assertSame([], StatusRules::validate(['editing' => []])['editing']);
+		foreach ([[['kind' => 'nope', 'key' => 'p1']], [['kind' => 'project']], 'x', array_fill(0, 21, ['kind' => 'project', 'key' => 'p1'])] as $bad) {
+			try {
+				StatusRules::validate(['editing' => $bad]);
+				$this->fail('editing accepted: ' . json_encode($bad));
+			} catch (ApiException $e) {
+				$this->assertSame(422, $e->getStatus());
+			}
+		}
 		// 0.17.0: `calendar_shared` and `applied_shares` (shares matrix) are no longer fields; unknown keys are ignored.
 		$this->assertNull(StatusRules::validate(['calendar_shared' => 1, 'applied_shares' => 'x'])['app_version']);
 		$this->assertSame(gmmktime(6, 15, 0, 9, 26, 2026), StatusRules::validate(['last_sync' => '2026-09-26T08:15:00+02:00'])['last_sync']);

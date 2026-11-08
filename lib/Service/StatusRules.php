@@ -10,7 +10,7 @@ namespace OCA\TimeSister\Service;
 final class StatusRules {
 	/**
 	 * @param array<string,mixed> $in
-	 * @return array{app_version:?string,last_sync:?int,last_backup:?string,calendar_url:?string,projects:?list<string>}
+	 * @return array{app_version:?string,last_sync:?int,last_backup:?string,calendar_url:?string,projects:?list<string>,editing:?list<array{kind:string,key:string}>}
 	 */
 	public static function validate(array $in): array {
 		$v = $in['app_version'] ?? null;
@@ -38,7 +38,44 @@ final class StatusRules {
 		}
 		$projects = $in['projects'] ?? null;
 		$projects = $projects === null ? null : self::projects($projects);
-		return ['app_version' => $v, 'last_sync' => $sync, 'last_backup' => $backup, 'calendar_url' => $url, 'projects' => $projects];
+		$editing = $in['editing'] ?? null;
+		$editing = $editing === null ? null : self::editing($editing);
+		return ['app_version' => $v, 'last_sync' => $sync, 'last_backup' => $backup, 'calendar_url' => $url, 'projects' => $projects, 'editing' => $editing];
+	}
+
+	/** At most this many records in `editing`. */
+	public const MAX_EDITING = 20;
+	/** A report of `editing` counts this long (seconds); the Mac app reports with every sync. */
+	public const EDITING_TTL = 180;
+
+	/**
+	 * `editing` (0.45.0): the records the person holds open for editing –
+	 * `[ { kind, key } ]`, at most 20, each a known kind and a valid key.
+	 * Presence only, never a lock: the others see a hint.
+	 *
+	 * @return list<array{kind:string,key:string}>
+	 */
+	public static function editing(mixed $in): array {
+		if (!is_array($in) || !array_is_list($in) || count($in) > self::MAX_EDITING) {
+			throw ApiException::invalid(Message::of('“{field}” must be a list of at most {max} records.', ['field' => 'editing', 'max' => self::MAX_EDITING]));
+		}
+		$out = [];
+		foreach ($in as $e) {
+			$kind = null;
+			$key = null;
+			if (is_array($e)) {
+				$kind = $e['kind'] ?? null;
+				$key = $e['key'] ?? null;
+			} elseif ($e instanceof \stdClass) {
+				$kind = $e->kind ?? null;
+				$key = $e->key ?? null;
+			}
+			if (!is_string($kind) || !RecordValidator::isKind($kind) || !is_string($key) || !RecordValidator::isKey($key)) {
+				throw ApiException::invalid('“editing” holds { kind, key } of records.');
+			}
+			$out[] = ['kind' => $kind, 'key' => $key];
+		}
+		return $out;
 	}
 
 	/** At most this many project keys in `projects`. */

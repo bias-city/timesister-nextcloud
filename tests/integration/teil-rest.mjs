@@ -70,6 +70,15 @@ async function restOhneSicherungen() {
 		})
 		check('POST /status → seen_at', s.status === 200 && ISO.test(s.data?.seen_at), s.text)
 		expect('calendar_url javascript:', await ocs(U1, 'POST', '/status', { calendar_url: 'javascript:alert(1)' }), 422, 'invalid')
+		// 0.45.0: presence - what the person is editing, visible to the team while fresh.
+		expect('editing: a list of records', await ocs(U1, 'POST', '/status', { editing: [{ kind: 'project', key: 'p-edit' }] }), 200)
+		expect('editing: unknown kind', await ocs(U1, 'POST', '/status', { editing: [{ kind: 'nope', key: 'x' }] }), 422, 'invalid')
+		expect('editing: too many', await ocs(U1, 'POST', '/status', { editing: Array.from({ length: 21 }, (_, i) => ({ kind: 'project', key: `p${i}` })) }), 422, 'invalid')
+		const st = await ocs(A, 'GET', '/status')
+		const mine = st.data?.find?.((x) => x.uid === 'zbuser1')
+		check('GET /status shows editing and editing_at of the member', JSON.stringify(mine?.editing) === JSON.stringify([{ kind: 'project', key: 'p-edit' }]) && ISO.test(mine?.editing_at ?? ''), JSON.stringify(mine?.editing))
+		expect('editing: empty list clears', await ocs(U1, 'POST', '/status', { editing: [] }), 200)
+		check('… cleared', ((await ocs(A, 'GET', '/status')).data?.find?.((x) => x.uid === 'zbuser1')?.editing ?? []).length === 0)
 		expect('last_sync not ISO', await ocs(U1, 'POST', '/status', { last_sync: 'gestern' }), 422, 'invalid')
 		// A fresh account that certainly never reported yet (several checks share the environment).
 		const still = `still${RUN}`

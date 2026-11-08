@@ -132,6 +132,7 @@ as *retired*. Message wording may change at any time.
 | `office_costs_schema` | 409 conflict | since 0.40.0: `setting/office_costs` holds bank accounts (schema 2); a write without `accounts` (schema 1) would drop them |
 | `invoice_already_paid` | 409 conflict | since 0.40.0: the invoice is paid already – a payment needs an open rest; only a `reversal` goes on a paid invoice |
 | `payment_from_bank` | 409 conflict | since 0.40.0: a payment from the bank (`source` camt or csv) is on the invoice; `/unpaid` does not delete it – take it back with a `reversal` |
+| `project_code_taken` | 409 conflict | since 0.45.0: the project code is the code of another live project of the team (`current { key, name }`); checked under the team lock, so two admins at once cannot both win |
 
 The server app adds codes release by release; every new `ApiException`
 for a rule gets one (a unit test holds the services of receipts, expenses,
@@ -7148,4 +7149,18 @@ characters; `422 invalid` otherwise) – the customer's cost center or reference
 entered by hand. Issuing freezes it: `GET …/fixed` answers `cost_center`
 (string or null); reversals and credit notes copy it. Optional everywhere; the
 first step towards the reference block.
+
+## Presence and unique project codes, 0.45.0 (2026-11-09)
+
+Still `api: 2`; migration adds `ts_client_status.editing` (TEXT) and
+`editing_at` (BIGINT).
+
+- `POST /status` takes `editing: [ { kind, key } ]` – the records the client
+  holds open for editing, at most 20, each a known kind and a valid key; an
+  empty list clears, a missing key keeps the last report. `GET /status`
+  answers `editing` (the list while the report is younger than 180 s, else
+  `[]`) and `editing_at` per member. Presence only: nothing is locked, the
+  record version (`409 version_conflict`) stays the guard.
+- Record writes of kind `project`: the code must not be the code of another
+  live project of the team → `409 project_code_taken` (see «Error codes»).
 

@@ -58,6 +58,11 @@ final class StatusService {
 				$s->setProjects($v['projects'] === null ? null : json_encode($v['projects'], JSON_THROW_ON_ERROR));
 				$s->setProjectsAt($v['projects'] === null ? null : $now);
 			}
+			// 0.45.0: what the person is editing right now; missing keeps the last report, an empty list clears it.
+			if (array_key_exists('editing', $in)) {
+				$s->setEditing($v['editing'] === null || $v['editing'] === [] ? null : json_encode($v['editing'], JSON_THROW_ON_ERROR));
+				$s->setEditingAt($v['editing'] === null || $v['editing'] === [] ? null : $now);
+			}
 			$s->setSeenAt($now);
 			try {
 				$new ? $this->status->insert($s) : $this->status->update($s);
@@ -71,8 +76,19 @@ final class StatusService {
 		}
 	}
 
+	/** @return list<array{kind:string,key:string}> the fresh `editing` of a status row, else empty */
+	private static function editingOf(?ClientStatus $s, int $now): array {
+		$at = $s?->getEditingAt();
+		if ($s === null || $at === null || $at + StatusRules::EDITING_TTL < $now) {
+			return [];
+		}
+		$v = json_decode((string)$s->getEditing(), true);
+		return is_array($v) ? array_values(array_filter($v, static fn (mixed $e): bool => is_array($e) && isset($e['kind'], $e['key']))) : [];
+	}
+
 	/** @return list<array<string,mixed>> all members, even without a status report */
 	public function list(Membership $m): array {
+		$now = $this->time->getTime();
 		$this->policy->requireTeamRead($m);
 		$byUid = $this->status->findByTenant($m->tenantId);
 		$consents = $this->consent->byTenant($m->tenantId);
@@ -100,6 +116,9 @@ final class StatusService {
 				'time_calendar' => $tc !== null,
 				'entries_read_at' => Time::iso($tc?->getLastReadAt()),
 				'entries_error' => $tc?->getLastError(),
+				// 0.45.0: presence - what the person reported as open for editing, while the report is fresh.
+				'editing' => self::editingOf($s, $now),
+				'editing_at' => Time::iso($s?->getEditingAt()),
 			];
 		}
 		return $out;

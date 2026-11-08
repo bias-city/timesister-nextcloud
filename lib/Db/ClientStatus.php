@@ -33,6 +33,10 @@ use OCP\DB\Types;
  * @method string|null getProjects()
  * @method void setProjects(?string $projects)
  * @method int|null getProjectsAt()
+ * @method string|null getEditing()
+ * @method void setEditing(?string $editing)
+ * @method int|null getEditingAt()
+ * @method void setEditingAt(?int $editingAt)
  * @method void setProjectsAt(?int $projectsAt)
  */
 final class ClientStatus extends Entity {
@@ -53,6 +57,9 @@ final class ClientStatus extends Entity {
 	/** JSON list of the project keys booked on in the last 12 months (0.12.0); null: never reported. */
 	protected ?string $projects = null;
 	protected ?int $projectsAt = null;
+	/** 0.45.0: the records the person holds open for editing (JSON list) and when it reported them. */
+	protected ?string $editing = null;
+	protected ?int $editingAt = null;
 
 	public function __construct() {
 		$this->addType('tenantId', Types::INTEGER);
@@ -69,5 +76,7 @@ final class ClientStatus extends Entity {
 		$this->addType('jobWeeksAt', Types::INTEGER);
 		$this->addType('projects', Types::STRING);
 		$this->addType('projectsAt', Types::INTEGER);
+		$this->addType('editing', Types::STRING);
+		$this->addType('editingAt', Types::INTEGER);
 	}
 }
