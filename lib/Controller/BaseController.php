@@ -50,12 +50,10 @@ abstract class BaseController extends OCSController {
 		try {
 			return $fn();
 		} catch (ApiException $e) {
-			$r = new DataResponse($e->toData($this->l), $e->getStatus());
-			if ($e->getStatus() === 403 && in_array($this->request->getMethod(), ['PUT', 'POST', 'DELETE'], true)) {
-				// A refused write counts for Nextcloud's brute-force throttling; the write routes carry the attribute.
-				$r->throttle(['action' => self::BRUTE_FORCE_ACTION]);
-			}
-			return $r;
+			// A refusal of a signed-in account is no guessing attempt and is not throttled: Nextcloud counts
+			// attempts per IP address, so one account's refused writes would hold back every write of a
+			// whole office behind the same address (0.45.1). Flooding is bounded per user by the rate limits.
+			return new DataResponse($e->toData($this->l), $e->getStatus());
 		}
 	}
 

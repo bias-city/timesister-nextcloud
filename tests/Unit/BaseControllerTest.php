@@ -17,7 +17,7 @@ use OCP\IL10N;
 use OCP\IRequest;
 use PHPUnit\Framework\TestCase;
 
-/** 0.9.1: a refused write is throttled, and every write route carries the brute-force attribute. */
+/** Every write route carries the brute-force attribute; since 0.45.1 a refused write is not throttled (counted per IP, it held back whole offices). */
 class BaseControllerTest extends TestCase {
 	private function controller(string $method): BaseController {
 		$request = $this->createMock(IRequest::class);
@@ -30,14 +30,13 @@ class BaseControllerTest extends TestCase {
 		};
 	}
 
-	public function testRefusedWritesAreThrottled(): void {
-		$r = $this->controller('PUT')->go(static fn () => throw ApiException::forbidden());
-		$this->assertSame(403, $r->getStatus());
-		$this->assertTrue($r->isThrottled());
-		$this->assertSame(['action' => BaseController::BRUTE_FORCE_ACTION], $r->getThrottleMetadata());
-
-		$this->assertFalse($this->controller('GET')->go(static fn () => throw ApiException::forbidden())->isThrottled(), 'reads carry no attribute');
-		$this->assertFalse($this->controller('PUT')->go(static fn () => throw ApiException::invalid('x'))->isThrottled(), 'only 403');
+	public function testRefusedWritesAreNotThrottled(): void {
+		foreach (['PUT', 'POST', 'DELETE', 'GET'] as $verb) {
+			$r = $this->controller($verb)->go(static fn () => throw ApiException::forbidden());
+			$this->assertSame(403, $r->getStatus());
+			$this->assertFalse($r->isThrottled(), "$verb: a refusal of a signed-in account is no guessing attempt");
+		}
+		$this->assertFalse($this->controller('PUT')->go(static fn () => throw ApiException::invalid('x'))->isThrottled());
 		$this->assertFalse($this->controller('PUT')->go(static fn () => ['ok' => true])->isThrottled());
 	}
 

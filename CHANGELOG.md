@@ -1,5 +1,19 @@
 # Changes
 
+## 0.45.1 – 2026-11-09
+
+`api: 2` unchanged, no migration.
+
+- **A refused write no longer counts as a brute-force attempt.** Until now
+  every `403` on `PUT`, `POST` or `DELETE` was registered with Nextcloud's
+  brute-force throttling. Nextcloud counts per IP address, so the refused
+  writes of one account – for example an account that left its team and
+  whose app keeps reporting – held back every write of an office behind the
+  same address, until uploads and bookings answered `429` “Reached maximum
+  delay”. The write routes keep `#[BruteForceProtection]`; flooding stays
+  bounded by the per-user rate limits. An address already held back is
+  freed with `occ security:bruteforce:reset <ip>`.
+
 ## 0.45.0 – 2026-11-09
 
 `api: 2` unchanged; one additive migration (`ts_client_status.editing`,
