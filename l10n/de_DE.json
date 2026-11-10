@@ -526,6 +526,7 @@
 		"Each account needs a currency (three letters), an IBAN without spaces and, if any, a BIC of 8 or 11 characters.": "Jedes Konto braucht eine Währung (drei Buchstaben), eine IBAN ohne Leerzeichen und, falls vorhanden, einen BIC mit 8 oder 11 Zeichen.",
 		"One account per currency.": "Ein Konto je Währung.",
 		"“vat” must be null or a percentage from 0 to 100.": "„vat“ muss null oder ein Prozentsatz von 0 bis 100 sein.",
+		"“excluded” must be a boolean.": "„excluded“ muss ein Wahrheitswert sein.",
 		"“invoice_dates” must be a list of at most 200 days (YYYY-MM-DD), each once.": "„invoice_dates“ muss eine Liste von höchstens 200 Tagen (JJJJ-MM-TT) sein, jeder einmal.",
 		"“{field}” must be a list of { from, rate }.": "„{field}“ muss eine Liste von { from, rate } sein.",
 		"Each entry of “{field}” needs a day “from” (YYYY-MM-DD) and a “rate” ≥ 0.": "Jeder Eintrag von „{field}“ braucht einen Tag „from“ (JJJJ-MM-TT) und einen „rate“ ≥ 0.",

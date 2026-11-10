@@ -369,6 +369,10 @@ final class InvoiceRules {
 				if (!(is_int($a) || (is_float($a) && is_finite($a)))) {
 					throw ApiException::invalid('“amount” must be a number.');
 				}
+				// 0.46.0: `excluded` – the line is taken out of the draft (stays open, not frozen).
+				if (isset($p->excluded) && !is_bool($p->excluded)) {
+					throw ApiException::invalid('“excluded” must be a boolean.');
+				}
 				self::checkLevel($p);
 				self::checkLineTax($p);
 				self::checkAdvance($p, $negated);

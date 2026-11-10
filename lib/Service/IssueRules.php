@@ -82,9 +82,19 @@ final class IssueRules {
 	}
 
 	/** @return list<\stdClass> */
+	/**
+	 * The positions that are on the invoice: a line taken out in the draft (`excluded`, 0.46.0) is not frozen.
+	 * @return list<\stdClass>
+	 */
 	public static function positionsOf(\stdClass $d): array {
 		$p = $d->positions ?? null;
-		return is_array($p) ? array_values(array_filter($p, static fn (mixed $x): bool => $x instanceof \stdClass)) : [];
+		$out = [];
+		foreach (is_array($p) ? $p : [] as $x) {
+			if ($x instanceof \stdClass && ($x->excluded ?? false) !== true) {
+				$out[] = $x;
+			}
+		}
+		return $out;
 	}
 
 	/** @return list<\stdClass> */

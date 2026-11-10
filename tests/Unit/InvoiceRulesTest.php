@@ -246,6 +246,9 @@ class InvoiceRulesTest extends TestCase {
 		$this->assertSame('422 Booking 1: “code” must be text of at most 64 characters.', self::check($b(['code' => str_repeat('c', 65)])));
 		$this->assertSame('ok', self::outcome(fn () => InvoiceRules::checkPositions([(object)$pos()])), 'the public check for a credit note’s positions');
 		$this->assertSame('422 Position 1: “amount” must be a number.', self::outcome(fn () => InvoiceRules::checkPositions([(object)$pos(['amount' => true])])));
+		// 0.46.0: a line taken out of the draft.
+		$this->assertSame('ok', self::outcome(fn () => InvoiceRules::checkPositions([(object)$pos(['excluded' => true])])));
+		$this->assertSame('422 Position 1: “excluded” must be a boolean.', self::outcome(fn () => InvoiceRules::checkPositions([(object)$pos(['excluded' => 'yes'])])));
 	}
 
 	/** 0.26.0: the advance and its deduction naming the advance invoice. */

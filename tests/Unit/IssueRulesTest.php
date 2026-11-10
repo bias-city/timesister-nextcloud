@@ -59,4 +59,10 @@ class IssueRulesTest extends TestCase {
 		$g = ApiException::gone();
 		$this->assertSame(410, $g->getStatus());
 	}
+
+	/** 0.46.0: a position taken out of the draft (`excluded`) is not frozen. */
+	public function testExcludedPositionsAreNotFrozen(): void {
+		$d = (object)['positions' => [(object)['kind' => 'hours', 'text' => 'AP1', 'amount' => 100], (object)['kind' => 'flat', 'text' => 'Weg', 'amount' => 50, 'excluded' => true], 'x', (object)['kind' => 'text', 'text' => 'Hinweis', 'amount' => 0, 'excluded' => false]]];
+		$this->assertSame(['AP1', 'Hinweis'], array_map(static fn (\stdClass $p): string => $p->text, IssueRules::positionsOf($d)));
+	}
 }

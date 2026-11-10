@@ -1,5 +1,17 @@
 # Changes
 
+## 0.46.0 – 2026-11-10
+
+`api: 2` unchanged, no migration.
+
+- **A draft position can be taken out and stays open.** A position of an
+  invoice draft may carry `excluded: true` (PLAN-RECHNUNGEN §9, the person
+  decides line by line): the client keeps it visible in the draft, counts it
+  out of the sums and drops it – with the bookings of an hours line – before
+  issuing. The server accepts the flag in `positions[]` (a boolean) and never
+  freezes a line with `excluded: true`; its bookings and receipts keep no
+  invoice number and are open for the next draft.
+
 ## 0.45.1 – 2026-11-09
 
 `api: 2` unchanged, no migration.
