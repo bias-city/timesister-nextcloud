@@ -432,13 +432,15 @@ final class IssueRules {
 	 *
 	 * @param list<\stdClass> $positions
 	 * @param list<array{uid:string,event_uid:string,start:string,hours:float,rate:float,amount:float,code:?string,level?:?string}> $hours
+	 * @param list<array{kind:string,title:string,value:string}>|null $references
 	 * @return array<string,mixed>
 	 */
-	public static function payload(string $key, string $number, string $issuedOn, string $issuedBy, string $dueOn, ?string $project, ?string $customerKey, string $from, string $to, string $currency, VatLines $sums, \stdClass $issuer, \stdClass $customer, array $positions, array $hours, ?string $greeting, ?string $body, ?string $footer, ?string $reverses, ?string $credits, ?string $qrReference = null, ?\stdClass $layout = null, ?string $companion = null, ?string $costCenter = null): array {
+	public static function payload(string $key, string $number, string $issuedOn, string $issuedBy, string $dueOn, ?string $project, ?string $customerKey, string $from, string $to, string $currency, VatLines $sums, \stdClass $issuer, \stdClass $customer, array $positions, array $hours, ?string $greeting, ?string $body, ?string $footer, ?string $reverses, ?string $credits, ?string $qrReference = null, ?\stdClass $layout = null, ?string $companion = null, ?string $costCenter = null, ?array $references = null): array {
 		// 0.26.0: the layout only when set - older entries keep their exact payload; 0.39.0 likewise the companion invoice.
-		// 0.44.0 likewise the cost center: only when set, so older entries keep their exact payload.
+		// 0.44.0 likewise the cost center, 0.47.0 the reference lines: only when set, so older entries keep their exact payload.
 		return ($layout === null ? [] : ['layout' => $layout]) + ($companion === null ? [] : ['companion' => $companion])
-			+ ($costCenter === null ? [] : ['cost_center' => $costCenter]) + [
+			+ ($costCenter === null ? [] : ['cost_center' => $costCenter])
+			+ ($references === null || $references === [] ? [] : ['references' => $references]) + [
 			'key' => $key,
 			'number' => $number,
 			'issued_on' => $issuedOn,
@@ -490,6 +492,28 @@ final class IssueRules {
 	public static function textOf(\stdClass $d, string $field): ?string {
 		$v = $d->{$field} ?? null;
 		return is_string($v) && $v !== '' ? $v : null;
+	}
+
+	/** 0.47.0: the draft's reference lines as the column freezes them – JSON, or null when there are none. */
+	public static function referencesJsonOf(\stdClass $d): ?string {
+		$lines = ReferenceRules::frozen($d->{ReferenceRules::LINES} ?? null);
+		return $lines === null ? null : json_encode($lines, Json::FLAGS);
+	}
+
+	/**
+	 * 0.47.0: the frozen reference lines of the column, or null.
+	 *
+	 * @return list<array{kind:string,title:string,value:string}>|null
+	 */
+	public static function referencesOf(?string $json): ?array {
+		if ($json === null || $json === '') {
+			return null;
+		}
+		try {
+			return ReferenceRules::frozen(json_decode($json, true, 8, JSON_THROW_ON_ERROR));
+		} catch (\JsonException) {
+			return null;
+		}
 	}
 
 	/** Money and hours as the DECIMAL columns take them. */

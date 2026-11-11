@@ -227,6 +227,11 @@ class QuoteRulesTest extends TestCase {
 		$this->assertStringContainsString('"project_draft":{"code":"N400","name":"School house"}', $r['json'], 'the draft stored as sent');
 		$this->assertSame('ok', self::check(['budgets' => null, 'budget_ids' => null, 'project_draft' => null]));
 		$this->assertSame('ok', self::check(['budgets' => []]), 'an empty list passes – the client keeps at least one');
+		// 0.47.0: a quote's budget is checked like a project's – reference blocks included.
+		$rl = ['kind' => 'order', 'title' => 'Order', 'value' => 'B-7'];
+		$this->assertSame('ok', self::check(['budgets' => [['id' => 'b1', 'reference_blocks' => [['id' => 'rb1', 'default' => true, 'lines' => [$rl]]]]]]));
+		$this->assertSame('422 Exactly one reference block of a budget is the default.',
+			self::check(['budgets' => [['id' => 'b1', 'reference_blocks' => [['id' => 'rb1', 'default' => true, 'lines' => [$rl]], ['id' => 'rb2', 'default' => true, 'lines' => [$rl]]]]]]));
 		$this->assertSame('ok', self::check(['project' => null, 'project_draft' => ['name' => 'Only a name']]), 'the code may be missing');
 		$this->assertSame('ok', self::check(['project' => null, 'project_draft' => ['code' => null, 'name' => 'Only a name']]));
 		$this->assertSame('ok', self::check(['budget' => null, 'budgets' => array_map(static fn (int $i) => array_merge($b1, ['id' => 'b-' . $i]), range(1, 50))]), '50 budgets');
@@ -386,7 +391,13 @@ class QuoteRulesTest extends TestCase {
 		$i = QuoteRules::issuedCopy($d, '2026-10-29T13:05:00Z', 'pblead', 'OF-2026-012', '2026-10-29', '2026-12-15', 184.0, 33120.0, ['key' => 'gemeinde-muster', 'name' => 'Gemeinde Muster']);
 		$this->assertSame('{"at":"2026-10-29T13:05:00Z","by":"pblead","number":"OF-2026-012","date":"2026-10-29","valid_until":"2026-12-15","currency":"chf","hours":184.0,"amount":33120.0,'
 			. '"customer":{"key":"gemeinde-muster","name":"Gemeinde Muster"},"project":null,"project_draft":{"code":"N410","name":"Schulhaus"},'
-			. '"budgets":[{"id":"b1","name":"Vorprojekt","currency":"CHF"}],"texts":{"greeting":"Hi"},"attachments":"Plan"}', json_encode($i, JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION));
+			. '"budgets":[{"id":"b1","name":"Vorprojekt","currency":"CHF"}],"texts":{"greeting":"Hi"},"attachments":"Plan","references":null}', json_encode($i, JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION));
+		// 0.47.0: the reference lines the client sent with the issue, frozen as kind/title/value.
+		$refs = QuoteRules::issueBody((object)['references' => [(object)['kind' => 'order', 'title' => ' Order ', 'value' => 'B-7', 'note' => 'x']]], 0)['references'];
+		$j = QuoteRules::issuedCopy($d, '2026-10-29T13:05:00Z', 'pblead', 'OF-2026-012', '2026-10-29', null, null, null, ['key' => null, 'name' => null], $refs);
+		$this->assertSame([['kind' => 'order', 'title' => 'Order', 'value' => 'B-7']], $j->references);
+		$this->assertSame('422 “references” must be null or a list of at most 6 reference lines.',
+			self::outcome(static fn () => QuoteRules::issueBody((object)['references' => array_fill(0, 7, (object)['title' => 'a', 'value' => 'b'])], 0)));
 		$this->assertTrue(QuoteRules::isIssued((object)['number' => 'OF-1', 'issued' => $i]));
 		$this->assertFalse(QuoteRules::isIssued((object)['number' => 'OF-1']));
 
@@ -419,7 +430,7 @@ class QuoteRulesTest extends TestCase {
 		$this->assertFalse(property_exists($fresh, 'document') || property_exists($fresh, 'documents'), 'a new quote carries no server fields');
 
 		// The request of the issue and the document kinds and names.
-		$this->assertSame(['date' => '2026-10-29', 'valid_until' => '2026-12-15', 'hours' => 184.0, 'amount' => 33120.5], QuoteRules::issueBody((object)['date' => '2026-10-29', 'valid_until' => '2026-12-15', 'hours' => 184, 'amount' => 33120.504], 0));
+		$this->assertSame(['date' => '2026-10-29', 'valid_until' => '2026-12-15', 'hours' => 184.0, 'amount' => 33120.5, 'references' => null], QuoteRules::issueBody((object)['date' => '2026-10-29', 'valid_until' => '2026-12-15', 'hours' => 184, 'amount' => 33120.504], 0));
 		$this->assertSame('1970-01-01', QuoteRules::issueBody(new \stdClass(), 0)['date']);
 		$this->assertStringStartsWith('422', self::outcome(static fn () => QuoteRules::issueBody((object)['hours' => -1], 0)));
 		$this->assertStringStartsWith('422', self::outcome(static fn () => QuoteRules::issueBody((object)['date' => 'today'], 0)));

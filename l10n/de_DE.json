@@ -987,7 +987,21 @@
 		"Password confirmation cancelled; nothing deleted.": "Passwortbestätigung abgebrochen; nichts gelöscht.",
 		"The project code “{code}” is already used by “{name}”.": "Der Projektcode „{code}“ gehört schon „{name}“.",
 		"“{field}” must be a list of at most {max} records.": "„{field}“ muss eine Liste von höchstens {max} Datensätzen sein.",
-		"“editing” holds { kind, key } of records.": "„editing“ enthält { kind, key } von Datensätzen."
+		"“editing” holds { kind, key } of records.": "„editing“ enthält { kind, key } von Datensätzen.",
+		"Work package {no}: “reference_block” must be null or the “id” of a reference block of this budget.": "Arbeitspaket {no}: „reference_block“ muss null oder die „id“ eines Referenzblocks dieses Budgets sein.",
+		"Cost position {no}: “reference_block” must be null or the “id” of a reference block of this budget.": "Kostenposition {no}: „reference_block“ muss null oder die „id“ eines Referenzblocks dieses Budgets sein.",
+		"Addendum {no}: “reference_block” must be null or the “id” of a reference block of this budget.": "Nachtrag {no}: „reference_block“ muss null oder die „id“ eines Referenzblocks dieses Budgets sein.",
+		"“{field}” must be null or a list of at most {max} reference blocks.": "„{field}“ muss null oder eine Liste von höchstens {max} Referenzblöcken sein.",
+		"Reference block {n}: must be a JSON object.": "Referenzblock {n}: muss ein JSON-Objekt sein.",
+		"Reference block {n}: “id” must be text of 1 to {max} characters, unique within the budget.": "Referenzblock {n}: „id“ muss Text mit 1 bis {max} Zeichen sein, eindeutig im Budget.",
+		"Reference block {n}: “name” must be empty or text of at most {max} characters.": "Referenzblock {n}: „name“ muss leer oder Text mit höchstens {max} Zeichen sein.",
+		"Reference block {n}: “default” must be true or false.": "Referenzblock {n}: „default“ muss true oder false sein.",
+		"Reference block {n}: “lines” must be a list of 1 to {max} reference lines.": "Referenzblock {n}: „lines“ muss eine Liste von 1 bis {max} Referenzzeilen sein.",
+		"Reference block {n}: {message}": "Referenzblock {n}: {message}",
+		"Exactly one reference block of a budget is the default.": "Genau ein Referenzblock eines Budgets ist die Vorgabe.",
+		"“{field}” must be null or a list of at most {max} reference lines.": "„{field}“ muss null oder eine Liste von höchstens {max} Referenzzeilen sein.",
+		"Reference line {n}: must be a JSON object.": "Referenzzeile {n}: muss ein JSON-Objekt sein.",
+		"Reference line {n}: {message}": "Referenzzeile {n}: {message}"
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

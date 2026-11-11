@@ -230,7 +230,7 @@ final class RecordRights {
 			return true;
 		}
 		$k = $m->tenantId . ':' . $m->uid;
-		$this->ownPersons[$k] ??= array_map(static fn (Record $r): string => (string)$r->getRkey(), $this->records->findPersonsOf($m->uid, $m->tenantId, true));
+		$this->ownPersons[$k] ??= array_map(static fn (Record $r): string => $r->getRkey(), $this->records->findPersonsOf($m->uid, $m->tenantId, true));
 		return in_array($key, $this->ownPersons[$k], true);
 	}
 

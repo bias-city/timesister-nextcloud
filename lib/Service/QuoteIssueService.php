@@ -84,7 +84,7 @@ final class QuoteIssueService {
 				$d->valid_until = $v['valid_until'];
 			}
 			$d->status = 'quoted';
-			$d->issued = QuoteRules::issuedCopy($d, LedgerRules::at($now), $m->uid, $number, $v['date'], is_string($d->valid_until ?? null) ? $d->valid_until : null, $v['hours'], $v['amount'], ['key' => $customerKey, 'name' => $customerName]);
+			$d->issued = QuoteRules::issuedCopy($d, LedgerRules::at($now), $m->uid, $number, $v['date'], is_string($d->valid_until ?? null) ? $d->valid_until : null, $v['hours'], $v['amount'], ['key' => $customerKey, 'name' => $customerName], $v['references']);
 			$x = RecordValidator::validate(QuoteRules::KIND, $key, $d);
 			$op = ['kind' => QuoteRules::KIND, 'key' => $key, 'version' => $rec->getVersion(), 'json' => $x['json'], 'accounts' => $x['accounts']];
 			return $this->recordService->applyWithin($m, [$op], false, $top, true)['records'][0];

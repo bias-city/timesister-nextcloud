@@ -65,4 +65,25 @@ class IssueRulesTest extends TestCase {
 		$d = (object)['positions' => [(object)['kind' => 'hours', 'text' => 'AP1', 'amount' => 100], (object)['kind' => 'flat', 'text' => 'Weg', 'amount' => 50, 'excluded' => true], 'x', (object)['kind' => 'text', 'text' => 'Hinweis', 'amount' => 0, 'excluded' => false]]];
 		$this->assertSame(['AP1', 'Hinweis'], array_map(static fn (\stdClass $p): string => $p->text, IssueRules::positionsOf($d)));
 	}
+
+	/** 0.47.0: the draft's reference lines frozen as kind/title/value; in the ledger payload only when there are any. */
+	public function testReferencesFrozen(): void {
+		$d = (object)['references' => [(object)['kind' => 'cost_center', 'title' => 'Cost center', 'value' => '4711', 'extra' => 'x'], (object)['kind' => 'order', 'title' => 'Order', 'value' => 'B-7']]];
+		$json = IssueRules::referencesJsonOf($d);
+		$this->assertSame('[{"kind":"cost_center","title":"Cost center","value":"4711"},{"kind":"order","title":"Order","value":"B-7"}]', $json);
+		$this->assertNull(IssueRules::referencesJsonOf((object)['references' => []]));
+		$this->assertNull(IssueRules::referencesJsonOf(new \stdClass()));
+		$lines = IssueRules::referencesOf($json);
+		$this->assertSame([['kind' => 'cost_center', 'title' => 'Cost center', 'value' => '4711'], ['kind' => 'order', 'title' => 'Order', 'value' => 'B-7']], $lines);
+		$this->assertNull(IssueRules::referencesOf(null));
+		$this->assertNull(IssueRules::referencesOf('not json'));
+		$payload = static fn (?array $refs): array => IssueRules::payload('inv-7', 'RE-1', '2026-11-10', 'pbadmin', '2026-12-10', 'p', 'c', '2026-10-01', '2026-10-31', 'CHF',
+			\OCA\TimeSister\Service\VatLines::of([], 8.1, 'domestic'), new \stdClass(), new \stdClass(), [], [], null, null, null, null, null, null, null, null, 'KST 4711', $refs);
+		$with = $payload($lines);
+		$this->assertSame($lines, $with['references']);
+		$this->assertStringContainsString('"references":[{"kind":"cost_center","title":"Cost center","value":"4711"},{"kind":"order","title":"Order","value":"B-7"}]', LedgerRules::canonical($with));
+		$this->assertArrayNotHasKey('references', $payload(null), 'older entries keep their exact payload');
+		$this->assertArrayNotHasKey('references', $payload([]));
+		$this->assertSame(LedgerRules::canonical($payload(null)), LedgerRules::canonical($payload([])));
+	}
 }

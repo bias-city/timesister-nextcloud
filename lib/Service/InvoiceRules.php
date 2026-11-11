@@ -178,6 +178,11 @@ final class InvoiceRules {
 		}
 		// 0.44.0: the customer's cost center or reference, free text, printed in the head.
 		self::text($d->cost_center ?? null, 'cost_center', self::COST_CENTER_MAX, self::CONTROL_NOTE);
+		// 0.47.0: the reference block the lines came from and their copy, stored trimmed; no duty, no check against the budget.
+		ReferenceRules::checkBlockId($d->{ReferenceRules::BLOCK} ?? null);
+		if (property_exists($d, ReferenceRules::LINES)) {
+			$d->{ReferenceRules::LINES} = ReferenceRules::references($d->{ReferenceRules::LINES});
+		}
 		if (($d->positions ?? null) !== null) {
 			// A reversal or credit note carries the negated lines (0.27.0): the advance signs mirror.
 			self::checkPositions($d->positions, ($d->reverses ?? null) !== null || ($d->credits ?? null) !== null);

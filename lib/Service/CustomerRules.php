@@ -10,11 +10,13 @@ namespace OCA\TimeSister\Service;
  * The customer record (0.20.0), pure: the optional fields the e-invoices
  * and exports read – `e_invoice` (an XRechnung is wanted), `leitweg_id`
  * (German public customers, up to 46 characters) and `datev_account`
- * (the debtor account, digits), the type and payment term (0.27.0) and the
- * free tags. Other fields pass as before.
+ * (the debtor account, digits), the type and payment term (0.27.0), the
+ * free tags and `expects_references` (0.47.0). Other fields pass as before.
  */
 final class CustomerRules {
 	public const LEITWEG_MAX = 46;
+	/** 0.47.0: invoices to this customer should carry references (`reference_blocks` live on the budgets). */
+	public const EXPECTS_REFERENCES = 'expects_references';
 	public const ACCOUNT_MAX = 9;
 	/** 0.27.0 (controlling): the customer's payment term in days. */
 	public const PAYMENT_DAYS_MAX = 365;
@@ -44,6 +46,11 @@ final class CustomerRules {
 		$e = $d->e_invoice ?? null;
 		if ($e !== null && !is_bool($e)) {
 			throw ApiException::notBool('e_invoice');
+		}
+		// 0.47.0: the customer expects references on invoices (a soft note; the client shows the hint).
+		$x = $d->{self::EXPECTS_REFERENCES} ?? null;
+		if ($x !== null && !is_bool($x)) {
+			throw ApiException::notBool(self::EXPECTS_REFERENCES);
 		}
 		$l = $d->leitweg_id ?? null;
 		if ($l !== null && (!is_string($l) || $l === '' || strlen($l) > self::LEITWEG_MAX || !preg_match('/^[A-Za-z0-9\-]+$/', $l))) {

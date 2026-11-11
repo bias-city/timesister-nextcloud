@@ -55,6 +55,8 @@ use OCP\DB\Types;
  * @method string|null getFooter()
  * @method string|null getCostCenter()
  * @method void setCostCenter(?string $costCenter)
+ * @method string|null getReferencesJson()
+ * @method void setReferencesJson(?string $referencesJson)
  * @method void setFooter(?string $footer)
  * @method string getNet()
  * @method void setNet(string $net)
@@ -165,6 +167,8 @@ final class InvInvoice extends Entity {
 	protected ?string $footer = null;
 	/** 0.44.0: the customer's cost center, printed in the head. */
 	protected ?string $costCenter = null;
+	/** 0.47.0: the reference lines as frozen, JSON. */
+	protected ?string $referencesJson = null;
 	protected string $net = '0';
 	protected string $vatAmount = '0';
 	protected string $gross = '0';
@@ -230,6 +234,7 @@ final class InvInvoice extends Entity {
 		$this->addType('body', Types::STRING);
 		$this->addType('footer', Types::STRING);
 		$this->addType('costCenter', Types::STRING);
+		$this->addType('referencesJson', Types::STRING);
 		$this->addType('net', Types::DECIMAL);
 		$this->addType('vatAmount', Types::DECIMAL);
 		$this->addType('gross', Types::DECIMAL);

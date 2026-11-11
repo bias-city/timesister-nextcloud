@@ -321,4 +321,51 @@ class ProjectRulesTest extends TestCase {
 			self::outcome(static fn () => RecordValidator::validate('project', 'q1', self::obj('{"id":"q1","status":"offered"}'))));
 		$this->assertSame('', self::outcome(static fn () => RecordValidator::validate('customer', 'k1', self::obj('{"id":"k1","status":"offered"}'))), 'customers are not checked');
 	}
+
+	/** 0.47.0: reference blocks on the budget, exactly one default, and the blocks packages, costs and addenda name. */
+	public function testReferenceBlocks(): void {
+		$line = '{"kind":"cost_center","title":" Cost center ","value":"4711"}';
+		$blocks = '"reference_blocks":[{"id":"rb1","name":"Cost center 4711","default":true,"lines":[' . $line . ']},{"id":"rb2","name":"","lines":[{"title":"Order","value":"B-7"}]}]';
+		$cost = '{"no":1,"name":"Travel","kind":"expense","rule":"flat","amount":100,"per":"budget","reference_block":"rb2"}';
+		$b = self::obj('{"id":"b1",' . $blocks . ',"work_packages":[{"no":"1","reference_block":"rb2"},{"no":"2","reference_block":null},{"no":"3","reference_block":""}],'
+			. '"costs":[' . $cost . '],"addenda":[{"no":1,"date":"2026-11-10","package":"1","hours":4,"reference_block":"rb1"}]}');
+		$this->assertSame('', self::outcome(static fn () => ProjectRules::checkBudget($b)));
+		$this->assertSame('Cost center', $b->reference_blocks[0]->lines[0]->title, 'stored trimmed');
+		$this->assertSame('other', $b->reference_blocks[1]->lines[0]->kind, 'a line without kind is a free one');
+		$this->assertSame('', self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","reference_blocks":[]}'))), 'no blocks, no default');
+		$this->assertSame('', self::validate('{"status":"draft","budgets":[{"id":"b1",' . $blocks . '}]}'), 'through the project');
+		// Exactly one default.
+		$this->assertSame('422 Exactly one reference block of a budget is the default.',
+			self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","reference_blocks":[{"id":"a","default":true,"lines":[' . $line . ']},{"id":"b","default":true,"lines":[' . $line . ']}]}'))));
+		$this->assertSame('422 Exactly one reference block of a budget is the default.',
+			self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","reference_blocks":[{"id":"a","lines":[' . $line . ']}]}'))));
+		// The shape of a block.
+		$this->assertSame('422 Reference block 2: “id” must be text of 1 to 40 characters, unique within the budget.',
+			self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","reference_blocks":[{"id":"a","default":true,"lines":[' . $line . ']},{"id":"a","lines":[' . $line . ']}]}'))));
+		$this->assertSame('422 Reference block 1: “lines” must be a list of 1 to 6 reference lines.',
+			self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","reference_blocks":[{"id":"a","default":true,"lines":[]}]}'))));
+		$this->assertSame('422 Reference block 1: “name” must be empty or text of at most 80 characters.',
+			self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","reference_blocks":[{"id":"a","name":"' . str_repeat('x', 81) . '","default":true,"lines":[' . $line . ']}]}'))));
+		$this->assertSame('422 Reference block 1: Reference line 1: “kind” must be one of cost_center, contract, order, leitweg, tender, project_ref, other.',
+			self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","reference_blocks":[{"id":"a","default":true,"lines":[{"kind":"iban","title":"x","value":"y"}]}]}'))));
+		$this->assertSame('422 Reference block 1: Reference line 1: “value” must be text of 1 to 120 characters.',
+			self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","reference_blocks":[{"id":"a","default":true,"lines":[{"title":"x","value":"a\\u0007b"}]}]}'))));
+		$eleven = implode(',', array_map(static fn (int $i): string => '{"id":"r' . $i . '","default":' . ($i === 0 ? 'true' : 'false') . ',"lines":[' . $line . ']}', range(0, 10)));
+		$this->assertSame('422 “reference_blocks” must be null or a list of at most 10 reference blocks.',
+			self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","reference_blocks":[' . $eleven . ']}'))));
+		// A reference_block names a block of this budget.
+		$e = null;
+		try {
+			ProjectRules::checkBudget(self::obj('{"id":"b1",' . $blocks . ',"work_packages":[{"no":"1","reference_block":"rb9"}]}'));
+		} catch (ApiException $x) {
+			$e = $x;
+		}
+		$this->assertNotNull($e);
+		$this->assertSame('422 Work package 1: “reference_block” must be null or the “id” of a reference block of this budget.', $e->getStatus() . ' ' . $e->getText()->text());
+		$this->assertSame('reference_block', $e->toData()['field'] ?? null);
+		$this->assertSame('422 Cost position 1: “reference_block” must be null or the “id” of a reference block of this budget.',
+			self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1","costs":[' . str_replace('rb2', 'rb1', $cost) . ']}'))), 'no blocks: only null');
+		$this->assertSame('422 Addendum 1: “reference_block” must be null or the “id” of a reference block of this budget.',
+			self::outcome(static fn () => ProjectRules::checkBudget(self::obj('{"id":"b1",' . $blocks . ',"work_packages":[{"no":"1"}],"addenda":[{"no":1,"date":"2026-11-10","package":"1","hours":4,"reference_block":7}]}'))));
+	}
 }

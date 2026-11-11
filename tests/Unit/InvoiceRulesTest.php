@@ -486,4 +486,19 @@ class InvoiceRulesTest extends TestCase {
 		$this->assertSame('alice.new', $mapped->bookings[0]->person, 'a team ZIP moved to other accounts: the booking’s person follows');
 		$this->assertSame('lea', $mapped->created_by);
 	}
+
+	/** 0.47.0: the reference block the invoice came from and its copy of the lines; no duty, not checked against the budget. */
+	public function testReferences(): void {
+		$line = static fn (array $over = []): array => array_merge(['kind' => 'cost_center', 'title' => 'Cost center', 'value' => '4711'], $over);
+		$this->assertSame('ok', self::check(['reference_block' => 'rb1', 'references' => [$line(), $line(['kind' => 'order', 'title' => 'Order', 'value' => 'B-7'])]]));
+		$this->assertSame('ok', self::check(['reference_block' => null, 'references' => null]));
+		$this->assertSame('ok', self::check(['reference_block' => 'unknown-elsewhere', 'references' => []]), 'not checked against the budget');
+		$r = RecordValidator::validate('invoice', 'inv-1a2b3c4d', self::data(['references' => [$line(['title' => '  Cost center ', 'kind' => null])]]));
+		$this->assertStringContainsString('"references":[{"kind":"other","title":"Cost center","value":"4711"}]', $r['json'], 'trimmed, a missing kind is a free one');
+		$this->assertSame('422 “references” must be null or a list of at most 6 reference lines.', self::check(['references' => array_fill(0, 7, $line())]));
+		$this->assertSame('422 Reference line 2: “kind” must be one of cost_center, contract, order, leitweg, tender, project_ref, other.', self::check(['references' => [$line(), $line(['kind' => 'iban'])]]));
+		$this->assertSame('422 Reference line 1: “title” must be text of 1 to 60 characters.', self::check(['references' => [$line(['title' => ' '])]]));
+		$this->assertSame('422 Reference line 1: must be a JSON object.', self::check(['references' => ['4711']]));
+		$this->assertSame('422 “reference_block” must be null or text of 1 to 40 characters.', self::check(['reference_block' => str_repeat('x', 41)]));
+	}
 }

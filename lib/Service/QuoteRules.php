@@ -341,8 +341,14 @@ final class QuoteRules {
 		return $o;
 	}
 
-	/** The offered part, frozen on issue: what later negotiation never alters. @param array{key:?string,name:?string} $customer */
-	public static function issuedCopy(\stdClass $d, string $at, string $by, string $number, string $date, ?string $validUntil, ?float $hours, ?float $amount, array $customer): \stdClass {
+	/**
+	 * The offered part, frozen on issue: what later negotiation never alters.
+	 * 0.47.0: `references` – the lines of the budget's default block the client sent, null when none.
+	 *
+	 * @param array{key:?string,name:?string} $customer
+	 * @param list<\stdClass>|null $references
+	 */
+	public static function issuedCopy(\stdClass $d, string $at, string $by, string $number, string $date, ?string $validUntil, ?float $hours, ?float $amount, array $customer, ?array $references = null): \stdClass {
 		$budgets = $d->budgets ?? null;
 		if (!is_array($budgets)) {
 			$budgets = ($d->budget ?? null) instanceof \stdClass ? [$d->budget] : [];
@@ -357,12 +363,19 @@ final class QuoteRules {
 			'budgets' => array_values($budgets),
 			'texts' => ($d->texts ?? null) instanceof \stdClass ? $d->texts : null,
 			'attachments' => is_string($d->attachments ?? null) ? $d->attachments : null,
+			'references' => ReferenceRules::frozen($references),
 		]);
 	}
 
-	/** The body of `POST /quotes/{key}/issue`: a day, an optional day, two optional sums ≥ 0. @return array{date:string,valid_until:?string,hours:?float,amount:?float} */
+	/**
+	 * The body of `POST /quotes/{key}/issue`: a day, an optional day, two optional sums ≥ 0,
+	 * 0.47.0 the reference lines to freeze (null or at most six).
+	 *
+	 * @return array{date:string,valid_until:?string,hours:?float,amount:?float,references:list<\stdClass>|null}
+	 */
 	public static function issueBody(\stdClass $body, int $now): array {
-		$out = ['date' => gmdate('Y-m-d', $now), 'valid_until' => null, 'hours' => null, 'amount' => null];
+		$out = ['date' => gmdate('Y-m-d', $now), 'valid_until' => null, 'hours' => null, 'amount' => null,
+			'references' => ReferenceRules::references($body->{ReferenceRules::LINES} ?? null)];
 		foreach (['date', 'valid_until'] as $f) {
 			$v = $body->{$f} ?? null;
 			if ($v === null) {

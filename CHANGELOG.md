@@ -1,5 +1,31 @@
 # Changes
 
+## 0.47.0 – 2026-11-10
+
+`api: 2` unchanged, migration 1029 adds a column
+(`ts_inv_invoices.references_json`). Additive for every client of 0.46.0.
+
+- **References live on the budget.** A budget may carry
+  `reference_blocks` – at most 10 named blocks of 1 to 6 reference lines
+  `{ kind, title, value }` (cost center, contract, order number, Leitweg-ID,
+  tender, project reference or a free one), ids unique, exactly one of them
+  the default. Work packages, cost positions and addenda name theirs with
+  `reference_block` (null: the default block, or the parent package's); an
+  id that is not a block of the budget answers `422`. Quotes' budgets are
+  checked alike.
+- **The invoice carries its copy.** A draft may carry `reference_block`
+  (where the lines came from) and `references` (at most six lines). Issuing
+  freezes the lines: `…/fixed` answers `references`, reversals and credit
+  notes copy them, and the ledger payload holds them only when there are
+  any – older entries keep their exact payload. No duty: the hint for a
+  customer that expects references is the client's.
+- **The customer's note.** A customer may carry `expects_references`
+  (true or false).
+- **Issued quotes freeze theirs.** `POST /quotes/{key}/issue` takes
+  `references` (the lines of the default block, at most six) and freezes
+  them in `issued.references`.
+- Capability `references: 1`.
+
 ## 0.46.0 – 2026-11-10
 
 `api: 2` unchanged, no migration.

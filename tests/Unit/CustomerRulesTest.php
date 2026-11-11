@@ -84,4 +84,12 @@ class CustomerRulesTest extends TestCase {
 		$this->assertSame('422 Each customer type needs a “name” of 1 to 60 characters.', $check('{"customer_types":[{"id":"a","name":"' . str_repeat('x', 61) . '"}]}'));
 		$this->assertSame('422 “customer_types” names the customer type a twice.', $check('{"customer_types":[{"id":"a","name":"A"},{"id":"a","name":"B"}]}'));
 	}
+
+	/** 0.47.0: the customer expects references on invoices – a soft note. */
+	public function testExpectsReferences(): void {
+		$this->assertSame('ok', self::check('{"id":"k1","expects_references":true}'));
+		$this->assertSame('ok', self::check('{"id":"k1","expects_references":null}'));
+		$this->assertSame('ok', self::check('{"id":"k1","cost_centers":[{"no":"4711","name":"Hochbau"}]}'), 'the older list still passes');
+		$this->assertSame('422 “expects_references” must be true or false.', self::check('{"id":"k1","expects_references":"yes"}'));
+	}
 }

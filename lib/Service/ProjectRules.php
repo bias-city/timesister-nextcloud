@@ -196,7 +196,7 @@ final class ProjectRules {
 		}
 	}
 
-	/** One budget: currency (upper case), `rates` refused, `cap` and work package `rate` ≥ 0, `invoice_dates` days, `costs` ({@see CostRules}), `progress` 0–100, work package `addendum` bool, the fee fields (0.33.0). Also a quote's budget. */
+	/** One budget: currency (upper case), `rates` refused, `cap` and work package `rate` ≥ 0, `invoice_dates` days, `costs` ({@see CostRules}), `progress` 0–100, work package `addendum` bool, the fee fields (0.33.0), the reference blocks (0.47.0). Also a quote's budget. */
 	public static function checkBudget(\stdClass $b): void {
 		// 0.24.1: the progress the Lead sets, a whole percent or null.
 		$p = $b->progress ?? null;
@@ -245,6 +245,8 @@ final class ProjectRules {
 		// 0.21.0: the cost positions beside the work packages (module «costs»).
 		CostRules::check($b->{CostRules::FIELD} ?? null);
 		self::checkAddenda($b);
+		// 0.47.0: the reference blocks and the block each package, cost position and addendum names.
+		ReferenceRules::checkBudget($b);
 		$wps = $b->work_packages ?? null;
 		if (!is_array($wps)) {
 			return;
