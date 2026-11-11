@@ -1005,7 +1005,26 @@
 		"In the mode manual the app issues invoices; the server keeps no ledger.": "Im Modus manual stellt die App die Rechnungen aus; der Server führt kein Journal.",
 		"“kind” must be “pdf”, “docx” or “xml”.": "„kind“ muss „pdf“, „docx“ oder „xml“ sein.",
 		"The document must be a Word file (.docx).": "Das Dokument muss eine Word-Datei (.docx) sein.",
-		"Only an issued or paid invoice with a number and a date gets its documents filed.": "Ablegen lassen sich nur die Dokumente einer gestellten oder bezahlten Rechnung mit Nummer und Datum."
+		"Only an issued or paid invoice with a number and a date gets its documents filed.": "Ablegen lassen sich nur die Dokumente einer gestellten oder bezahlten Rechnung mit Nummer und Datum.",
+		"Only one of your calendars counts as your time calendar. Entries with a project code in other calendars are shown, but never counted. The Mac app creates a calendar “TimeSister – <name>” when you sign in and names it itself; without the Mac app, choose your time calendar here.": "Nur einer deiner Kalender zählt als Zeitkalender. Einträge mit Projektcode in anderen Kalendern werden angezeigt, aber nie gezählt. Die Mac-App legt beim Anmelden einen Kalender „TimeSister – <Name>“ an und benennt ihn selbst; ohne Mac-App wählst du deinen Zeitkalender hier.",
+		"Time calendar": "Zeitkalender",
+		"Your calendars": "Deine Kalender",
+		"Stop counting this calendar": "Diesen Kalender nicht mehr zählen",
+		"Team: {name}": "Team: {name}",
+		"None yet": "Noch keiner",
+		"{name} – no longer among your calendars": "{name} – nicht mehr unter deinen Kalendern",
+		"Last read: {date}": "Zuletzt gelesen: {date}",
+		"Not read yet; the server reads it within a few minutes.": "Noch nicht gelesen; der Server liest ihn innert weniger Minuten.",
+		"Last read failed: {message}": "Letztes Lesen fehlgeschlagen: {message}",
+		"You have no calendar of your own yet. Create one in the Calendar app, then reload this page.": "Du hast noch keinen eigenen Kalender. Lege einen in der Kalender-App an und lade diese Seite neu.",
+		"Use as time calendar": "Als Zeitkalender verwenden",
+		"Your time calendar": "Dein Zeitkalender",
+		"The team’s vacation calendar": "Ferienkalender des Teams",
+		"Use “{name}” as your time calendar? The entries of “{old}” no longer count.": "„{name}“ als Zeitkalender verwenden? Die Einträge von „{old}“ zählen dann nicht mehr.",
+		"Stop counting “{name}”? Its entries no longer count; billed hours stay.": "„{name}“ nicht mehr zählen? Seine Einträge zählen dann nicht mehr; verrechnete Stunden bleiben.",
+		"“{name}” is your time calendar now.": "„{name}“ ist jetzt dein Zeitkalender.",
+		"No calendar counts as your time calendar now.": "Jetzt zählt kein Kalender als dein Zeitkalender.",
+		"Not saved: {message}": "Nicht gespeichert: {message}"
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

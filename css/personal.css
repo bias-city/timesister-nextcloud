@@ -1,0 +1,16 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* Only Nextcloud's CSS variables, like admin.css. */
+
+#timesister-personal { max-width: 720px; }
+#timesister-personal h3 { margin: 24px 0 8px; font-weight: bold; }
+#timesister-personal .ts-muted { color: var(--color-text-maxcontrast); }
+#timesister-personal .ts-error { color: var(--color-error-text, var(--color-error)); min-height: 1.2em; margin: 8px 0 0; }
+#timesister-personal .ts-p-uri { font-family: monospace; color: var(--color-text-maxcontrast); }
+#timesister-personal .ts-p-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#timesister-personal table { width: 100%; border-collapse: collapse; }
+#timesister-personal td {
+	text-align: left; vertical-align: middle;
+	padding: 8px 10px; border-bottom: 1px solid var(--color-border);
+}
+#timesister-personal td.ts-right { text-align: right; white-space: nowrap; }
+#timesister-personal tr.ts-p-current td:first-child > span:first-child { font-weight: bold; }

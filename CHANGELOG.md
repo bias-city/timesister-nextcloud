@@ -1,5 +1,18 @@
 # Changes
 
+## 0.49.0 – 2026-11-11
+
+`api: 2` unchanged, no migration. Additive for every client of 0.48.0.
+
+- **Personal settings page «TimeSister».** A member without the Mac app
+  names their time calendar under Settings › Personal › TimeSister: the
+  current time calendar, the account's own writable calendars (no shared-in
+  ones, no subscriptions, not the birthday calendar; the team's vacation
+  calendar shown but not offered) with «Use as time calendar», and «Stop
+  counting this calendar». The page calls `PUT`/`DELETE /me/time-calendar`
+  with the request token – the same rules as for the Mac app. Outside a
+  team it says so in one sentence.
+
 ## 0.48.0 – 2026-11-11
 
 `api: 2` unchanged, no migration. Additive for every client of 0.47.0.

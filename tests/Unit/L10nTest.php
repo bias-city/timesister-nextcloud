@@ -216,13 +216,16 @@ class L10nTest extends TestCase {
 	}
 
 	public function testJsKeysProvided(): void {
-		$php = (string)file_get_contents(self::ROOT . '/lib/Settings/AdminSettings.php');
-		preg_match_all("/'([a-z_]+)' => \\\$l->[tn]\\(/", $php, $m);
-		$keys = $m[1];
-		$js = (string)file_get_contents(self::ROOT . '/js/admin.js');
-		preg_match_all("/\\btr\\('([a-z_]+)'\\s*[,)]/", $js, $used);
-		$this->assertNotEmpty($used[1]);
-		$this->assertDoesNotMatchRegularExpression("/tr\\('role_(user|lead|admin|subadmin)'/", $js, 'role words come from RoleName, not from tr()');
-		$this->assertSame([], array_values(array_diff(array_unique($used[1]), $keys)));
+		// Each page script and the dictionary of its settings class (personal page since 0.49.0).
+		foreach (['admin' => 'AdminSettings', 'personal' => 'PersonalSettings'] as $script => $class) {
+			$php = (string)file_get_contents(self::ROOT . "/lib/Settings/$class.php");
+			preg_match_all("/'([a-z_]+)' => \\\$l->[tn]\\(/", $php, $m);
+			$keys = $m[1];
+			$js = (string)file_get_contents(self::ROOT . "/js/$script.js");
+			preg_match_all("/\\btr\\('([a-z_]+)'\\s*[,)]/", $js, $used);
+			$this->assertNotEmpty($used[1], $script);
+			$this->assertDoesNotMatchRegularExpression("/tr\\('role_(user|lead|admin|subadmin)'/", $js, 'role words come from RoleName, not from tr()');
+			$this->assertSame([], array_values(array_diff(array_unique($used[1]), $keys)), $script);
+		}
 	}
 }

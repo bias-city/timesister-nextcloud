@@ -177,6 +177,12 @@ final class AbsenceService {
 		}
 	}
 
+	/** The URI of the team's vacation calendar when it lies in `$uid`'s account, else null. */
+	public function vacationUriOf(int $tenantId, string $uid): ?string {
+		$vc = AbsenceRules::vacationCalendar($this->settings($tenantId));
+		return $vc !== null && $vc['owner'] === $uid ? $vc['uri'] : null;
+	}
+
 	/** The owner's calendar by URI – writable and exportable, or null. */
 	private function calendar(string $owner, string $uri): (ICreateFromString&ICalendarExport)|null {
 		foreach ($this->calendars->getCalendarsForPrincipal('principals/users/' . $owner, [$uri]) as $cal) {

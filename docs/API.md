@@ -2493,6 +2493,13 @@ ts_tenants         + entries_revision, entries_since
   new one is read in full.
 - `DELETE /me/time-calendar`: un-names; the person's entries become
   tombstones, kept ones stay.
+- **Personal settings page** (added 0.49.0): a member can also name the
+  time calendar in Settings › Personal › TimeSister – useful without the
+  Mac app. The page lists the account's own writable calendars (no shared-in
+  ones, no subscriptions, not the birthday calendar; the team's vacation
+  calendar shown but not offered) and calls `PUT`/`DELETE
+  /me/time-calendar` with the session's request token, so the same rules
+  and answers apply.
 - `PUT /me/absences` `{ "items": [{ source_uid, kind, start, end }] }`
   (every member, for themselves): the complete state of the own absences
   for the shared vacation calendar, at most 400 items; replaces what was
