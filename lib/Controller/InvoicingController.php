@@ -12,6 +12,7 @@ use OCA\TimeSister\Service\DocumentService;
 use OCA\TimeSister\Service\InvoiceAssignService;
 use OCA\TimeSister\Service\IssueService;
 use OCA\TimeSister\Service\Json;
+use OCA\TimeSister\Service\ManualInvoiceService;
 use OCA\TimeSister\Service\TenantService;
 use OCP\AppFramework\Http\Attribute\ApiRoute;
 use OCP\AppFramework\Http\Attribute\BruteForceProtection;
@@ -31,6 +32,8 @@ use OCP\IRequest;
  * sent to `PUT …/document` closes, `issue/cancel` releases; `preview` and
  * `render` are gone (410) – the server renders nothing. Since 0.38.0
  * `assign` sets the budget of a fixed invoice (Leads of the project too).
+ * Since 0.48.0 `document` also files and serves the app's own invoices in
+ * the invoicing mode manual (ManualInvoiceService).
  */
 final class InvoicingController extends BaseController {
 	/** `positions` of a credit note may be sent along. */
@@ -43,6 +46,7 @@ final class InvoicingController extends BaseController {
 		private IssueService $issues,
 		private DocumentService $documents,
 		private InvoiceAssignService $assigns,
+		private ManualInvoiceService $manual,
 	) {
 		parent::__construct($request, $tenants, $l);
 	}
@@ -65,7 +69,10 @@ final class InvoicingController extends BaseController {
 		return $this->run(fn () => $this->issues->cancel($this->tenants->current(), $key));
 	}
 
-	/** PUT /invoices/{key}/document?kind=pdf|xml – the body is the file (raw, ≤ 20 MB): the PDF closes the issue, the XML is filed next to it. */
+	/**
+	 * PUT /invoices/{key}/document?kind=pdf|xml – the body is the file (raw, ≤ 20 MB): the PDF closes the issue, the XML is filed next to it.
+	 * Mode manual (0.48.0), invoice never fixed: pdf|docx|xml of the app's own invoice, replacing the earlier file.
+	 */
 	#[ApiRoute(verb: 'PUT', url: '/api/v1/invoices/{key}/document')]
 	#[BruteForceProtection(action: self::BRUTE_FORCE_ACTION)]
 	#[NoAdminRequired]
@@ -74,6 +81,10 @@ final class InvoicingController extends BaseController {
 		return $this->run(function () use ($key) {
 			$kind = $this->request->getParam('kind');
 			$bytes = Json::readInput(DocumentRules::FILE_MAX);
+			$m = $this->tenants->current();
+			if ($this->manual->handles($m, $key)) {
+				return $this->manual->put($m, $key, $kind, $bytes);
+			}
 			if ($kind === null || $kind === '' || $kind === DocumentRules::KIND_PDF) {
 				return $this->issues->close($this->tenants->current(), $key, $bytes);
 			}
@@ -154,13 +165,15 @@ final class InvoicingController extends BaseController {
 		return $this->run(static fn () => throw ApiException::gone());
 	}
 
-	/** GET /invoices/{key}/document?kind=pdf|xml – the filed document as a download; 409 document_missing while `issuing`. */
+	/** GET /invoices/{key}/document?kind=pdf|xml – the filed document as a download; 409 document_missing while `issuing`. Mode manual (0.48.0): also docx, 404 when not filed. */
 	#[ApiRoute(verb: 'GET', url: '/api/v1/invoices/{key}/document')]
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 120, period: 60)]
 	public function document(string $key): Response {
 		return $this->respond(function () use ($key): Response {
-			$r = $this->documents->document($this->tenants->current(), $key, $this->request->getParam('kind'));
+			$m = $this->tenants->current();
+			$kind = $this->request->getParam('kind');
+			$r = $this->manual->handles($m, $key) ? $this->manual->get($m, $key, $kind) : $this->documents->document($m, $key, $kind);
 			return new DataDownloadResponse($r['content'], $r['name'], $r['type']);
 		});
 	}

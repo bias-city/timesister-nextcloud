@@ -120,6 +120,8 @@ final class IssueService {
 		$this->requireAdmin($m);
 		// 0.24.0: in the mode external the accounting system issues.
 		HandoverRules::refuseIssue($t->invoicingMode());
+		// 0.48.0: in the mode manual the app issues, without a ledger.
+		ManualInvoiceRules::refuseIssue($t->invoicingMode());
 		RecordValidator::checkAddress(InvoiceRules::KIND, $key);
 		$now = $this->time->getTime();
 		$issuedOn = IssueRules::issuedOn($body->issued_on ?? null, $now);

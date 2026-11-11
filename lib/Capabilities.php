@@ -148,6 +148,10 @@ use OCP\Capabilities\ICapability;
  * `reference_block` and `references` (at most six lines), frozen on issue
  * (`…/fixed`, ledger payload when set); `references` in the body of
  * `POST /quotes/{key}/issue`, frozen in `issued`.
+ * `invoicing_manual: 1` since 0.48.0: the team setting `invoicing_mode`
+ * takes `manual` (the app issues; no ledger, `POST …/issue` 409
+ * `invoicing_manual`); `PUT`/`GET /invoices/{key}/document?kind=pdf|docx|xml`
+ * file and serve the app's own invoices, a second upload replacing the first.
  * `corrections: 3` since 0.41.0: a correction (record and POST
  * /entries/correct) also moves start and end – `from`/`to`, Team Admins and
  * Leads only (`correction_time_invalid`); 2 since 0.27.0 the record
@@ -159,7 +163,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, quote_template: int, credit_limit: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, quote_documents: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int, fee_models: int, planning_rate: int, rule_receipts: int, invoices_free: int, invoice_plan_records: int, entry_invoice: int, advance_rules: int, expenses_separate: int, receipts_by_customer: int, bank_entries: int, references: int}} */
+	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, quote_template: int, credit_limit: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, quote_documents: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int, fee_models: int, planning_rate: int, rule_receipts: int, invoices_free: int, invoice_plan_records: int, entry_invoice: int, advance_rules: int, expenses_separate: int, receipts_by_customer: int, bank_entries: int, references: int, invoicing_manual: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -210,6 +214,7 @@ final class Capabilities implements ICapability {
 				'receipts_by_customer' => 1,
 				'bank_entries' => 3,
 				'references' => 1,
+				'invoicing_manual' => 1,
 			],
 		];
 	}

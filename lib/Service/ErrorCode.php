@@ -71,6 +71,10 @@ final class ErrorCode {
 	public const INVOICE_REVIEW_ADMIN_ONLY = 'invoice_review_admin_only';
 	public const INVOICE_ISSUE_ADMIN_ONLY = 'invoice_issue_admin_only';
 	public const INVOICE_ISSUE_EXTERNAL = 'invoice_issue_external';
+	/** 0.48.0: in the mode manual the app issues; the server keeps no ledger. */
+	public const INVOICING_MANUAL = 'invoicing_manual';
+	/** 0.48.0: only an issued or paid invoice with number and date gets its files (mode manual). */
+	public const INVOICE_MANUAL_NOT_ISSUED = 'invoice_manual_not_issued';
 	public const INVOICE_NUMBER_ADMIN_ONLY = 'invoice_number_admin_only';
 	public const INVOICE_NUMBER_TAKEN = 'invoice_number_taken';
 	public const INVOICE_ALREADY_REVERSED = 'invoice_already_reversed';

@@ -740,7 +740,7 @@
 		"Only a draft without a number can be handed over.": "Übergeben lässt sich nur ein Entwurf ohne Nummer.",
 		"Only a handed-over invoice can be revoked.": "Zurücknehmen lässt sich nur eine übergebene Rechnung.",
 		"“invoicing_mode” must be null or an object with “mode”.": "„invoicing_mode“ muss null oder ein Objekt mit „mode“ sein.",
-		"“{field}” must be “timesister” or “external”.": "„{field}“ muss „timesister“ oder „external“ sein.",
+		"“{field}” must be “timesister”, “manual” or “external”.": "„{field}“ muss „timesister“, „manual“ oder „external“ sein.",
 		"“{field}” must be “off”, “auto” or “manual”.": "„{field}“ muss „off“, „auto“ oder „manual“ sein.",
 		"Handing over needs the team setting invoicing_mode external.": "Zum Übergeben braucht es die Team-Einstellung invoicing_mode external.",
 		"This invoice was handed over to {system}; revoke the hand-over first.": "Diese Rechnung wurde an {system} übergeben; nimm zuerst die Übergabe zurück.",
@@ -1001,7 +1001,11 @@
 		"Exactly one reference block of a budget is the default.": "Genau ein Referenzblock eines Budgets ist die Vorgabe.",
 		"“{field}” must be null or a list of at most {max} reference lines.": "„{field}“ muss null oder eine Liste von höchstens {max} Referenzzeilen sein.",
 		"Reference line {n}: must be a JSON object.": "Referenzzeile {n}: muss ein JSON-Objekt sein.",
-		"Reference line {n}: {message}": "Referenzzeile {n}: {message}"
+		"Reference line {n}: {message}": "Referenzzeile {n}: {message}",
+		"In the mode manual the app issues invoices; the server keeps no ledger.": "Im Modus manual stellt die App die Rechnungen aus; der Server führt kein Journal.",
+		"“kind” must be “pdf”, “docx” or “xml”.": "„kind“ muss „pdf“, „docx“ oder „xml“ sein.",
+		"The document must be a Word file (.docx).": "Das Dokument muss eine Word-Datei (.docx) sein.",
+		"Only an issued or paid invoice with a number and a date gets its documents filed.": "Ablegen lassen sich nur die Dokumente einer gestellten oder bezahlten Rechnung mit Nummer und Datum."
 	},
 	"pluralForm": "nplurals=2; plural=(n != 1);"
 }

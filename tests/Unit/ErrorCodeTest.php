@@ -31,6 +31,8 @@ class ErrorCodeTest extends TestCase {
 		'BankRules', 'BankService', 'OfficeCostRules',
 		// 0.41.0: the times of a correction.
 		'CorrectionTimes',
+		// 0.48.0: the invoicing mode manual.
+		'ManualInvoiceRules', 'ManualInvoiceService',
 	];
 
 	public function testBodyCarriesCodeAndField(): void {

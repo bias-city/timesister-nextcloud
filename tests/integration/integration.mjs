@@ -15,7 +15,8 @@
 // fixed expense reports with ledger (0.23.0), the invoicing mode and the
 // hand-over to an accounting system that issues the invoice (0.24.0), the
 // expense table, settling by the person and the ECB rates (0.30.0), the fee
-// models – amounts, categories, the lock, the issue checks (0.33.0).
+// models – amounts, categories, the lock, the issue checks (0.33.0), the
+// invoicing mode manual – the app's own files, no ledger (0.48.0).
 //
 //   NC_URL=http://localhost:8081 node tests/integration/integration.mjs
 //
@@ -43,6 +44,7 @@ import { kosten } from './teil-kosten.mjs'
 import { belege } from './teil-belege.mjs'
 import { spesen } from './teil-spesen.mjs'
 import { uebergabe } from './teil-uebergabe.mjs'
+import { manuell } from './teil-manuell.mjs'
 import { renderer } from './teil-renderer.mjs'
 import { honorar } from './teil-honorar.mjs'
 import { summary } from './harness.mjs'
@@ -68,6 +70,7 @@ await kosten()
 await belege()
 await spesen()
 await uebergabe()
+await manuell()
 await renderer()
 await honorar()
 await rest()

@@ -11,13 +11,17 @@ namespace OCA\TimeSister\Service;
  * TimeSister issuing without a copy; `{mode: timesister, system, copy:
  * auto|manual}` sends a copy of every issued invoice to an accounting
  * system (the Mac app's plugins); `{mode: external, system}` hands the draft
- * over and the accounting system issues it. Pure.
+ * over and the accounting system issues it; `{mode: manual}` (0.48.0): the
+ * Mac app issues and files the invoices itself, the server keeps no
+ * ledger (not tamper-evident). Pure.
  */
 final class InvoicingModeRules {
 	public const FIELD = 'invoicing_mode';
 	public const TIMESISTER = 'timesister';
 	public const EXTERNAL = 'external';
-	public const MODES = [self::TIMESISTER, self::EXTERNAL];
+	/** 0.48.0: the app issues, numbers from the team counter and files; no ledger on the server. */
+	public const MANUAL = 'manual';
+	public const MODES = [self::TIMESISTER, self::MANUAL, self::EXTERNAL];
 	public const COPY_OFF = 'off';
 	public const COPIES = [self::COPY_OFF, 'auto', 'manual'];
 	public const KEYS = ['mode', 'system', 'copy', 'archive_pdf'];
@@ -48,7 +52,7 @@ final class InvoicingModeRules {
 		}
 		$mode = $v['mode'] ?? null;
 		if (!is_string($mode) || !in_array($mode, self::MODES, true)) {
-			throw ApiException::invalid(Message::of('“{field}” must be “timesister” or “external”.', ['field' => self::FIELD . '.mode']));
+			throw ApiException::invalid(Message::of('“{field}” must be “timesister”, “manual” or “external”.', ['field' => self::FIELD . '.mode']));
 		}
 		$system = $v['system'] ?? null;
 		$system = $system === null ? null : ExportRules::system($system, self::FIELD . '.system');
@@ -64,7 +68,8 @@ final class InvoicingModeRules {
 		if ($mode === self::EXTERNAL && $copy !== self::COPY_OFF) {
 			throw ApiException::invalid('“invoicing_mode.copy” must be “off” for the mode “external”: the accounting system issues the invoices itself.');
 		}
-		if ($mode === self::TIMESISTER && $system === null && $copy !== self::COPY_OFF) {
+		// The mode manual follows the copy rules of the mode timesister.
+		if ($mode !== self::EXTERNAL && $system === null && $copy !== self::COPY_OFF) {
 			throw ApiException::invalid('“invoicing_mode.copy” needs “invoicing_mode.system”: name the accounting system that gets the copies.');
 		}
 		$archive = $v[self::ARCHIVE_PDF] ?? null;
@@ -103,6 +108,11 @@ final class InvoicingModeRules {
 	/** The system that issues the team's invoices (mode external), else null. @param ?array{mode:string,system:?string,copy:string,archive_pdf?:bool} $m */
 	public static function externalSystem(?array $m): ?string {
 		return $m !== null && $m['mode'] === self::EXTERNAL ? $m['system'] : null;
+	}
+
+	/** Does the app issue and file the team's invoices itself (mode manual, 0.48.0)? @param ?array{mode:string,system:?string,copy:string,archive_pdf?:bool} $m */
+	public static function isManual(?array $m): bool {
+		return $m !== null && $m['mode'] === self::MANUAL;
 	}
 
 	/** Does the team store the accounting system's PDF (mode external, `archive_pdf` not false)? @param ?array{mode:string,system:?string,copy:string,archive_pdf?:bool} $m */

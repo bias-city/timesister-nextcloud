@@ -109,7 +109,7 @@ export async function uebergabe() {
 			await bad('external without system', { mode: 'external' }, '“invoicing_mode.system” is required for the mode “external”: name the accounting system that issues the invoices.')
 			await bad('external with a copy', { mode: 'external', system: 'bexio', copy: 'auto' }, '“invoicing_mode.copy” must be “off” for the mode “external”: the accounting system issues the invoices itself.')
 			await bad('a copy without system', { mode: 'timesister', copy: 'manual' }, '“invoicing_mode.copy” needs “invoicing_mode.system”: name the accounting system that gets the copies.')
-			await bad('an unknown mode', { mode: 'mac' }, '“invoicing_mode.mode” must be “timesister” or “external”.')
+			await bad('an unknown mode', { mode: 'mac' }, '“invoicing_mode.mode” must be “timesister”, “manual” or “external”.')
 			await bad('a system name in capitals', { mode: 'timesister', system: 'Bexio', copy: 'auto' }, '“invoicing_mode.system” must be a name of 1 to 64 characters: lowercase letters, digits, “.”, “_” or “-”, starting with a letter or digit (for example “bexio”).')
 			await bad('an unknown key', { mode: 'timesister', extra: 1 }, 'Unknown team setting “invoicing_mode.extra”.')
 			await bad('archive_pdf not a bool (0.24.1)', { mode: 'external', system: 'bexio', archive_pdf: 'yes' }, '“invoicing_mode.archive_pdf” must be true, false or null.')

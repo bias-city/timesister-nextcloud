@@ -93,6 +93,8 @@ as *retired*. Message wording may change at any time.
 | `invoice_review_admin_only` | 403 forbidden | only Team Admins return a draft submitted for approval |
 | `invoice_issue_admin_only` | 403 forbidden | only Team Admins issue, reverse and settle invoices |
 | `invoice_issue_external` | 409 conflict | the team hands its invoices over to an accounting system; TimeSister does not issue them |
+| `invoicing_manual` | 409 conflict | since 0.48.0: the team's `invoicing_mode` is manual – the app issues its invoices, the server keeps no ledger (`POST …/issue`) |
+| `invoice_manual_not_issued` | 409 conflict | since 0.48.0, mode manual: only an invoice record with status issued or paid, a `number` and an `issued_on` gets its documents filed (`PUT …/document`) |
 | `invoice_number_admin_only` | 403 forbidden | only Team Admins assign invoice numbers |
 | `invoice_number_taken` | 409 conflict | the next invoice number is taken; check the invoice number pattern |
 | `invoice_already_reversed` | 409 conflict | the invoice is reversed already |
@@ -419,6 +421,12 @@ Clarifications the app implements this way. Nothing stated above changes.
   count as broken, Nextcloud's log notes it.
 - **Throttling:** writing endpoints at most 300 calls per minute and
   account, `POST /backups` 60; beyond that Nextcloud responds with `429`.
+  The write routes carry `#[BruteForceProtection]`, but since 0.45.1 a
+  refusal of a signed-in account (`403`) is **not** counted as an attempt:
+  Nextcloud counts per IP address, and one account's refused writes held
+  back every write of an office behind the same address (`429` “Reached
+  maximum delay”). An address already held back is freed with
+  `occ security:bruteforce:reset <ip>` or after the attempts expire.
 
 - **Form of settings** (from the fork, 2026-09-26): `setting/targethours`
   has as `data` `{"entries": [{"from", "weekly_hours", "note"}]}`,
@@ -2217,9 +2225,8 @@ GET /templates/invoice/info   (none stored)
 ```
 
 - **Writing: Team Admins only.** Leads and Members get `403 forbidden`
-  “Only Team Admins manage the invoice template.” on `PUT` and `DELETE` (a
-  refused `PUT` or `DELETE` counts for brute-force throttling, as every
-  refused write). Since 0.34.0 every member reads `…/info` and the file
+  “Only Team Admins manage the invoice template.” on `PUT` and `DELETE`
+  (not counted for brute-force throttling since 0.45.1). Since 0.34.0 every member reads `…/info` and the file
   (to fill invoices and quotes); before, reading was for Team Admins too.
   Every account reaches only its own team's template.
 - `size`: bytes of the file; `sha256`: hex of the file; `modified_at`:
@@ -2736,7 +2743,8 @@ client while the status is `draft`:
 | Field | Rule |
 |---|---|
 | `greeting`, `body`, `footer` | `null` or text up to 4000 characters each (tab and line breaks allowed): the free texts of the document – salutation and introduction, the text after the positions, the footer. Prefilled by the client from the team's template texts. |
-| `positions` | optional list, at most 500: `{ "kind": "hours"\|"flat"\|"discount"\|"text", "text": …, "work_package"?: int, "person"?: uid, "hours"?: number ≥ 0, "rate"?: number ≥ 0, "amount": number }` – the lines as the client composed them from the hours (grouped per work package and person, or as chosen) plus flat fees, discounts (negative `amount`) and text-only lines (`amount` 0). `text` 1–500 characters. |
+| `reference_block`, `references` | 0.47.0: the id of the budget's reference block the lines came from (`null`, empty or text of 1–40 characters, not checked against the budget) and the copy of its lines, `null` or at most six `{ kind, title, value }` (see «References, 0.47.0»). Optional, no duty; frozen on issue. |
+| `positions` | optional list, at most 500: `{ "kind": "hours"\|"flat"\|"discount"\|"text", "text": …, "work_package"?: int, "person"?: uid, "hours"?: number ≥ 0, "rate"?: number ≥ 0, "amount": number }` – the lines as the client composed them from the hours (grouped per work package and person, or as chosen) plus flat fees, discounts (negative `amount`) and text-only lines (`amount` 0). `text` 1–500 characters. Since 0.46.0 a position may carry `"excluded": true` – taken out of the draft by the person; the server never freezes such a line (see *Issuing*). |
 | `bookings[].hours`, `bookings[].rate`, `bookings[].code` | optional per booking: the hours of that occurrence, the rate applied, the code; `hours`, `rate` numbers ≥ 0, `code` up to 64 characters. The server stores them with the invoice's hours when issuing. |
 
 An issued invoice (`number` set, status not `draft`) refuses every record
@@ -2759,7 +2767,11 @@ write: `409 issued` “An issued invoice does not change; reverse it.”
    is billed by invoice RE-2026-0007.” A series counts per occurrence
    (`start`).
 3. The number comes from the team's counter and pattern (0.16.0).
-4. Frozen into `ts_inv_invoices`: `issuer_json` (the settings' `issuer`),
+4. A position of the draft with `excluded: true` (0.46.0, taken out by
+   the person) is not part of the invoice: the server drops it before
+   freezing; the client leaves its bookings out of `bookings`, so they keep
+   no billing mark and are open for the next draft.
+5. Frozen into `ts_inv_invoices`: `issuer_json` (the settings' `issuer`),
    `customer_json` (name, address lines, country, VAT id, contact if the
    draft names one), `positions_json`, the three texts, the period, the
    currency (the budget's), `vat` (the draft's, else the team's default,
@@ -3099,8 +3111,9 @@ rely on it:
   anything else renders English. Since 0.22.0 a write accepts only
   `null`, `de` or `en` (see «Document language» below). Labels, the watermark (VORABZUG/DRAFT),
   dates (`15.10.2026` / `2026-10-15`) and amounts (`1’234.50` / `1,234.50`)
-  follow it. The chain line is always `Beleg <number> · Kette <seq> <hash[0:12]> ← <prev_hash[0:12]>`
-  (`← –` for the first entry); a preview carries
+  follow it. The chain line is always `Beleg <number> · Kette <seq> ← <prev_hash[0:12]>`
+  (`← –` for the first entry; the entry's own hash covers the PDF and so
+  cannot be printed in it); a preview carries
   `VORABZUG – (noch nicht gestellt)` / `DRAFT – (not yet issued)` instead
   and shows the title “Rechnung (noch nicht gestellt)”.
 - **Metadata:** the PDF's Subject is the chain line, Keywords the
@@ -4511,8 +4524,10 @@ one new column. A team chooses how invoices come about (decision of
 
 `PUT /team/settings` (Team Admins) and `POST/PUT /admin/teams`
 (`settings.invoicing_mode`): `null` (case 1, the default) or
-`{ "mode": "timesister"|"external", "system": null|name, "copy": "off"|"auto"|"manual" }`.
-`invoicing` stays the switch of issuing on the server.
+`{ "mode": "timesister"|"manual"|"external", "system": null|name, "copy": "off"|"auto"|"manual" }`.
+`invoicing` stays the switch of issuing on the server. Since 0.48.0 the mode
+`manual` (the app issues, no ledger) follows the rules of `timesister`; see
+«Invoicing mode manual, 0.48.0».
 
 - `mode` is required. `system` after `^[a-z0-9][a-z0-9._-]{0,63}$`.
 - `external` needs `system`; `copy` is then `off` or missing.
@@ -5312,6 +5327,7 @@ capability; `invoicing: 1` covers the new endpoint.
 | `type` | `null` or a key: since 0.29.0 any of the team's `settings.customer_types`, 1–40 lower-case letters, digits or dashes (before: one of `public`, `cooperative`, `private`, `company`); otherwise `422` |
 | `payment_days` | `null` or an integer 1–365: the customer's payment term in days. `POST /invoices/{key}/issue` without `due_days` takes it for `due_on` (then the default 30) |
 | `tags` | `null` or a list of at most 30 words of 1–40 characters without `#`, whitespace, comma or control characters: the customer's free tags (`arealentwicklung`), for filtering and sorting in the app; checked from the next release, earlier ones keep the field as it comes |
+| `expects_references` | `null`, `true` or `false` (0.47.0): invoices to this customer should carry references – a soft note, the client shows a hint when an invoice has none; the server never requires them. Otherwise `422` ““expects_references” must be true or false.” |
 
 `invoice` record (checked on every write; a client writes them only on
 invoices the server has not issued – issued ones take the endpoints below):
@@ -7164,3 +7180,145 @@ Still `api: 2`; migration adds `ts_client_status.editing` (TEXT) and
 - Record writes of kind `project`: the code must not be the code of another
   live project of the team → `409 project_code_taken` (see «Error codes»).
 
+## References, 0.47.0 (2026-11-10) – `references: 1`
+
+Still `api: 2`; migration 1029 adds `ts_inv_invoices.references_json`
+(TEXT, nullable; the column avoids the SQL keyword `references`). The
+customer's references – cost center, contract, order number, Leitweg-ID –
+live on the budget as named blocks; an invoice copies one block's lines and
+freezes them. Plan: `PLAN-REFERENZEN.md`.
+
+A **reference line** is `{ "kind", "title", "value" }`: `kind` one of
+`cost_center`, `contract`, `order`, `leitweg`, `tender`, `project_ref`,
+`other` (missing or `null` is stored as `other`), `title` 1–60 and `value`
+1–120 characters without control characters (both stored trimmed).
+
+**Budget** (`budgets[]` of a project, `budget`/`budgets[]` of a quote –
+both through `ProjectRules::checkBudget`):
+
+| Field | Rule |
+|---|---|
+| `reference_blocks` | `null` or at most 10 blocks `{ "id", "name", "default", "lines" }`: `id` 1–40 characters, unique within the budget; `name` `null`, empty or at most 80 characters (empty: the client shows the first line); `default` `true`/`false` (missing: `false`); `lines` 1–6 reference lines. Once there are blocks, exactly one is the default. |
+| `work_packages[].reference_block`, `costs[].reference_block`, `addenda[].reference_block` | `null`, empty (the default block, or the parent package's) or the `id` of a block of the same budget. |
+
+**Customer**: `expects_references` (bool, optional). `cost_centers` and the
+project's `cost_center` stay accepted as before (the Mac app migrates them
+into blocks and no longer writes them).
+
+**Invoice** (draft): `reference_block` (`null`, empty or 1–40 characters)
+and `references` (`null` or at most six lines). No duty, no check against
+the budget. `cost_center` stays (the client derives it from the first line
+of kind `cost_center`, else the earlier free text).
+
+### Issuing
+
+- `POST /invoices/{key}/issue` freezes the draft's `references` (only
+  `kind`, `title`, `value`) in `references_json`; `GET …/fixed` answers
+  `references` (the list, or `null` when there are none). Reversals and
+  credit notes copy them.
+- Ledger payload: `references` only when the list is not empty – older
+  entries and invoices without references keep their exact payload.
+- `POST /quotes/{key}/issue` takes `references` (`null` or at most six
+  lines: the lines of the default block, chosen by the client) and freezes
+  them in `issued.references` (`null` when none).
+
+### Errors (`422 invalid`, `field` as named)
+
+| Field | Message |
+|---|---|
+| `reference_blocks` | “reference_blocks” must be null or a list of at most 10 reference blocks. · Reference block {n}: must be a JSON object. · Reference block {n}: “id” must be text of 1 to 40 characters, unique within the budget. · Reference block {n}: “name” must be empty or text of at most 80 characters. · Reference block {n}: “default” must be true or false. · Reference block {n}: “lines” must be a list of 1 to 6 reference lines. · Reference block {n}: Reference line {m}: … · Exactly one reference block of a budget is the default. |
+| `reference_block` | Work package {no}: / Cost position {no}: / Addendum {no}: “reference_block” must be null or the “id” of a reference block of this budget. · On an invoice: “reference_block” must be null or text of 1 to 40 characters. |
+| `references` | “references” must be null or a list of at most 6 reference lines. · Reference line {n}: must be a JSON object. · Reference line {n}: “kind” must be one of cost_center, contract, order, leitweg, tender, project_ref, other. · Reference line {n}: “title” must be text of 1 to 60 characters. (likewise `value`, 120) |
+
+### Capability
+
+`references: 1`.
+
+### Classes
+
+`ReferenceRules` (new, pure: blocks, lines, frozen copy), `ProjectRules`,
+`CustomerRules`, `InvoiceRules`, `QuoteRules` (`issueBody`, `issuedCopy`),
+`IssueRules` (`payload`, `referencesJsonOf`, `referencesOf`), `IssueService`,
+`InvoiceFixed`, `InvInvoice` (`referencesJson`), migration
+`Version1029Date20261110120000`.
+
+## Invoicing mode manual, 0.48.0 (2026-11-11) – `invoicing_manual: 1`
+
+Still `api: 2`, no migration. A third way invoices come about (decision of
+2026-11-11), beside `timesister` (the server issues, with ledger) and
+`external` (the accounting system issues), which stay as they are:
+
+4. **Manual**: the Mac app issues the invoice itself. It takes the number
+   from the team counter (`POST /invoices/next-number`, unchanged), sets the
+   status by hand in the record (`issued`, `paid`, `cancelled`), renders
+   PDF, Word file and XRechnung and files them here. The server keeps **no
+   ledger, no hash chain, no fixed row** – not tamper-evident.
+
+### Team setting
+
+`invoicing_mode: { "mode": "manual", "system": null|name, "copy": "off"|"auto"|"manual" }`
+– the rules of `timesister`: `copy` other than `off` needs `system`;
+`archive_pdf` is kept only for `external`. Hand-over (`…/handover`,
+`…/external-document`) stays refused (`409 handover_mode_not_external`,
+`handover_no_archive`).
+
+### What changes in the mode manual
+
+- `POST /invoices/{key}/issue`: `409 conflict`, `code: invoicing_manual`,
+  “In the mode manual the app issues invoices; the server keeps no ledger.”
+  (after the 404 of `invoicing` off and the 403 for non-admins, as with the
+  mode external).
+- Client writes of invoice records (`PUT /records/invoice/{key}`, batch) with
+  `number` and `status` `draft`|`issued`|`paid`|`cancelled` pass as in every
+  mode – a manual invoice never has a fixed row. The rights stay: a Lead
+  writes only drafts without a number.
+- `POST /invoices/next-number` and `GET …?year=` serve the team counter as
+  before (Team Admins).
+
+### `PUT /invoices/{key}/document?kind=pdf|docx|xml` (Team Admins)
+
+Same route and body as the close of 0.32.0: the raw file, at most 20 MB.
+When the team's mode is manual **and** the server never fixed this invoice
+(no row from an earlier `issue`), the file is the app's own document –
+independent of the switch `invoicing`:
+
+- The record must be live (`404`) with status `issued` or `paid`, a
+  `number` and an `issued_on` day; otherwise `409 invoice_manual_not_issued`
+  (a draft).
+- `kind` missing or `pdf`: a PDF (`%PDF-`); `xml`: a well-formed CII or UBL
+  invoice; `docx`: non-empty, starting with `PK`. Otherwise `422 invalid`
+  (`field: content`; `kind` other: `field: kind`, ““kind” must be “pdf”,
+  “docx” or “xml”.”); larger than 20 MB `413`.
+- A number fixed by the server earlier (mode timesister) is refused: `409
+  invoice_number_taken` – that file belongs to the ledger.
+- Filed in the backup owner's files as
+  `<root>/Buchhaltung/<YYYY of issued_on>/Rechnungen/<issued_on>_<number>_<customer>.<pdf|docx|xml>`
+  (customer: the name of the record's customer, the parts made safe as in
+  the document tree). The same invoice and kind **replace** the earlier file
+  (no `_2`; Nextcloud's file versions keep the old one). No ledger entry,
+  no change to the record.
+- Answer `200`: `{ "ok": true, "path": "<path below the owner's home>", "name": "<file name>", "size": <bytes> }`.
+
+An invoice fixed on the server, or a team in another mode: the behaviour of
+0.32.0 unchanged (`kind` `pdf`|`xml` only).
+
+### `GET /invoices/{key}/document?kind=pdf|docx|xml` (Team Admins, the project's Leads)
+
+Mode manual, invoice never fixed: the filed file as a download (name
+`<number>.<kind>`, type `application/pdf`, `application/xml` or
+`application/vnd.openxmlformats-officedocument.wordprocessingml.document`).
+The path is derived from the record as it is now (`issued_on`, `number`,
+customer); a record without number or date, or no file there: `404` “The
+document is missing in the files.” Members: `403 invoice_read_lead_only`.
+
+### Capability
+
+`invoicing_manual: 1`.
+
+### Classes
+
+`InvoicingModeRules` (`MANUAL`, `isManual`), `ManualInvoiceRules` (new,
+pure: refusal, kinds, bytes, which records, the name), `ManualInvoiceService`
+(new: filing and reading), `InvoicingController` (`document` routes),
+`IssueService::issue`, `ErrorCode` (`invoicing_manual`,
+`invoice_manual_not_issued`).

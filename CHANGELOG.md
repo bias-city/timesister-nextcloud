@@ -1,5 +1,30 @@
 # Changes
 
+## 0.48.0 – 2026-11-11
+
+`api: 2` unchanged, no migration. Additive for every client of 0.47.0.
+
+- **A third invoicing mode: manual.** The team setting `invoicing_mode`
+  takes `{ "mode": "manual" }` (copy and system as in the mode timesister).
+  The app issues the invoice itself: number from the team counter
+  (`POST /invoices/next-number`, unchanged), status by hand in the record,
+  PDF, Word file and XRechnung rendered on the Mac. The server keeps no
+  ledger, no hash chain and no fixed row for these invoices – they are not
+  tamper-evident. The modes timesister and external stay as they are.
+- **Issuing on the server is refused in it.** `POST /invoices/{key}/issue`
+  answers `409 invoicing_manual`; hand-over stays bound to the mode external.
+- **The app's files are filed.** `PUT /invoices/{key}/document?kind=pdf|docx|xml`
+  of an invoice the server never fixed writes the file to
+  `Buchhaltung/<YYYY>/Rechnungen/<issued_on>_<number>_<customer>.<ext>` when
+  the record is issued or paid with a number and a day (`409
+  invoice_manual_not_issued` otherwise); the same invoice and kind replace
+  the earlier file, nothing goes into the ledger. Answer `{ ok, path, name,
+  size }`. `GET …/document?kind=` serves it back (Team Admins and the
+  project's Leads, `404` when none). A number the server fixed earlier is
+  refused (`409 invoice_number_taken`).
+- Capability `invoicing_manual: 1`; error codes `invoicing_manual` and
+  `invoice_manual_not_issued`.
+
 ## 0.47.0 – 2026-11-10
 
 `api: 2` unchanged, migration 1029 adds a column
