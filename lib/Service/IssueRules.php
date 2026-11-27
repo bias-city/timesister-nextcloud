@@ -198,6 +198,11 @@ final class IssueRules {
 		return $v;
 	}
 
+	/** `due_on` as the API shows it: null without a due day (a reversal or credit note asks for no payment). */
+	public static function dueOut(string $day): ?string {
+		return $day === '' ? null : $day;
+	}
+
 	/** The day `$days` after `$day`. */
 	public static function dueOn(string $day, int $days): string {
 		return (new \DateTimeImmutable($day . ' 00:00:00', new \DateTimeZone('UTC')))->modify('+' . $days . ' days')->format('Y-m-d');
@@ -445,7 +450,7 @@ final class IssueRules {
 			'number' => $number,
 			'issued_on' => $issuedOn,
 			'issued_by' => $issuedBy,
-			'due_on' => $dueOn,
+			'due_on' => self::dueOut($dueOn),
 			'project' => $project,
 			// 0.38.0: no `budget` – it is an assignment for controlling, changed through `assign`.
 			'customer_key' => $customerKey,

@@ -28,7 +28,7 @@ final class ProjectRules {
 	public const TEAM_ROLES = ['member', 'sparring', 'support', 'qa'];
 	public const MAX_TEAM = 100;
 	public const CURRENCY_PATTERN = '/^[A-Za-z]{3}$/';
-	/** 0.27.0: the project's currency – one per project, its budgets inherit it. */
+	/** 0.27.0: the project's currency – the default for its budgets (0.51.0: a budget may have its own). */
 	public const CURRENCY = 'currency';
 	/** 0.25.0: what the budgets are called («Phasen»), from the template the project came from. */
 	public const BUDGET_LABEL = 'budget_label';
@@ -71,8 +71,9 @@ final class ProjectRules {
 		LevelRules::validateProject($data->{LevelRules::PROJECT_FIELD} ?? null);
 		// 0.33.0: the catalog's levels per code are derived on reading.
 		unset($data->{LevelRules::CATALOG_FIELD});
-		// 0.27.0: the project's currency (null or three letters, stored upper case);
-		// a budget's `currency` stays for older clients and follows the project's.
+		// 0.27.0: the project's currency (null or three letters, stored upper case).
+		// 0.51.0: it is the default – a budget keeps its own valid `currency`, only
+		// budgets without one take the project's (`budget_currency`).
 		$currency = $data->{self::CURRENCY} ?? null;
 		if ($currency !== null) {
 			if (!is_string($currency) || preg_match(self::CURRENCY_PATTERN, $currency) !== 1) {
@@ -88,7 +89,7 @@ final class ProjectRules {
 		foreach ($budgets as $b) {
 			if ($b instanceof \stdClass) {
 				self::checkBudget($b);
-				if ($currency !== null) {
+				if ($currency !== null && !is_string($b->currency ?? null)) {
 					$b->currency = $currency;
 				}
 			}

@@ -32,7 +32,7 @@ export async function offerten() {
 		head('Quotes: capability and setup')
 		{
 			const cap = await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')
-			check('capability quotes: 4 (texts, attachments and the number on issue since 0.32.0)', cap.data?.capabilities?.timesister?.quotes === 4, cap.data?.capabilities?.timesister)
+			check('capability quotes: 5 (texts, attachments and the number on issue since 0.32.0, withdrawn since 0.50.0)', cap.data?.capabilities?.timesister?.quotes === 5, cap.data?.capabilities?.timesister)
 			expect('project led by zblead', await ocs(A, 'PUT', `/records/project/${OA}`, { version: 0, data: project(OA, ['zblead']) }), 200)
 			expect('project led by zbverw', await ocs(A, 'PUT', `/records/project/${OB}`, { version: 0, data: project(OB, ['zbverw']) }), 200)
 			expect('person via accounts (zbuser2)', await ensure(A, 'person', NOAH, { login: NOAH, accounts: ['zbuser2'] }), 200)

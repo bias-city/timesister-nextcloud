@@ -11,6 +11,7 @@ use OCA\TimeSister\Db\Record;
 use OCA\TimeSister\Db\RecordMapper;
 use OCA\TimeSister\Service\AccessPolicy;
 use OCA\TimeSister\Service\ApiException;
+use OCA\TimeSister\Service\ErrorCode;
 use OCA\TimeSister\Service\Json;
 use OCA\TimeSister\Service\Membership;
 use OCA\TimeSister\Service\QuoteRules;
@@ -64,6 +65,23 @@ class QuoteRulesTest extends TestCase {
 
 	private static function check(array $over = [], array $drop = [], string $key = self::KEY): string {
 		return self::outcome(fn () => RecordValidator::validate('quote', $key, self::data($over, $drop)));
+	}
+
+	/** 20.11.2026: in the category model a set `mean_rate` is the fallback for packages without a level (the budget
+	 *  computes with it); without one an amount still needs a level with a rate. */
+	public function testIssueAcceptsMeanRateAsFallback(): void {
+		$settings = Json::decode('{"currency":"CHF","fee_model":"category","levels":[{"id":"b","name":"Kategorie B","rates":[{"from":"2025-01-01","currency":"CHF","rate":197}]}]}');
+		self::assertInstanceOf(\stdClass::class, $settings);
+		$budget = ['id' => 'b-1', 'fee_model' => 'category', 'mean_rate' => 150, 'work_packages' => [['no' => '1', 'name' => 'Leitung', 'hours' => [40], 'amount' => [6000]]]];
+		$d = self::data(['budgets' => [$budget]]);
+		$this->assertSame('ok', self::outcome(fn () => QuoteRules::requireComplete($d, $settings, null, '2026-11-20')));
+		$budget['mean_rate'] = null;
+		$d = self::data(['budgets' => [$budget]]);
+		$e = self::outcomeException(fn () => QuoteRules::requireComplete($d, $settings, null, '2026-11-20'));
+		$this->assertSame([ErrorCode::AMOUNT_WITHOUT_RATE, 'level'], [$e?->getRuleCode(), $e?->getField()]);
+		$budget['work_packages'][0]['level'] = 'b';
+		$d = self::data(['budgets' => [$budget]]);
+		$this->assertSame('ok', self::outcome(fn () => QuoteRules::requireComplete($d, $settings, null, '2026-11-20')));
 	}
 
 	/** 0.27.0 (controlling): the probability 0–100 and the reason when lost. */
@@ -138,7 +156,7 @@ class QuoteRulesTest extends TestCase {
 		foreach ([['name' => str_repeat('n', 201)], ['name' => "a\nb"], ['name' => 7]] as $i => $over) {
 			$this->assertSame('422 “name” must be text of 1 to 200 characters.', self::check($over), (string)$i);
 		}
-		$status = '422 “status” of a quote is one of draft, quoted, negotiation, verbal, accepted, declined.';
+		$status = '422 “status” of a quote is one of draft, quoted, negotiation, verbal, accepted, declined, withdrawn.';
 		$this->assertSame($status, self::check([], ['status']));
 		$this->assertSame($status, self::check(['status' => 'active']));
 		$this->assertSame($status, self::check(['status' => 'Accepted']));
@@ -259,7 +277,18 @@ class QuoteRulesTest extends TestCase {
 			$this->assertSame($code, self::check(['project' => null, 'project_draft' => ['code' => $bad, 'name' => 'X']]), var_export($bad, true));
 		}
 		$this->assertSame('422 A quote has either “project” or “project_draft”, not both.', self::check(['project' => 'd200', 'project_draft' => ['code' => 'N400', 'name' => 'X']]));
-		$this->assertSame(4, (new Capabilities($this->createMock(IAppManager::class)))->getCapabilities()['timesister']['quotes']);
+		$this->assertSame(5, (new Capabilities($this->createMock(IAppManager::class)))->getCapabilities()['timesister']['quotes']);
+	}
+
+	/** 0.50.0 (`quotes: 5`): `withdrawn`, the day of the decision and the kind of loss. */
+	public function testWithdrawn(): void {
+		$this->assertSame('ok', self::check(['status' => 'withdrawn', 'decided_on' => '2026-11-18', 'lost_kind' => 'withdrawn', 'lost_reason' => 'Project stopped']));
+		$this->assertSame('ok', self::check(['status' => 'declined', 'decided_on' => '2026-11-18', 'lost_kind' => 'withdrawn']), 'an older client’s withdrawn quote');
+		$this->assertSame('ok', self::check(['status' => 'declined', 'lost_kind' => null]));
+		$this->assertSame('422 “decided_on” must be a day in the format YYYY-MM-DD.', self::check(['decided_on' => '18.11.2026']));
+		foreach (['lost', '', 7] as $bad) {
+			$this->assertSame('422 “lost_kind” is null or one of declined, withdrawn.', self::check(['lost_kind' => $bad]), var_export($bad, true));
+		}
 	}
 
 	public function testLimits(): void {
@@ -462,7 +491,7 @@ class QuoteRulesTest extends TestCase {
 
 	public function testCapabilityAndZip(): void {
 		$cap = (new Capabilities($this->createMock(IAppManager::class)))->getCapabilities()['timesister'];
-		$this->assertSame(4, $cap['quotes'], 'texts, attachments, issue since 0.32.0');
+		$this->assertSame(5, $cap['quotes'], 'texts, attachments, issue since 0.32.0; withdrawn since 0.50.0');
 		$this->assertSame(1, $cap['quote_documents']);
 		$mapped = ZipRules::mapData(self::data(), ['pblead' => 'lea', 'pbadmin' => 'petra']);
 		$this->assertInstanceOf(\stdClass::class, $mapped);

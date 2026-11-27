@@ -64,11 +64,9 @@ final class JobService {
 				throw ApiException::conflict(Message::of('A {job} with this key already exists.', ['job' => JobWord::JOB]));
 			}
 			$job = JobFlow::create($key, $f, $target, $m->uid, Time::iso($ts) ?? '');
-			// Offered only to oneself: taken at once, nobody to notify.
+			// Offered only to oneself: it waits in the own Inbox like any
+			// offer (accepted the usual way), nobody to notify.
 			$selbst = $f['recipients'] === [$m->uid];
-			if ($selbst) {
-				$job = JobFlow::accept($job, $m->uid, Time::iso($ts) ?? '');
-			}
 			// Volume is no longer a rule (0.7.5): above the work package is
 			// allowed, the clients show it.
 			JobRules::checkOverlap($job, $f['recipients'], $this->others($m), $this->name(...));
@@ -509,13 +507,16 @@ final class JobService {
 
 	/**
 	 * A Job the caller offered to themselves (0.15.0): they may change it as
-	 * long as it stays theirs – `recipients`, if sent, only themselves.
+	 * long as it stays theirs – still offered to them or In Progress with
+	 * them; `recipients`, if sent, only themselves.
 	 *
 	 * @param array<string,mixed> $job
 	 * @param array<string,mixed> $c from JobRules::change()
 	 */
 	private static function ownSelfJob(Membership $m, array $job, array $c): bool {
-		return ($job['sender'] ?? null) === $m->uid && ($job['assignee'] ?? null) === $m->uid
+		$assignee = $job['assignee'] ?? null;
+		$mine = $assignee === $m->uid || ($assignee === null && array_values((array)($job['recipients'] ?? [])) === [$m->uid]);
+		return ($job['sender'] ?? null) === $m->uid && $mine
 			&& (!isset($c['recipients']) || $c['recipients'] === [$m->uid]);
 	}
 

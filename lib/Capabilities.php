@@ -108,7 +108,9 @@ use OCP\Capabilities\ICapability;
  * `quotes: 4` since 0.32.0: `texts`, `attachments`, `issued`, `POST
  * /quotes/{key}/issue`, the setting `quote_number`. `quote_documents: 1`
  * since 0.32.0: `POST /quotes/{key}/documents?kind=sent|signed`, `GET
- * /quotes/{key}/documents`, `documents[]` on the record. `invoice_layout: 2`
+ * /quotes/{key}/documents`, `documents[]` on the record. `quotes: 5` since
+ * 0.51.0: cost positions of kind `section` (title only, `costs: 2`).
+ * 0.50.0: the status `withdrawn`, `decided_on` and `lost_kind` on a quote. `invoice_layout: 2`
  * since 0.32.0: six appendices, every table from the client.
  * `fee_models: 1` since 0.33.0: work packages led by `amount`, the fee
  * model per budget (`fee_model`, `mean_rate`, `cap_mode`, `tolerance`
@@ -152,6 +154,8 @@ use OCP\Capabilities\ICapability;
  * takes `manual` (the app issues; no ledger, `POST …/issue` 409
  * `invoicing_manual`); `PUT`/`GET /invoices/{key}/document?kind=pdf|docx|xml`
  * file and serve the app's own invoices, a second upload replacing the first.
+ * `budget_currency: 1` since 0.51.0: a budget keeps its own valid `currency`;
+ *   the project's currency only fills budgets without one (before: it replaced every budget's).
  * `corrections: 3` since 0.41.0: a correction (record and POST
  * /entries/correct) also moves start and end – `from`/`to`, Team Admins and
  * Leads only (`correction_time_invalid`); 2 since 0.27.0 the record
@@ -163,7 +167,7 @@ final class Capabilities implements ICapability {
 	) {
 	}
 
-	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, quote_template: int, credit_limit: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, quote_documents: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int, fee_models: int, planning_rate: int, rule_receipts: int, invoices_free: int, invoice_plan_records: int, entry_invoice: int, advance_rules: int, expenses_separate: int, receipts_by_customer: int, bank_entries: int, references: int, invoicing_manual: int}} */
+	/** @return array{timesister: array{api: int, corrections: int, entry_lists: int, version: string, jobs: int, billing: int, absences: int, team_backup: int, privacy_notice: int, derived_lead: int, lead_scope: int, booking_reports: int, job_fits: int, quotes: int, cost_rates: int, invoices: int, invoice_template: int, quote_template: int, credit_limit: int, entries: int, invoicing: int, invoice_documents: int, e_invoice: int, quote_documents: int, invoice_export: int, vat_lines: int, costs: int, receipts: int, document_tree: int, expense_fixing: int, invoice_handover: int, templates: int, advances: int, invoice_layout: int, customer_types: int, expense_table: int, fee_models: int, planning_rate: int, rule_receipts: int, invoices_free: int, invoice_plan_records: int, entry_invoice: int, advance_rules: int, expenses_separate: int, receipts_by_customer: int, bank_entries: int, references: int, invoicing_manual: int, budget_currency: int}} */
 	public function getCapabilities(): array {
 		return [
 			'timesister' => [
@@ -178,7 +182,7 @@ final class Capabilities implements ICapability {
 				'lead_scope' => 1,
 				'booking_reports' => 1,
 				'job_fits' => 1,
-				'quotes' => 4,
+				'quotes' => 5,
 				'cost_rates' => 1,
 				'invoices' => 1,
 				'invoice_template' => 1,
@@ -191,7 +195,7 @@ final class Capabilities implements ICapability {
 				'quote_documents' => 1,
 				'invoice_export' => 1,
 				'vat_lines' => 1,
-				'costs' => 1,
+				'costs' => 2,
 				'receipts' => 2,
 				'document_tree' => 1,
 				'expense_fixing' => 1,
@@ -215,6 +219,7 @@ final class Capabilities implements ICapability {
 				'bank_entries' => 3,
 				'references' => 1,
 				'invoicing_manual' => 1,
+				'budget_currency' => 1,
 			],
 		];
 	}

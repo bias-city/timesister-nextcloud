@@ -102,7 +102,7 @@ export async function projekte() {
 
 		head('Projects: quotes (0.16.0) – status, team, currency, work package rates')
 		const caps = await ocs(U1, 'GET', '/ocs/v1.php/cloud/capabilities?format=json')
-		check('capability quotes: 4 (the statuses since 1, the kind quote since 2, issue since 4)', caps.data?.capabilities?.timesister?.quotes === 4, caps.data?.capabilities?.timesister)
+		check('capability quotes: 5 (the statuses since 1, the kind quote since 2, issue since 4, withdrawn since 5)', caps.data?.capabilities?.timesister?.quotes === 5, caps.data?.capabilities?.timesister)
 		const budget = (rate) => [{ id: 'b1', from: '2026-01-01', hours: 40, currency: 'chf', rates: {},
 			work_packages: [{ no: 1, name: 'Concept', hours: [40], rate }] }]
 		const quote = (extra) => ({ ...full(PQ, ['zblead']), status: 'draft', team: ['zbuser1', 'zbuser2', 'zbuser1'], budgets: budget(180), ...extra })

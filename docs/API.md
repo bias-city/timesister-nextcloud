@@ -1073,9 +1073,9 @@ with the unchanged record (a resent request is not an error).
   the hours of a work package; the clients show by how much. Offered,
   waiting and In Progress Jobs hold their full hours; returned, declined,
   rejected and Done ones only what was booked (`progress.hours`).
-- **Offered only to oneself (0.7.5):** when the recipients are exactly the
-  sender, the Job is accepted at once (`in_progress`, assignee = sender),
-  and nobody is notified.
+- **Offered only to oneself (0.51.0):** when the recipients are exactly the
+  sender, the Job stays `offered` in the sender's own Inbox and is accepted
+  the usual way; nobody is notified. (0.7.5 to 0.50.0 accepted it at once.)
 - **No overlap:** no two Jobs on the same work package or a common code,
   with overlapping periods, for the same person (open offer, waiting
   counter-proposal or In Progress). Checked on offer, change, accept and
@@ -1853,12 +1853,13 @@ when a manager does.
 ### Members offer a Job to themselves
 
 `PUT /jobs/{key}` with `recipients` exactly `[caller]` is open to every
-member of the team, on any project of the team (the booking catalog). As
-since 0.7.5 it is In Progress at once and nobody is notified. Such a Job
-has `sender` = `assignee` = the member:
+member of the team, on any project of the team (the booking catalog).
+Since 0.51.0 it stays `offered` in the member's own Inbox and nobody is
+notified; the member accepts it the usual way (`sender` = `assignee`):
 
 - `POST /jobs/{key}/change` by the sender is allowed as long as the Job
-  stays theirs – `recipients`, if sent, only themselves (`403` otherwise);
+  stays theirs – offered to them or In Progress with them; `recipients`,
+  if sent, only themselves (`403` otherwise);
   `DELETE` by the sender as before.
 - Offering to others, or with several recipients, stays with Team Admins
   and the project's Leads (`403` with a message naming the rule).
@@ -1894,7 +1895,7 @@ Admins).
 | `codes` | While a quote (`draft`, `quoted`, `declined`) it may be empty or missing – as may `subprojects`. From `active` on (also with no status) exactly one code, as since 0.12.0: none → `422` “An active project needs a code.”; more than one → `422` “A project has exactly one code …” in every status. |
 | `from_quote` | Optional boolean: the project began as a quote. It keeps it in every status, also `active`. `true`, `false` or `null`; anything else `422`. No rights hang on it. |
 | `team` | Optional list of `{ "user": uid, "role": role }`: the accounts assigned to the quote or project and their role (see “The team and its roles”). At most 100, each an account of the team – also one who left (`422` “Not members of this team: …” otherwise). |
-| `budgets[].currency` | Optional, three letters (`CHF`), stored upper case; `422` otherwise. Since 0.27.0 the project's `currency` overrides it on write (see “Project: `currency`”). |
+| `budgets[].currency` | Optional, three letters (`CHF`), stored upper case; `422` otherwise. Since 0.51.0 (`budget_currency: 1`) a valid one stays; only a missing one takes the project's `currency` on write (0.27.0–0.50.0 the project's overrode it; see “Project: `currency`”). |
 | `budgets[].work_packages[].rate` | Optional number ≥ 0; `422` otherwise. Since 0.26.3 the default for the packages below (`parent`) without a rate of their own. |
 | `budgets[].work_packages[].hours` | Since 0.26.3: a package that is the `parent` of another has no hours of its own – all entries zero or none; `422` “A work package with packages below has no hours of its own – move them to a package below.” otherwise. Its figure is the sum of the packages below; such a package is not bookable. |
 | `budgets[].cap` | Optional cost cap in the budget's currency, a number ≥ 0; `null` or missing: the sum of hours × rate counts. `422` ““cap” must be null or a number ≥ 0.” otherwise. |
@@ -5070,10 +5071,13 @@ in the booking catalog. The Leads write it with the rest of the project.
 ### Project: `currency`
 
 `currency`: `null` or three letters, stored upper case (`422` ““currency” must
-be three letters, for example CHF.” otherwise) – the one currency of the
-project; its `level_rates` and its budgets count in it. With a `currency` on
-the project every `budgets[].currency` is set to it on write (older clients
-keep reading it there); without one a budget keeps its own. Summing across
+be three letters, for example CHF.” otherwise) – the currency of the
+project; its `level_rates` count in it, and it is the default for its
+budgets. Since 0.51.0 (`budget_currency: 1`) a budget keeps its own valid
+`currency`; only a budget without one gets the project's on write (0.27.0 to
+0.50.0 every `budgets[].currency` was set to it). A budget in another currency
+than the project's takes no `level_rates` of the project, and the levels'
+standard rates only in the team's currency. Summing across
 projects happens per currency – there is no exchange rate. Only in the full
 project record, never in the booking catalog.
 
@@ -7329,3 +7333,27 @@ pure: refusal, kinds, bytes, which records, the name), `ManualInvoiceService`
 (new: filing and reading), `InvoicingController` (`document` routes),
 `IssueService::issue`, `ErrorCode` (`invoicing_manual`,
 `invoice_manual_not_issued`).
+
+## Withdrawn quotes, 0.50.0 (2026-11-18) – `quotes: 5`
+
+A quote gets a third end state besides `accepted` and `declined`:
+**`withdrawn`** – the team withdrew it (also a draft); it counts neither as
+won nor as lost. Two optional fields on the record:
+
+- `decided_on`: the day of the decision (accepted, declined, withdrawn),
+  `YYYY-MM-DD` like the other days; the win rate counts by it.
+- `lost_kind`: `null`, `declined` or `withdrawn` (`422` otherwise).
+
+`QuoteRules::STATUSES` takes `withdrawn`. The rules of the life cycle
+(quoted only by `POST /quotes/{key}/issue`, accept and decline only an
+issued open quote) are the client's; the server checks the content only.
+A client that sees `quotes < 5` sends a withdrawn quote as `declined` with
+`lost_kind: withdrawn` and reads it back as withdrawn.
+
+### Capability
+
+`quotes: 5`.
+
+### Classes
+
+`QuoteRules` (`WITHDRAWN`, `LOST_KINDS`, `decided_on` in `DAYS`).

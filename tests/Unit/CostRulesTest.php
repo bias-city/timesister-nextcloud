@@ -60,13 +60,28 @@ class CostRulesTest extends TestCase {
 		$this->assertSame('ok', self::message(self::with(2, ['forecast' => [500, 1000.5, 0]])), '0.26.0: the forecast per milestone');
 	}
 
+	/** 0.51.0 (`costs: 2`): a section is a title only. */
+	public function testSectionCarriesNothing(): void {
+		$c = self::with(1, ['kind' => 'section', 'name' => 'Nebenkosten der Baustelle', 'row' => 1], ['rule', 'amount', 'per']);
+		$this->assertSame('ok', self::message($c));
+		CostRules::check($c);
+		$this->assertSame('rebill', $c[1]->mode, 'the mode stays the default');
+		foreach ([
+			[['cap' => 500], 'cap'], [['percent' => 3], 'percent'], [['amount' => 10], 'amount'], [['rule' => 'receipts'], 'rule'],
+			[['forecast' => [1, 2]], 'forecast'], [['code' => 'D200.1'], 'code'], [['markup' => 5], 'markup'], [['addendum' => true], 'addendum'],
+		] as [$over, $field]) {
+			$weg = array_values(array_diff(['rule', 'amount', 'per'], [$field]));
+			$this->assertSame("422 Cost position 2: “{$field}” does not apply to a section.", self::message(self::with(1, ['kind' => 'section'] + $over, $weg)));
+		}
+	}
+
 	public function testErrorsNameTheField(): void {
 		foreach ([
 			[self::with(0, ['no' => 0]), '422 Cost position 1: The field “no” must be an integer ≥ 1.'],
 			[self::with(1, ['no' => 1]), '422 Cost position 2: “no” must be unique within the budget.'],
 			[self::with(0, ['name' => '']), '422 Cost position 1: “name” must be text of 1 to 120 characters.'],
 			[self::with(0, ['name' => str_repeat('x', 121)]), '422 Cost position 1: “name” must be text of 1 to 120 characters.'],
-			[self::with(0, ['kind' => 'travel']), '422 Cost position 1: “kind” must be one of expense, third_party.'],
+			[self::with(0, ['kind' => 'travel']), '422 Cost position 1: “kind” must be one of expense, third_party, section.'],
 			[self::with(0, [], ['rule']), '422 Cost position 1: “rule” must be one of percent, flat, receipts.'],
 			[self::with(3, ['rule' => 'flat']), '422 Cost position 4: “rule” must be one of receipts.'],
 			[self::with(0, ['percent' => 101]), '422 Cost position 1: “percent” must be a percentage from 0 to 100.'],
@@ -107,7 +122,7 @@ class CostRulesTest extends TestCase {
 			RecordValidator::validate('project', 'p1', $project);
 			$this->fail('kind');
 		} catch (ApiException $e) {
-			$this->assertSame([422, 'Cost position 1: “kind” must be one of expense, third_party.'], [$e->getStatus(), $e->getMessage()]);
+			$this->assertSame([422, 'Cost position 1: “kind” must be one of expense, third_party, section.'], [$e->getStatus(), $e->getMessage()]);
 		}
 		ModuleRules::validate((object)['jobs' => true, 'costs' => false, 'later' => 'x']);
 		ModuleRules::validate(null);

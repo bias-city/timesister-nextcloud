@@ -1,5 +1,35 @@
 # Changes
 
+## 0.51.0 – 2026-11-27
+
+`api: 2` unchanged, no migration. Additive for every client of 0.50.0.
+
+- **Sections in the cost list (`costs: 2`).** A cost position of kind
+  `section` is a title only (`name`, optional `description`, `row`): it
+  structures the list and carries no rule, amounts, cap, markup, VAT,
+  forecast, code, reference block or addendum. Older clients ignore it.
+- **A currency per budget (`budget_currency: 1`).** A budget keeps its own
+  valid `currency`; the project's `currency` only fills budgets without one
+  (before, it replaced every budget's on write). Clients that send no
+  `currency` on a budget see no change.
+- **A Job offered to oneself stays offered.** It is no longer taken at
+  once: it waits in the sender's own Inbox (`state: offered`, no
+  `assignee`) and is accepted the usual way; still nobody is notified.
+  While offered, the sender may change it like a Job In Progress with them.
+- **Reversals and credit notes are not due.** They ask for no payment, so
+  their record, `issue` block and frozen ledger payload carry
+  `due_on: null` (stored empty); invoices keep their due day. Entries
+  frozen before keep theirs.
+
+## 0.50.0 – 2026-11-18
+
+`api: 2` unchanged, no migration. Additive for every client of 0.49.0.
+
+- **Withdrawn quotes (`quotes: 5`).** A quote takes the status
+  `withdrawn` (the team withdrew it; neither won nor lost), the day of the
+  decision `decided_on` and `lost_kind` (`declined` or `withdrawn`). Older
+  clients send a withdrawn quote as `declined` with `lost_kind: withdrawn`.
+
 ## 0.49.0 – 2026-11-11
 
 `api: 2` unchanged, no migration. Additive for every client of 0.48.0.

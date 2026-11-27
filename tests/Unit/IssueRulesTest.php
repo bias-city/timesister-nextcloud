@@ -55,7 +55,7 @@ class IssueRulesTest extends TestCase {
 
 	public function testCapability(): void {
 		$cap = (new Capabilities($this->createMock(IAppManager::class)))->getCapabilities()['timesister'];
-		$this->assertSame([2, 1, 4, 1, 2], [$cap['invoice_documents'], $cap['e_invoice'], $cap['quotes'], $cap['quote_documents'], $cap['invoice_layout']], '0.32.0');
+		$this->assertSame([2, 1, 5, 1, 2], [$cap['invoice_documents'], $cap['e_invoice'], $cap['quotes'], $cap['quote_documents'], $cap['invoice_layout']], '0.32.0, quotes 5 since 0.50.0');
 		$g = ApiException::gone();
 		$this->assertSame(410, $g->getStatus());
 	}
@@ -85,5 +85,16 @@ class IssueRulesTest extends TestCase {
 		$this->assertArrayNotHasKey('references', $payload(null), 'older entries keep their exact payload');
 		$this->assertArrayNotHasKey('references', $payload([]));
 		$this->assertSame(LedgerRules::canonical($payload(null)), LedgerRules::canonical($payload([])));
+	}
+
+	/** 0.51.0: a reversal or credit note has no due day - stored empty, shown and frozen as null. */
+	public function testReversalWithoutDueDay(): void {
+		$this->assertNull(IssueRules::dueOut(''));
+		$this->assertSame('2026-12-21', IssueRules::dueOut('2026-12-21'));
+		$payload = static fn (string $due): array => IssueRules::payload('inv-8', 'RE-2', '2026-11-21', 'pbadmin', $due, 'p', 'c', '2026-10-01', '2026-10-31', 'CHF',
+			\OCA\TimeSister\Service\VatLines::of([], 8.1, 'domestic'), new \stdClass(), new \stdClass(), [], [], null, null, null, 'inv-7', null);
+		$this->assertNull($payload('')['due_on']);
+		$this->assertStringContainsString('"due_on":null', LedgerRules::canonical($payload('')));
+		$this->assertSame('2026-12-21', $payload('2026-12-21')['due_on'], 'an invoice keeps its due day');
 	}
 }

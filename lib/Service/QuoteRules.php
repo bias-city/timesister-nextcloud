@@ -29,12 +29,20 @@ namespace OCA\TimeSister\Service;
  * `POST /quotes/{key}/issue` sets the number from the team's counter and
  * freezes the offered part as the server field `issued`; `documents[]`
  * (`quote_documents: 1`) and `document` are the server's too.
+ *
+ * Since 0.50.0 (`quotes: 5`) the status `withdrawn` (the team withdrew the
+ * quote; it counts neither as won nor as lost), the day of the decision
+ * `decided_on` and `lost_kind` (`declined` or `withdrawn`). Older clients
+ * send a withdrawn quote as `declined` with `lost_kind: withdrawn`.
  */
 final class QuoteRules {
 	public const KIND = 'quote';
 	public const ACCEPTED = 'accepted';
 	public const DRAFT = 'draft';
-	public const STATUSES = [self::DRAFT, 'quoted', 'negotiation', 'verbal', self::ACCEPTED, 'declined'];
+	public const WITHDRAWN = 'withdrawn';
+	public const STATUSES = [self::DRAFT, 'quoted', 'negotiation', 'verbal', self::ACCEPTED, 'declined', self::WITHDRAWN];
+	/** 0.50.0: how a quote was lost. */
+	public const LOST_KINDS = ['declined', self::WITHDRAWN];
 	/** 0.27.0: at most this many budgets in one quote. */
 	public const BUDGETS_MAX = 50;
 	public const DRAFT_CODE_MAX = 64;
@@ -51,7 +59,7 @@ final class QuoteRules {
 	public const PDF_MAX = 2000;
 	public const BUDGET_ID_MAX = 128;
 	public const BY_MAX = 64;
-	public const DAYS = ['date', 'valid_until', 'accepted_on', 'created_on'];
+	public const DAYS = ['date', 'valid_until', 'accepted_on', 'created_on', 'decided_on'];
 	public const PROBABILITY_MAX = 100;
 	public const LOST_REASON_MAX = 500;
 	/** 0.32.0: the document's texts, the attachments line, the number pattern, the three document kinds. */
@@ -85,7 +93,8 @@ final class QuoteRules {
 	 * by category the team has a level (`no_levels`); every package without
 	 * packages below that has an amount above 0 has its rate in the budget's
 	 * model – a `mean_rate` in the mean-rate model; a level (own or above)
-	 * with a rate in the currency on `$day` in the category model. The role
+	 * with a rate in the currency on `$day` in the category model, unless the
+	 * budget sets a `mean_rate` as the fallback for packages without one. The role
 	 * model needs nothing more; hours-led packages are not checked.
 	 *
 	 * @throws ApiException 422 `no_levels`, `amount_without_rate`, `level_rate_missing`
@@ -124,6 +133,11 @@ final class QuoteRules {
 						throw (new ApiException(422, ApiException::INVALID, Message::of('Budget {budget}: the model “mean_rate” needs its rate before the quote is issued.', ['budget' => $id]), ['budget' => $id]))
 							->code(ErrorCode::AMOUNT_WITHOUT_RATE)->field('mean_rate');
 					}
+					continue;
+				}
+				// A set mean_rate is the fallback for packages without a level (or whose level has no
+				// rate): the budget computes with it, so issuing accepts it too (20.11.2026).
+				if (($b->mean_rate ?? null) !== null) {
 					continue;
 				}
 				$level = LevelRules::levelOf($wp, $byNo);
@@ -258,6 +272,10 @@ final class QuoteRules {
 			throw ApiException::invalid(Message::of('“{field}” must be null or an integer from {min} to {max}.', ['field' => 'probability', 'min' => 0, 'max' => self::PROBABILITY_MAX]));
 		}
 		self::text($d->lost_reason ?? null, 'lost_reason', self::LOST_REASON_MAX, self::CONTROL_NOTE);
+		$kind = $d->lost_kind ?? null;
+		if ($kind !== null && !in_array($kind, self::LOST_KINDS, true)) {
+			throw ApiException::invalid(Message::of('“lost_kind” is null or one of {kinds}.', ['kinds' => implode(', ', self::LOST_KINDS)]));
+		}
 		// 0.32.0: the document's texts and the attachments line.
 		$texts = $d->texts ?? null;
 		if ($texts !== null) {

@@ -136,8 +136,8 @@ final class ReceiptRules {
 		$b = $d->budget ?? null;
 		$c = $d->cost ?? null;
 		$k = $d->cost_kind ?? null;
-		if ($k !== null && !in_array($k, CostRules::KINDS, true)) {
-			throw self::oneOf('cost_kind', CostRules::KINDS);
+		if ($k !== null && !in_array($k, CostRules::TARGET_KINDS, true)) {
+			throw self::oneOf('cost_kind', CostRules::TARGET_KINDS);
 		}
 		if ($p === null) {
 			if ($b !== null || $c !== null) {

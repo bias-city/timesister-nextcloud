@@ -101,7 +101,7 @@ export async function renderer() {
 		head('Renderer: setup')
 		{
 			const cap = (await ocs(A, 'GET', '/ocs/v2.php/cloud/capabilities')).data?.capabilities?.timesister
-			check('capabilities invoice_documents 2, quotes 4, quote_documents 1, invoice_layout 2, e_invoice 1', cap?.invoice_documents === 2 && cap?.quotes === 4 && cap?.quote_documents === 1 && cap?.invoice_layout === 2 && cap?.e_invoice === 1, cap)
+			check('capabilities invoice_documents 2, quotes ≥ 4, quote_documents 1, invoice_layout 2, e_invoice 1', cap?.invoice_documents === 2 && cap?.quotes >= 4 && cap?.quote_documents === 1 && cap?.invoice_layout === 2 && cap?.e_invoice === 1, cap)
 			if (!owner) {
 				const teams = await ocs({ user: process.env.NC_ADMIN_USER || 'admin', pass: process.env.NC_ADMIN_PASS || 'admin123' }, 'GET', '/admin/teams')
 				const zb = (teams.data || []).find((t) => t.slug === 'zb')

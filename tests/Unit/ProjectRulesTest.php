@@ -147,12 +147,13 @@ class ProjectRulesTest extends TestCase {
 		}
 	}
 
-	/** 0.27.0: the project's currency – upper case, its budgets follow it; a budget keeps its own only without one on the project. */
+	/** 0.27.0: the project's currency – upper case; 0.51.0: the default for budgets without one, a budget's own stays. */
 	public function testProjectCurrency(): void {
 		$d = self::obj('{"id":"p","status":"draft","currency":"eur","budgets":[{"currency":"chf"},{"currency":null},{}]}');
 		ProjectRules::validate($d);
 		$this->assertSame('EUR', $d->currency, 'upper case');
-		$this->assertSame(['EUR', 'EUR', 'EUR'], array_map(static fn ($b) => $b->currency, $d->budgets), 'the budgets inherit it');
+		$this->assertSame(['CHF', 'EUR', 'EUR'], array_map(static fn ($b) => $b->currency, $d->budgets), 'own stays (upper case), missing takes the project\'s');
+		$this->assertSame('422 “currency” must be three letters, for example CHF.', self::validate('{"id":"p","status":"draft","currency":"EUR","budgets":[{"currency":"Fr."}]}'), 'an invalid one is refused, not replaced');
 		$d = self::obj('{"id":"p","status":"draft","currency":null,"budgets":[{"currency":"chf"}]}');
 		ProjectRules::validate($d);
 		$this->assertNull($d->currency);
@@ -160,6 +161,13 @@ class ProjectRulesTest extends TestCase {
 		foreach (['"CH"', '"CHFR"', '"CH1"', '"€"', '7', '["CHF"]'] as $bad) {
 			$this->assertSame('422 “currency” must be three letters, for example CHF.', self::validate('{"id":"p","status":"draft","currency":' . $bad . '}'), $bad);
 		}
+	}
+
+	/** 0.51.0: the capability `budget_currency` tells the client that a budget keeps its own currency. */
+	public function testBudgetCurrencyCapability(): void {
+		$apps = $this->createMock(\OCP\App\IAppManager::class);
+		$apps->method('getAppVersion')->willReturn('0.51.0');
+		$this->assertSame(1, (new \OCA\TimeSister\Capabilities($apps))->getCapabilities()['timesister']['budget_currency']);
 	}
 
 	public function testRates(): void {

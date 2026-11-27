@@ -260,7 +260,7 @@ final class IssueService {
 		return [
 			'number' => $row->getNumber(),
 			'issued_on' => $row->getIssuedOn(),
-			'due_on' => $row->getDueOn(),
+			'due_on' => IssueRules::dueOut($row->getDueOn()),
 			'seq' => $seq,
 			'prev_hash' => $prev,
 			'position' => $seq . ' of ' . $seq,
@@ -715,7 +715,8 @@ final class IssueService {
 		$taxCase = TaxRules::ofBlock(get_object_vars($customerBlock));
 		$positions = VatLines::freeze($given ?? IssueRules::negate($origPositions), (float)$orig->getVat(), $taxCase);
 		$sums = VatLines::of($positions, (float)$orig->getVat(), $taxCase);
-		$dueOn = IssueRules::dueOn($issuedOn, IssueRules::DUE_DAYS);
+		// 0.51.0: a reversal or credit note asks for no payment - no due day (stored empty).
+		$dueOn = '';
 		$newKey = IssueRules::newKey();
 		while ($this->records->findOne($tid, InvoiceRules::KIND, $newKey) !== null) {
 			$newKey = IssueRules::newKey();
@@ -767,7 +768,7 @@ final class IssueService {
 		$n->status = InvInvoice::ISSUING;
 		$n->number = $number;
 		$n->issued_on = $issuedOn;
-		$n->due_on = $dueOn;
+		$n->due_on = null;
 		$n->paid_on = null;
 		$n->bookings = [];
 		$n->hours = 0;

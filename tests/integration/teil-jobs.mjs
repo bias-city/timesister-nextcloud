@@ -83,12 +83,14 @@ export async function jobs() {
 		check('zbuser1 is notified: new offer', n1?.subject === `${nameOf('zblead')} offers you a Job: Basics`, n1)
 
 		head('Jobs: volume and overlap')
-		// 0.7.5: above the work package is allowed; offered only to oneself it is taken at once.
+		// 0.7.5: above the work package is allowed; offered only to oneself it waits in the own Inbox.
 		const selbst = await ocs(L, 'PUT', path(key(20)), offer({ hours: 20, recipients: ['zblead'] }))
 		made.push(key(20))
-		check('AP1 has 10 h left, 20 h to oneself: allowed, In Progress at once', selbst.status === 200
-			&& selbst.data?.data?.state === 'in_progress' && selbst.data?.data?.assignee === 'zblead', selbst.text.slice(0, 300))
+		check('AP1 has 10 h left, 20 h to oneself: allowed, offered', selbst.status === 200
+			&& selbst.data?.data?.state === 'offered' && !selbst.data?.data?.assignee, selbst.text.slice(0, 300))
 		check('… and nobody is notified', !(await noteFor(L, key(20))))
+		const sa = await ocs(L, 'POST', `${path(key(20))}/accept`)
+		check('… accepted the usual way: In Progress', sa.status === 200 && sa.data?.data?.state === 'in_progress' && sa.data?.data?.assignee === 'zblead', sa.text.slice(0, 300))
 		expect('10 h for zbuser2', await ocs(L, 'PUT', path(key(2)), offer({ hours: 10, recipients: ['zbuser2'] })), 200)
 		made.push(key(2))
 		const dup = await ocs(L, 'PUT', path(key(3)), offer({ budget: null, work_package: null, hours: 5, start: '2026-10-20', end: '2026-11-10' }))
@@ -291,8 +293,12 @@ export async function jobs() {
 		head('Jobs: a Member takes a Job themselves (0.15.0)')
 		const mine = `self-${RUN}`
 		const so = await ocs(U1, 'PUT', path(mine), offer({ project: PX, code: 'PX.1', budget: null, work_package: null, hours: 4, start: '2027-01-04', end: '2027-01-08', recipients: ['zbuser1'] }))
-		check('zbuser1 offers a Job to themselves: In Progress at once', so.status === 200 && so.data?.data?.state === 'in_progress' && so.data?.data?.assignee === 'zbuser1' && so.data?.data?.sender === 'zbuser1', so.text.slice(0, 200))
+		check('zbuser1 offers a Job to themselves: in the own Inbox', so.status === 200 && so.data?.data?.state === 'offered' && !so.data?.data?.assignee && so.data?.data?.sender === 'zbuser1', so.text.slice(0, 200))
 		check('nobody is notified', !(await noteFor(L, mine)) && !(await noteFor(U1, mine)))
+		const so2 = await ocs(U1, 'POST', `${path(mine)}/change`, { hours: 5 })
+		check('zbuser1 changes it while offered', so2.status === 200 && so2.data?.data?.hours === 5 && so2.data?.data?.state === 'offered', so2.text.slice(0, 200))
+		const sa1 = await ocs(U1, 'POST', `${path(mine)}/accept`)
+		check('… and accepts it: In Progress', sa1.status === 200 && sa1.data?.data?.state === 'in_progress' && sa1.data?.data?.assignee === 'zbuser1', sa1.text.slice(0, 200))
 		const sc = await ocs(U1, 'POST', `${path(mine)}/change`, { hours: 6, title: 'Mine' })
 		check('zbuser1 changes their own Job', sc.status === 200 && sc.data?.data?.hours === 6 && sc.data?.data?.title === 'Mine', sc.text.slice(0, 200))
 		expect('… but not to someone else', await ocs(U1, 'POST', `${path(mine)}/change`, { recipients: ['zbuser2'] }), 403, 'forbidden')

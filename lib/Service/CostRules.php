@@ -21,7 +21,11 @@ final class CostRules {
 	public const DESCRIPTION_MAX = 300;
 	public const EXPENSE = 'expense';
 	public const THIRD_PARTY = 'third_party';
-	public const KINDS = [self::EXPENSE, self::THIRD_PARTY];
+	/** 0.51.0 (`costs: 2`): a section is a title only, it structures the cost list and carries no rule or amounts. */
+	public const SECTION = 'section';
+	public const KINDS = [self::EXPENSE, self::THIRD_PARTY, self::SECTION];
+	/** Kinds a receipt or invoice line can point to: a section is not a cost target. */
+	public const TARGET_KINDS = [self::EXPENSE, self::THIRD_PARTY];
 	public const PERCENT = 'percent';
 	public const FLAT = 'flat';
 	public const RECEIPTS = 'receipts';
@@ -77,6 +81,20 @@ final class CostRules {
 		if (!in_array($kind, self::KINDS, true)) {
 			throw self::oneOf('kind', self::KINDS);
 		}
+		if ($kind === self::SECTION) {
+			// A section has nothing to calculate: rule, amounts, cap, markup, VAT, forecast, code, block and addendum stay empty.
+			foreach (['rule', 'percent', 'amount', 'per', 'cap', 'markup', 'vat', 'forecast', 'code', 'reference_block', 'addendum_status'] as $f) {
+				if (($c->{$f} ?? null) !== null) {
+					throw ApiException::invalid(Message::of('“{field}” does not apply to a section.', ['field' => $f]));
+				}
+			}
+			if (($c->addendum ?? false) === true) {
+				throw ApiException::invalid(Message::of('“{field}” does not apply to a section.', ['field' => 'addendum']));
+			}
+			$c->mode = self::REBILL;
+			self::description($c);
+			return;
+		}
 		$rule = $c->rule ?? null;
 		if ($kind === self::THIRD_PARTY) {
 			if ($rule !== null && $rule !== self::RECEIPTS) {
@@ -128,6 +146,11 @@ final class CostRules {
 				}
 			}
 		}
+		self::description($c);
+	}
+
+	/** The optional description: text of at most DESCRIPTION_MAX characters. */
+	private static function description(\stdClass $c): void {
 		$d = $c->description ?? null;
 		if ($d !== null && (!is_string($d) || mb_strlen($d) > self::DESCRIPTION_MAX || preg_match(self::CONTROL_TEXT, $d) || !mb_check_encoding($d, 'UTF-8'))) {
 			throw ApiException::invalid(Message::of('“{field}” must be text of at most {max} characters.', ['field' => 'description', 'max' => self::DESCRIPTION_MAX]));

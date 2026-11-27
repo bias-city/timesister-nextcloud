@@ -47,7 +47,7 @@ final class InvoiceFixed {
 			'period' => ['from' => $row->getPeriodFrom(), 'to' => $row->getPeriodTo()],
 			'issued_on' => $row->getIssuedOn(),
 			'issued_by' => $row->getIssuedBy(),
-			'due_on' => $row->getDueOn(),
+			'due_on' => IssueRules::dueOut($row->getDueOn()),
 			'paid_on' => $row->getPaidOn(),
 			'paid_by' => $row->getPaidBy(),
 			'currency' => $row->getCurrency(),
